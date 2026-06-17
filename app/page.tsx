@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useSession, signIn, signOut } from "next-auth/react";
 
 const categories = [
@@ -26,6 +26,7 @@ export default function Home() {
   const [saved, setSaved] = useState<Image[]>([]);
   const [loading, setLoading] = useState(false);
   const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(true);
   const [showUpload, setShowUpload] = useState(false);
   const [showSaved, setShowSaved] = useState(false);
   const [search, setSearch] = useState("");
@@ -34,8 +35,11 @@ export default function Home() {
   const [newCategory, setNewCategory] = useState("Природа");
   const [newSrc, setNewSrc] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const observerRef = useRef<IntersectionObserver | null>(null);
+  const bottomRef = useRef<HTMLDivElement>(null);
 
   async function fetchImages(query: string, pageNum: number, reset: boolean) {
+    if (loading) return;
     setLoading(true);
     const key = process.env.NEXT_PUBLIC_UNSPLASH_ACCESS_KEY;
     const res = await fetch(`https://api.unsplash.com/search/photos?query=${query}&per_page=20&page=${pageNum}&client_id=${key}`);
@@ -45,25 +49,34 @@ export default function Home() {
       category: active, author: p.user.name, authorAvatar: p.user.profile_image.small,
     }));
     setImages(prev => reset ? fetched : [...prev, ...fetched]);
+    setHasMore(fetched.length === 20);
     setLoading(false);
   }
 
   useEffect(() => {
     setPage(1);
+    setHasMore(true);
     const q = searchQuery || categoryMap[active] || "photography";
     fetchImages(q, 1, true);
   }, [active, searchQuery]);
 
+  useEffect(() => {
+    if (!bottomRef.current) return;
+    observerRef.current = new IntersectionObserver(entries => {
+      if (entries[0].isIntersecting && hasMore && !loading) {
+        const next = page + 1;
+        setPage(next);
+        const q = searchQuery || categoryMap[active] || "photography";
+        fetchImages(q, next, false);
+      }
+    }, { threshold: 0.1 });
+    observerRef.current.observe(bottomRef.current);
+    return () => observerRef.current?.disconnect();
+  }, [hasMore, loading, page, active, searchQuery]);
+
   function handleSearch(e: React.FormEvent) {
     e.preventDefault();
     setSearchQuery(search);
-  }
-
-  function loadMore() {
-    const next = page + 1;
-    setPage(next);
-    const q = searchQuery || categoryMap[active] || "photography";
-    fetchImages(q, next, false);
   }
 
   function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
@@ -86,79 +99,336 @@ export default function Home() {
 
   function isSaved(id: string) { return saved.some(i => i.id === id); }
 
-  const btn = (extra?: any) => ({ backgroundColor: "#c0521a", color: "white", border: "none", borderRadius: "4px", padding: "10px 18px", cursor: "pointer", fontWeight: "bold", letterSpacing: "1px", fontFamily: "Georgia, serif", fontSize: "13px", ...extra });
-  const inp = { width: "100%", padding: "10px 14px", borderRadius: "4px", border: "1px solid #3a2e22", backgroundColor: "#1a1612", color: "#d4c4a8", fontFamily: "Georgia, serif", fontSize: "13px", outline: "none", boxSizing: "border-box" as const };
-
   const displayImages = showSaved ? saved : images;
 
   return (
     <>
       <style>{`
-        * { box-sizing: border-box; }
-        body { margin: 0; overflow-x: hidden; }
-        .grid { columns: 1; gap: 10px; padding: 10px; }
-        @media (min-width: 480px) { .grid { columns: 2; padding: 14px; } }
-        @media (min-width: 768px) { .grid { columns: 3; } }
-        @media (min-width: 1100px) { .grid { columns: 4; } }
-        .card { break-inside: avoid; margin-bottom: 10px; border-radius: 8px; overflow: hidden; background: #0f0d0b; position: relative; border: 1px solid #3a2e22; cursor: pointer; transition: transform 0.2s; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { overflow-x: hidden; background: #111; }
+
+        .grid {
+          columns: 2;
+          gap: 8px;
+          padding: 8px;
+        }
+        @media (min-width: 640px) { .grid { columns: 3; gap: 12px; padding: 12px; } }
+        @media (min-width: 900px) { .grid { columns: 4; } }
+        @media (min-width: 1200px) { .grid { columns: 5; } }
+
+        .card {
+          break-inside: avoid;
+          margin-bottom: 8px;
+          border-radius: 12px;
+          overflow: hidden;
+          background: #1a1a1a;
+          position: relative;
+          cursor: pointer;
+          transition: transform 0.15s ease;
+        }
+        @media (min-width: 640px) { .card { margin-bottom: 12px; border-radius: 16px; } }
         .card:hover { transform: scale(1.02); }
-        .card:hover .save-btn { opacity: 1; }
-        .save-btn { opacity: 0; position: absolute; top: 10px; right: 10px; border: none; border-radius: 20px; padding: 6px 14px; cursor: pointer; font-weight: bold; font-family: Georgia, serif; font-size: 12px; transition: opacity 0.2s; }
-        .modal-wrap { display: flex; flex-direction: column; max-height: 90vh; overflow-y: auto; }
-        @media (min-width: 640px) { .modal-wrap { flex-direction: row; overflow-y: hidden; } }
-        .modal-img { width: 100%; max-height: 50vh; object-fit: cover; }
-        @media (min-width: 640px) { .modal-img { width: 55%; max-height: 90vh; } }
-        .cats { display: flex; gap: 8px; overflow-x: auto; padding: 10px 12px; scrollbar-width: none; }
+        .card:hover .overlay { opacity: 1; }
+
+        .overlay {
+          opacity: 0;
+          position: absolute;
+          inset: 0;
+          background: linear-gradient(to bottom, rgba(0,0,0,0.3) 0%, transparent 40%, transparent 60%, rgba(0,0,0,0.5) 100%);
+          transition: opacity 0.2s ease;
+          display: flex;
+          flex-direction: column;
+          justify-content: space-between;
+          padding: 10px;
+        }
+
+        .save-btn {
+          align-self: flex-end;
+          background: #c0521a;
+          color: white;
+          border: none;
+          border-radius: 20px;
+          padding: 6px 14px;
+          cursor: pointer;
+          font-weight: 700;
+          font-size: 12px;
+          font-family: -apple-system, sans-serif;
+          transition: background 0.2s;
+        }
+        .save-btn:hover { background: #a04015; }
+        .save-btn.saved { background: #333; }
+
+        .card-author {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          padding: 8px 10px;
+        }
+
+        .header {
+          position: sticky;
+          top: 0;
+          z-index: 100;
+          background: #0a0a0a;
+          border-bottom: 1px solid #222;
+          padding: 10px 12px;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+
+        .logo {
+          font-size: 15px;
+          font-weight: 800;
+          color: #c0521a;
+          letter-spacing: 4px;
+          text-transform: uppercase;
+          font-family: Georgia, serif;
+          flex-shrink: 0;
+        }
+        @media (min-width: 640px) { .logo { font-size: 18px; } }
+
+        .search-wrap {
+          flex: 1;
+          display: flex;
+          min-width: 0;
+          background: #1a1a1a;
+          border-radius: 24px;
+          overflow: hidden;
+          border: 1px solid #2a2a2a;
+        }
+        .search-wrap:focus-within { border-color: #c0521a; }
+
+        .search-input {
+          flex: 1;
+          padding: 8px 14px;
+          background: transparent;
+          border: none;
+          color: #e0d0c0;
+          font-size: 13px;
+          outline: none;
+          min-width: 0;
+        }
+        .search-input::placeholder { color: #555; }
+
+        .search-btn {
+          padding: 8px 14px;
+          background: transparent;
+          border: none;
+          color: #666;
+          cursor: pointer;
+          font-size: 13px;
+          flex-shrink: 0;
+        }
+        .search-btn:hover { color: #c0521a; }
+
+        .icon-btn {
+          background: #1a1a1a;
+          border: 1px solid #2a2a2a;
+          border-radius: 50%;
+          width: 36px;
+          height: 36px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          cursor: pointer;
+          color: #888;
+          font-size: 15px;
+          flex-shrink: 0;
+          transition: all 0.2s;
+        }
+        .icon-btn:hover { border-color: #c0521a; color: #c0521a; }
+        .icon-btn.active { background: #c0521a; border-color: #c0521a; color: white; }
+
+        .cats {
+          display: flex;
+          gap: 6px;
+          overflow-x: auto;
+          padding: 8px 12px;
+          background: #0a0a0a;
+          border-bottom: 1px solid #1a1a1a;
+          scrollbar-width: none;
+        }
         .cats::-webkit-scrollbar { display: none; }
-        .search-form { display: flex; flex: 1; min-width: 0; }
-        .search-input { flex: 1; padding: 8px 12px; border-radius: 4px 0 0 4px; border: 1px solid #3a2e22; border-right: none; background: #1a1612; color: #d4c4a8; font-size: 13px; outline: none; min-width: 0; }
-        .search-btn { padding: 8px 12px; background: #3a2e22; border: 1px solid #3a2e22; color: #a08060; cursor: pointer; border-radius: 0 4px 4px 0; font-size: 13px; }
+
+        .cat-btn {
+          white-space: nowrap;
+          padding: 5px 14px;
+          border-radius: 20px;
+          border: none;
+          cursor: pointer;
+          font-size: 12px;
+          font-family: -apple-system, sans-serif;
+          font-weight: 500;
+          transition: all 0.2s;
+          background: #1a1a1a;
+          color: #666;
+        }
+        .cat-btn.active { background: #c0521a; color: white; }
+        .cat-btn:hover { color: #aaa; }
+
+        .modal-backdrop {
+          position: fixed;
+          inset: 0;
+          z-index: 200;
+          background: rgba(0,0,0,0.92);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          padding: 12px;
+        }
+
+        .modal-inner {
+          background: #111;
+          border-radius: 16px;
+          overflow: hidden;
+          max-width: 880px;
+          width: 100%;
+          display: flex;
+          flex-direction: column;
+          max-height: 92vh;
+        }
+        @media (min-width: 640px) { .modal-inner { flex-direction: row; } }
+
+        .modal-img {
+          width: 100%;
+          max-height: 45vh;
+          object-fit: cover;
+          display: block;
+        }
+        @media (min-width: 640px) { .modal-img { width: 56%; max-height: 92vh; } }
+
+        .modal-info {
+          flex: 1;
+          padding: 20px;
+          display: flex;
+          flex-direction: column;
+          gap: 14px;
+          overflow-y: auto;
+        }
+
+        .primary-btn {
+          background: #c0521a;
+          color: white;
+          border: none;
+          border-radius: 24px;
+          padding: 12px 24px;
+          cursor: pointer;
+          font-weight: 700;
+          font-family: -apple-system, sans-serif;
+          font-size: 14px;
+          letter-spacing: 0.5px;
+          transition: background 0.2s;
+          width: 100%;
+        }
+        .primary-btn:hover { background: #a04015; }
+        .primary-btn.saved-btn { background: #2a2a2a; }
+
+        .ghost-btn {
+          background: transparent;
+          color: #888;
+          border: 1px solid #2a2a2a;
+          border-radius: 24px;
+          padding: 11px 24px;
+          cursor: pointer;
+          font-weight: 600;
+          font-family: -apple-system, sans-serif;
+          font-size: 14px;
+          transition: all 0.2s;
+          flex: 1;
+        }
+        .ghost-btn:hover { border-color: #555; color: #aaa; }
+
+        .upload-area {
+          border: 2px dashed #2a2a2a;
+          border-radius: 12px;
+          height: 160px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          cursor: pointer;
+          overflow: hidden;
+          transition: border-color 0.2s;
+        }
+        .upload-area:hover { border-color: #c0521a; }
+
+        .field {
+          width: 100%;
+          padding: 11px 14px;
+          border-radius: 8px;
+          border: 1px solid #2a2a2a;
+          background: #1a1a1a;
+          color: #e0d0c0;
+          font-size: 13px;
+          outline: none;
+          transition: border-color 0.2s;
+        }
+        .field:focus { border-color: #c0521a; }
+
+        .spinner {
+          width: 24px; height: 24px;
+          border: 2px solid #2a2a2a;
+          border-top-color: #c0521a;
+          border-radius: 50%;
+          animation: spin 0.8s linear infinite;
+          margin: 0 auto;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .avatar { width: 30px; height: 30px; border-radius: 50%; cursor: pointer; border: 2px solid #2a2a2a; flex-shrink: 0; }
+        .sign-btn { background: transparent; border: 1px solid #2a2a2a; color: #888; border-radius: 20px; padding: 6px 12px; cursor: pointer; font-size: 11px; font-family: -apple-system, sans-serif; flex-shrink: 0; transition: all 0.2s; }
+        .sign-btn:hover { border-color: #c0521a; color: #c0521a; }
+
+        .empty { text-align: center; padding: 80px 20px; color: #444; font-size: 14px; }
+        .badge { background: #c0521a; color: white; border-radius: 10px; padding: 1px 6px; font-size: 10px; font-weight: 700; margin-left: 2px; }
       `}</style>
 
-      <main style={{ backgroundColor: "#1a1612", minHeight: "100vh", fontFamily: "Georgia, serif", maxWidth: "100vw", overflow: "hidden" }}>
+      <main style={{ backgroundColor: "#111", minHeight: "100vh", fontFamily: "-apple-system, sans-serif" }}>
 
         {/* Шапка */}
-        <header style={{ position: "sticky", top: 0, zIndex: 100, backgroundColor: "#0f0d0b", padding: "10px 12px", display: "flex", alignItems: "center", gap: "8px", borderBottom: "1px solid #3a2e22" }}>
-          <span style={{ fontSize: "16px", fontWeight: "bold", color: "#c0521a", letterSpacing: "3px", textTransform: "uppercase", flexShrink: 0 }}>SCHIELE</span>
-          
-          <form className="search-form" onSubmit={handleSearch}>
-            <input className="search-input" placeholder="Поиск..." value={search} onChange={e => setSearch(e.target.value)} />
-            <button type="submit" className="search-btn">🔍</button>
+        <header className="header">
+          <span className="logo">S</span>
+
+          <form style={{ flex: 1, display: "flex", minWidth: 0 }} onSubmit={handleSearch}>
+            <div className="search-wrap">
+              <input className="search-input" placeholder="Поиск..." value={search} onChange={e => setSearch(e.target.value)} />
+              <button type="submit" className="search-btn">⌕</button>
+            </div>
           </form>
 
-          <button onClick={() => setShowUpload(true)} style={btn({ padding: "8px 12px", flexShrink: 0 })}>+</button>
-          
-          <button onClick={() => setShowSaved(!showSaved)} style={btn({ padding: "8px 12px", flexShrink: 0, backgroundColor: showSaved ? "#8a3a12" : "#3a2e22", border: "1px solid #3a2e22" })}>
-            🔖 {saved.length}
+          <button className={`icon-btn ${showSaved ? "active" : ""}`} onClick={() => setShowSaved(!showSaved)} title="Сохранённые">
+            ♡{saved.length > 0 && <span className="badge">{saved.length}</span>}
           </button>
 
+          <button className="icon-btn" onClick={() => setShowUpload(true)} title="Добавить фото">+</button>
+
           {session ? (
-            <img src={session.user?.image || ""} onClick={() => signOut()} title="Нажмите чтобы выйти" style={{ width: "28px", height: "28px", borderRadius: "50%", cursor: "pointer", flexShrink: 0 }} />
+            <img src={session.user?.image || ""} className="avatar" onClick={() => signOut()} title="Выйти" />
           ) : (
-            <button onClick={() => signIn("google")} style={btn({ backgroundColor: "transparent", border: "1px solid #3a2e22", color: "#a08060", padding: "8px 10px", flexShrink: 0, fontSize: "11px" })}>ВОЙТИ</button>
+            <button className="sign-btn" onClick={() => signIn("google")}>Войти</button>
           )}
         </header>
 
         {/* Категории */}
-        {!showSaved && (
-          <div className="cats" style={{ backgroundColor: "#0f0d0b", borderBottom: "1px solid #3a2e22" }}>
+        {!showSaved && !searchQuery && (
+          <div className="cats">
             {categories.map(cat => (
-              <button key={cat} onClick={() => { setActive(cat); setSearchQuery(""); setSearch(""); }} style={{ whiteSpace: "nowrap", padding: "6px 14px", borderRadius: "20px", border: "none", cursor: "pointer", fontFamily: "Georgia, serif", fontSize: "12px", backgroundColor: active === cat && !searchQuery ? "#c0521a" : "#1a1612", color: active === cat && !searchQuery ? "white" : "#a08060", transition: "all 0.2s" }}>{cat}</button>
+              <button key={cat} className={`cat-btn ${active === cat ? "active" : ""}`} onClick={() => setActive(cat)}>{cat}</button>
             ))}
           </div>
         )}
 
-        {/* Заголовок поиска */}
+        {/* Статус поиска */}
         {searchQuery && (
-          <div style={{ padding: "10px 14px", color: "#a08060", fontSize: "13px", borderBottom: "1px solid #3a2e22" }}>
-            Результаты для: <span style={{ color: "#c0521a" }}>"{searchQuery}"</span>
-            <button onClick={() => { setSearchQuery(""); setSearch(""); }} style={{ marginLeft: "10px", background: "none", border: "none", color: "#6a5040", cursor: "pointer" }}>✕</button>
+          <div style={{ padding: "10px 14px", color: "#666", fontSize: "12px", borderBottom: "1px solid #1a1a1a", display: "flex", alignItems: "center", gap: "8px" }}>
+            <span>Результаты: <span style={{ color: "#c0521a" }}>"{searchQuery}"</span></span>
+            <button onClick={() => { setSearchQuery(""); setSearch(""); }} style={{ background: "none", border: "none", color: "#555", cursor: "pointer", fontSize: "14px" }}>✕</button>
           </div>
         )}
 
         {showSaved && (
-          <div style={{ padding: "10px 14px", color: "#a08060", fontSize: "13px", borderBottom: "1px solid #3a2e22" }}>
-            Сохранённые фото: <span style={{ color: "#c0521a" }}>{saved.length}</span>
+          <div style={{ padding: "10px 14px", color: "#666", fontSize: "12px", borderBottom: "1px solid #1a1a1a" }}>
+            Сохранено: <span style={{ color: "#c0521a" }}>{saved.length} фото</span>
           </div>
         )}
 
@@ -166,49 +436,49 @@ export default function Home() {
         <div className="grid">
           {displayImages.map(img => (
             <div key={img.id} className="card" onClick={() => setSelected(img)}>
-              <img src={img.src} alt={img.title} style={{ width: "100%", display: "block" }} />
-              <button
-                className="save-btn"
-                onClick={e => { e.stopPropagation(); toggleSave(img); }}
-                style={{ backgroundColor: isSaved(img.id) ? "#8a3a12" : "#c0521a", color: "white" }}
-              >
-                {isSaved(img.id) ? "✓ Сохранено" : "Сохранить"}
-              </button>
-              <div style={{ padding: "8px 10px", display: "flex", alignItems: "center", gap: "6px" }}>
-                {img.authorAvatar && <img src={img.authorAvatar} style={{ width: "18px", height: "18px", borderRadius: "50%" }} />}
-                <p style={{ color: "#a08060", fontSize: "11px", margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{img.author}</p>
+              <img src={img.src} alt={img.title} style={{ width: "100%", display: "block" }} loading="lazy" />
+              <div className="overlay">
+                <div />
+                <button className={`save-btn ${isSaved(img.id) ? "saved" : ""}`} onClick={e => { e.stopPropagation(); toggleSave(img); }}>
+                  {isSaved(img.id) ? "Сохранено" : "Сохранить"}
+                </button>
+              </div>
+              <div className="card-author">
+                {img.authorAvatar && <img src={img.authorAvatar} style={{ width: "16px", height: "16px", borderRadius: "50%" }} />}
+                <span style={{ color: "#555", fontSize: "10px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{img.author}</span>
               </div>
             </div>
           ))}
         </div>
 
         {displayImages.length === 0 && !loading && (
-          <div style={{ textAlign: "center", padding: "60px 20px", color: "#6a5040" }}>
-            {showSaved ? "Нет сохранённых фото" : "Ничего не найдено"}
-          </div>
+          <div className="empty">{showSaved ? "Нет сохранённых фото" : "Ничего не найдено"}</div>
         )}
 
-        {!showSaved && (
-          <div style={{ textAlign: "center", padding: "20px" }}>
-            <button onClick={loadMore} disabled={loading} style={btn({ opacity: loading ? 0.5 : 1 })}>{loading ? "ЗАГРУЗКА..." : "ЗАГРУЗИТЬ ЕЩЁ"}</button>
-          </div>
-        )}
+        {/* Бесконечная прокрутка */}
+        <div ref={bottomRef} style={{ padding: "20px", textAlign: "center" }}>
+          {loading && <div className="spinner" />}
+        </div>
 
         {/* Модальное — просмотр */}
         {selected && (
-          <div onClick={() => setSelected(null)} style={{ position: "fixed", inset: 0, zIndex: 200, backgroundColor: "rgba(0,0,0,0.9)", display: "flex", alignItems: "center", justifyContent: "center", padding: "12px" }}>
-            <div className="modal-wrap" onClick={e => e.stopPropagation()} style={{ backgroundColor: "#0f0d0b", borderRadius: "8px", border: "1px solid #3a2e22", overflow: "hidden", maxWidth: "900px", width: "100%" }}>
+          <div className="modal-backdrop" onClick={() => setSelected(null)}>
+            <div className="modal-inner" onClick={e => e.stopPropagation()}>
               <img src={selected.src} alt={selected.title} className="modal-img" />
-              <div style={{ flex: 1, padding: "20px", display: "flex", flexDirection: "column", gap: "12px" }}>
-                <button onClick={() => setSelected(null)} style={{ alignSelf: "flex-end", background: "none", border: "none", color: "#a08060", cursor: "pointer", fontSize: "20px" }}>✕</button>
-                <h2 style={{ color: "#d4c4a8", margin: 0, textTransform: "uppercase", fontSize: "15px", letterSpacing: "1px" }}>{selected.title}</h2>
-                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                  {selected.authorAvatar && <img src={selected.authorAvatar} style={{ width: "28px", height: "28px", borderRadius: "50%" }} />}
-                  <p style={{ color: "#a08060", fontSize: "13px", margin: 0 }}>{selected.author}</p>
+              <div className="modal-info">
+                <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                  <button onClick={() => setSelected(null)} style={{ background: "none", border: "none", color: "#555", cursor: "pointer", fontSize: "18px" }}>✕</button>
                 </div>
-                <p style={{ color: "#6a5040", fontSize: "11px", margin: 0, textTransform: "uppercase" }}>#{selected.category}</p>
-                <button onClick={() => toggleSave(selected)} style={btn({ backgroundColor: isSaved(selected.id) ? "#8a3a12" : "#c0521a" })}>
-                  {isSaved(selected.id) ? "✓ СОХРАНЕНО" : "СОХРАНИТЬ"}
+                <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                  {selected.authorAvatar && <img src={selected.authorAvatar} style={{ width: "36px", height: "36px", borderRadius: "50%" }} />}
+                  <div>
+                    <p style={{ color: "#e0d0c0", fontSize: "13px", fontWeight: 600 }}>{selected.author}</p>
+                    <p style={{ color: "#444", fontSize: "11px", textTransform: "uppercase", letterSpacing: "1px" }}>#{selected.category}</p>
+                  </div>
+                </div>
+                {selected.title && <p style={{ color: "#888", fontSize: "13px", lineHeight: 1.5 }}>{selected.title}</p>}
+                <button className={`primary-btn ${isSaved(selected.id) ? "saved-btn" : ""}`} onClick={() => toggleSave(selected)}>
+                  {isSaved(selected.id) ? "Сохранено" : "Сохранить"}
                 </button>
               </div>
             </div>
@@ -217,20 +487,23 @@ export default function Home() {
 
         {/* Модальное — загрузка */}
         {showUpload && (
-          <div onClick={() => setShowUpload(false)} style={{ position: "fixed", inset: 0, zIndex: 200, backgroundColor: "rgba(0,0,0,0.9)", display: "flex", alignItems: "center", justifyContent: "center", padding: "12px" }}>
-            <div onClick={e => e.stopPropagation()} style={{ backgroundColor: "#0f0d0b", borderRadius: "8px", border: "1px solid #3a2e22", padding: "20px", maxWidth: "480px", width: "100%", display: "flex", flexDirection: "column", gap: "12px", maxHeight: "90vh", overflowY: "auto" }}>
-              <h2 style={{ color: "#d4c4a8", margin: 0, fontSize: "15px", letterSpacing: "2px" }}>ДОБАВИТЬ ФОТО</h2>
-              <div onClick={() => fileRef.current?.click()} style={{ border: "2px dashed #3a2e22", borderRadius: "4px", height: "150px", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", overflow: "hidden" }}>
-                {newSrc ? <img src={newSrc} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <span style={{ color: "#6a5040", fontSize: "13px" }}>Нажмите чтобы выбрать фото</span>}
+          <div className="modal-backdrop" onClick={() => setShowUpload(false)}>
+            <div onClick={e => e.stopPropagation()} style={{ background: "#111", borderRadius: "16px", padding: "24px", maxWidth: "440px", width: "100%", display: "flex", flexDirection: "column", gap: "14px", maxHeight: "90vh", overflowY: "auto" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <h2 style={{ color: "#e0d0c0", fontSize: "16px", fontWeight: 700 }}>Добавить фото</h2>
+                <button onClick={() => setShowUpload(false)} style={{ background: "none", border: "none", color: "#555", cursor: "pointer", fontSize: "18px" }}>✕</button>
+              </div>
+              <div className="upload-area" onClick={() => fileRef.current?.click()}>
+                {newSrc ? <img src={newSrc} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <span style={{ color: "#444", fontSize: "13px" }}>Нажмите чтобы выбрать фото</span>}
               </div>
               <input ref={fileRef} type="file" accept="image/*" onChange={handleFile} style={{ display: "none" }} />
-              <input placeholder="Название" value={newTitle} onChange={e => setNewTitle(e.target.value)} style={inp} />
-              <select value={newCategory} onChange={e => setNewCategory(e.target.value)} style={inp}>
+              <input className="field" placeholder="Название" value={newTitle} onChange={e => setNewTitle(e.target.value)} />
+              <select className="field" value={newCategory} onChange={e => setNewCategory(e.target.value)}>
                 {categories.filter(c => c !== "Всё").map(c => <option key={c} value={c}>{c}</option>)}
               </select>
               <div style={{ display: "flex", gap: "10px" }}>
-                <button onClick={() => setShowUpload(false)} style={btn({ flex: 1, backgroundColor: "transparent", border: "1px solid #3a2e22", color: "#a08060" })}>ОТМЕНА</button>
-                <button onClick={handleAdd} style={btn({ flex: 1, opacity: (!newSrc || !newTitle) ? 0.5 : 1 })}>ОПУБЛИКОВАТЬ</button>
+                <button className="ghost-btn" onClick={() => setShowUpload(false)}>Отмена</button>
+                <button className="primary-btn" style={{ opacity: (!newSrc || !newTitle) ? 0.4 : 1 }} onClick={handleAdd}>Опубликовать</button>
               </div>
             </div>
           </div>

@@ -109,111 +109,185 @@ export default function Home() {
     <>
       <style>{`
         * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { overflow-x: hidden; background: #111; }
-
-        .grid {
-          columns: 2;
-          gap: 8px;
-          padding: 8px;
+        body { 
+          overflow-x: hidden; 
+          background: #ffffff;
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         }
-        @media (min-width: 640px) { .grid { columns: 3; gap: 12px; padding: 12px; } }
-        @media (min-width: 900px) { .grid { columns: 4; } }
-        @media (min-width: 1200px) { .grid { columns: 5; } }
+
+        .app-container {
+          max-width: 1280px;
+          margin: 0 auto;
+          padding: 0 16px;
+        }
+
+        /* Masonry Grid */
+        .grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+          gap: 12px;
+          padding: 12px 0;
+        }
+
+        @media (min-width: 640px) {
+          .grid { grid-template-columns: repeat(2, 1fr); gap: 16px; }
+        }
+        @media (min-width: 768px) {
+          .grid { grid-template-columns: repeat(3, 1fr); }
+        }
+        @media (min-width: 1024px) {
+          .grid { grid-template-columns: repeat(4, 1fr); }
+        }
+        @media (min-width: 1280px) {
+          .grid { grid-template-columns: repeat(5, 1fr); }
+        }
 
         .card {
-          break-inside: avoid;
-          margin-bottom: 8px;
-          border-radius: 12px;
+          border-radius: 16px;
           overflow: hidden;
-          background: #1a1a1a;
+          background: #ffffff;
           position: relative;
           cursor: pointer;
-          transition: transform 0.15s ease;
+          transition: transform 0.2s ease, box-shadow 0.2s ease;
+          box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+          border: 1px solid #f0f0f0;
         }
-        @media (min-width: 640px) { .card { margin-bottom: 12px; border-radius: 16px; } }
-        .card:hover { transform: scale(1.02); }
+
+        .card:hover {
+          transform: scale(1.02);
+          box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+          z-index: 10;
+        }
         .card:hover .overlay { opacity: 1; }
+
+        .card img {
+          width: 100%;
+          display: block;
+          height: auto;
+          background: #f5f5f5;
+        }
 
         .overlay {
           opacity: 0;
           position: absolute;
           inset: 0;
-          background: linear-gradient(to bottom, rgba(0,0,0,0.3) 0%, transparent 40%, transparent 60%, rgba(0,0,0,0.5) 100%);
-          transition: opacity 0.2s ease;
+          background: linear-gradient(to bottom, rgba(0,0,0,0.1) 0%, transparent 30%, transparent 60%, rgba(0,0,0,0.3) 100%);
+          transition: opacity 0.25s ease;
           display: flex;
           flex-direction: column;
           justify-content: space-between;
-          padding: 10px;
+          padding: 12px;
         }
 
         .save-btn {
           align-self: flex-end;
-          background: #c0521a;
+          background: #e60023;
           color: white;
           border: none;
-          border-radius: 20px;
-          padding: 6px 14px;
+          border-radius: 24px;
+          padding: 8px 18px;
           cursor: pointer;
           font-weight: 700;
-          font-size: 12px;
+          font-size: 13px;
           font-family: -apple-system, sans-serif;
-          transition: background 0.2s;
+          transition: background 0.15s ease, transform 0.1s ease;
+          letter-spacing: 0.3px;
+          box-shadow: 0 2px 8px rgba(0,0,0,0.15);
         }
-        .save-btn:hover { background: #a04015; }
-        .save-btn.saved { background: #333; }
+        .save-btn:hover { background: #c0001f; transform: scale(1.04); }
+        .save-btn.saved { 
+          background: #efefef; 
+          color: #111;
+          box-shadow: none;
+        }
+        .save-btn.saved:hover { background: #e0e0e0; }
 
         .card-author {
           display: flex;
           align-items: center;
-          gap: 6px;
-          padding: 8px 10px;
+          gap: 8px;
+          padding: 10px 12px;
+          background: white;
+        }
+        .card-author img {
+          width: 20px;
+          height: 20px;
+          border-radius: 50%;
+          flex-shrink: 0;
+          background: #e0e0e0;
+        }
+        .card-author span {
+          color: #666;
+          font-size: 11px;
+          font-weight: 500;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
         }
 
+        /* ===== HEADER ===== */
         .header {
           position: sticky;
           top: 0;
           z-index: 100;
-          background: #0a0a0a;
-          border-bottom: 1px solid #222;
-          padding: 10px 12px;
+          background: #ffffff;
+          border-bottom: 1px solid #e5e5e5;
+          padding: 10px 16px;
           display: flex;
           align-items: center;
-          gap: 8px;
+          gap: 10px;
+          max-width: 1280px;
+          margin: 0 auto;
         }
 
+        /* Логотип — видимый, но не кричащий */
         .logo {
-          font-size: 15px;
-          font-weight: 800;
-          color: #c0521a;
+          font-size: 20px;
+          font-weight: 700;
+          color: #111;
           letter-spacing: 4px;
           text-transform: uppercase;
           font-family: Georgia, serif;
           flex-shrink: 0;
+          padding: 4px 10px;
+          border-radius: 8px;
+          transition: background 0.2s;
+          cursor: pointer;
+          background: #f5f5f5;
+          border: 1px solid #e8e8e8;
+          line-height: 1.2;
         }
-        @media (min-width: 640px) { .logo { font-size: 18px; } }
+        .logo:hover { background: #eeeeee; }
 
+        /* Поиск — компактный */
         .search-wrap {
-          flex: 1;
+          flex: 0 1 420px;
           display: flex;
-          min-width: 0;
-          background: #1a1a1a;
+          min-width: 120px;
+          background: #efefef;
           border-radius: 24px;
           overflow: hidden;
-          border: 1px solid #2a2a2a;
+          border: 2px solid transparent;
+          transition: border-color 0.2s, background 0.2s, flex 0.2s;
         }
-        .search-wrap:focus-within { border-color: #c0521a; }
+        .search-wrap:focus-within { 
+          border-color: #e60023; 
+          background: #ffffff;
+          flex: 0 1 480px;
+        }
 
         .search-input {
           flex: 1;
           padding: 8px 14px;
           background: transparent;
           border: none;
-          color: #e0d0c0;
+          color: #111;
           font-size: 13px;
           outline: none;
-          min-width: 0;
+          min-width: 60px;
+          font-weight: 400;
         }
-        .search-input::placeholder { color: #555; }
+        .search-input::placeholder { color: #888; }
 
         .search-btn {
           padding: 8px 14px;
@@ -221,119 +295,187 @@ export default function Home() {
           border: none;
           color: #666;
           cursor: pointer;
-          font-size: 13px;
+          font-size: 15px;
           flex-shrink: 0;
+          transition: color 0.2s;
         }
-        .search-btn:hover { color: #c0521a; }
+        .search-btn:hover { color: #e60023; }
 
+        /* Кнопки-иконки */
         .icon-btn {
-          background: #1a1a1a;
-          border: 1px solid #2a2a2a;
+          background: transparent;
+          border: none;
           border-radius: 50%;
-          width: 36px;
-          height: 36px;
+          width: 38px;
+          height: 38px;
           display: flex;
           align-items: center;
           justify-content: center;
           cursor: pointer;
-          color: #888;
-          font-size: 15px;
+          color: #555;
+          font-size: 18px;
           flex-shrink: 0;
           transition: all 0.2s;
         }
-        .icon-btn:hover { border-color: #c0521a; color: #c0521a; }
-        .icon-btn.active { background: #c0521a; border-color: #c0521a; color: white; }
+        .icon-btn:hover { background: #f0f0f0; color: #111; }
+        .icon-btn.active { background: #e60023; color: white; }
+        .icon-btn.active:hover { background: #c0001f; }
 
+        .badge {
+          background: #e60023;
+          color: white;
+          border-radius: 10px;
+          padding: 1px 7px;
+          font-size: 10px;
+          font-weight: 700;
+          margin-left: 2px;
+        }
+
+        .avatar {
+          width: 32px;
+          height: 32px;
+          border-radius: 50%;
+          cursor: pointer;
+          border: 2px solid #e0e0e0;
+          flex-shrink: 0;
+          transition: border-color 0.2s;
+        }
+        .avatar:hover { border-color: #e60023; }
+
+        .sign-btn {
+          background: transparent;
+          border: 1px solid #ddd;
+          color: #333;
+          border-radius: 24px;
+          padding: 6px 14px;
+          cursor: pointer;
+          font-size: 12px;
+          font-weight: 600;
+          font-family: -apple-system, sans-serif;
+          flex-shrink: 0;
+          transition: all 0.2s;
+        }
+        .sign-btn:hover { 
+          border-color: #e60023; 
+          color: #e60023;
+          background: #fff5f5;
+        }
+
+        /* Категории */
         .cats {
           display: flex;
           gap: 6px;
           overflow-x: auto;
-          padding: 8px 12px;
-          background: #0a0a0a;
-          border-bottom: 1px solid #1a1a1a;
+          padding: 10px 0;
+          background: #ffffff;
+          border-bottom: 1px solid #f0f0f0;
           scrollbar-width: none;
+          max-width: 1280px;
+          margin: 0 auto;
+          padding-left: 16px;
+          padding-right: 16px;
         }
         .cats::-webkit-scrollbar { display: none; }
 
         .cat-btn {
           white-space: nowrap;
-          padding: 5px 14px;
-          border-radius: 20px;
+          padding: 6px 18px;
+          border-radius: 24px;
           border: none;
           cursor: pointer;
-          font-size: 12px;
+          font-size: 13px;
           font-family: -apple-system, sans-serif;
           font-weight: 500;
           transition: all 0.2s;
-          background: #1a1a1a;
-          color: #666;
+          background: #f0f0f0;
+          color: #555;
         }
-        .cat-btn.active { background: #c0521a; color: white; }
-        .cat-btn:hover { color: #aaa; }
+        .cat-btn.active { background: #111; color: white; }
+        .cat-btn:hover { background: #e0e0e0; color: #111; }
+        .cat-btn.active:hover { background: #222; }
 
+        /* Модалки */
         .modal-backdrop {
           position: fixed;
           inset: 0;
           z-index: 200;
-          background: rgba(0,0,0,0.92);
+          background: rgba(0,0,0,0.65);
           display: flex;
           align-items: center;
           justify-content: center;
-          padding: 12px;
+          padding: 20px;
+          animation: fadeIn 0.2s ease;
+        }
+        @keyframes fadeIn {
+          from { opacity: 0; }
+          to { opacity: 1; }
         }
 
         .modal-inner {
-          background: #111;
-          border-radius: 16px;
+          background: #ffffff;
+          border-radius: 20px;
           overflow: hidden;
           max-width: 880px;
           width: 100%;
           display: flex;
           flex-direction: column;
           max-height: 92vh;
+          box-shadow: 0 24px 64px rgba(0,0,0,0.3);
+          animation: slideUp 0.25s ease;
         }
-        @media (min-width: 640px) { .modal-inner { flex-direction: row; } }
+        @keyframes slideUp {
+          from { transform: translateY(20px); opacity: 0; }
+          to { transform: translateY(0); opacity: 1; }
+        }
+
+        @media (min-width: 640px) { 
+          .modal-inner { flex-direction: row; } 
+        }
 
         .modal-img {
           width: 100%;
           max-height: 45vh;
           object-fit: cover;
           display: block;
+          background: #f5f5f5;
         }
-        @media (min-width: 640px) { .modal-img { width: 56%; max-height: 92vh; } }
+        @media (min-width: 640px) { 
+          .modal-img { width: 56%; max-height: 92vh; } 
+        }
 
         .modal-info {
           flex: 1;
-          padding: 20px;
+          padding: 24px 28px;
           display: flex;
           flex-direction: column;
-          gap: 14px;
+          gap: 16px;
           overflow-y: auto;
         }
 
         .primary-btn {
-          background: #c0521a;
+          background: #e60023;
           color: white;
           border: none;
           border-radius: 24px;
-          padding: 12px 24px;
+          padding: 14px 24px;
           cursor: pointer;
           font-weight: 700;
           font-family: -apple-system, sans-serif;
-          font-size: 14px;
-          letter-spacing: 0.5px;
+          font-size: 15px;
+          letter-spacing: 0.3px;
           transition: background 0.2s;
           width: 100%;
         }
-        .primary-btn:hover { background: #a04015; }
-        .primary-btn.saved-btn { background: #2a2a2a; }
+        .primary-btn:hover { background: #c0001f; }
+        .primary-btn.saved-btn { background: #efefef; color: #111; }
+        .primary-btn.saved-btn:hover { background: #e0e0e0; }
 
         .ghost-btn {
           background: transparent;
-          color: #888;
-          border: 1px solid #2a2a2a;
+          color: #555;
+          border: 1px solid #ddd;
           border-radius: 24px;
-          padding: 11px 24px;
+          padding: 13px 24px;
           cursor: pointer;
           font-weight: 600;
           font-family: -apple-system, sans-serif;
@@ -341,53 +483,67 @@ export default function Home() {
           transition: all 0.2s;
           flex: 1;
         }
-        .ghost-btn:hover { border-color: #555; color: #aaa; }
+        .ghost-btn:hover { border-color: #999; color: #111; background: #f5f5f5; }
 
         .upload-area {
-          border: 2px dashed #2a2a2a;
-          border-radius: 12px;
-          height: 160px;
+          border: 2px dashed #ddd;
+          border-radius: 16px;
+          height: 180px;
           display: flex;
           align-items: center;
           justify-content: center;
           cursor: pointer;
           overflow: hidden;
-          transition: border-color 0.2s;
+          transition: border-color 0.2s, background 0.2s;
+          background: #fafafa;
         }
-        .upload-area:hover { border-color: #c0521a; }
+        .upload-area:hover { border-color: #e60023; background: #fff5f5; }
 
         .field {
           width: 100%;
-          padding: 11px 14px;
-          border-radius: 8px;
-          border: 1px solid #2a2a2a;
-          background: #1a1a1a;
-          color: #e0d0c0;
-          font-size: 13px;
+          padding: 12px 16px;
+          border-radius: 12px;
+          border: 1px solid #ddd;
+          background: #fafafa;
+          color: #111;
+          font-size: 14px;
           outline: none;
-          transition: border-color 0.2s;
+          transition: border-color 0.2s, box-shadow 0.2s;
+          font-family: -apple-system, sans-serif;
         }
-        .field:focus { border-color: #c0521a; }
+        .field:focus { border-color: #e60023; box-shadow: 0 0 0 3px rgba(230,0,35,0.1); background: #ffffff; }
 
         .spinner {
-          width: 24px; height: 24px;
-          border: 2px solid #2a2a2a;
-          border-top-color: #c0521a;
+          width: 28px;
+          height: 28px;
+          border: 3px solid #e0e0e0;
+          border-top-color: #e60023;
           border-radius: 50%;
           animation: spin 0.8s linear infinite;
           margin: 0 auto;
         }
         @keyframes spin { to { transform: rotate(360deg); } }
 
-        .avatar { width: 30px; height: 30px; border-radius: 50%; cursor: pointer; border: 2px solid #2a2a2a; flex-shrink: 0; }
-        .sign-btn { background: transparent; border: 1px solid #2a2a2a; color: #888; border-radius: 20px; padding: 6px 12px; cursor: pointer; font-size: 11px; font-family: -apple-system, sans-serif; flex-shrink: 0; transition: all 0.2s; }
-        .sign-btn:hover { border-color: #c0521a; color: #c0521a; }
-
-        .empty { text-align: center; padding: 80px 20px; color: #444; font-size: 14px; }
-        .badge { background: #c0521a; color: white; border-radius: 10px; padding: 1px 6px; font-size: 10px; font-weight: 700; margin-left: 2px; }
+        .empty { text-align: center; padding: 80px 20px; color: #888; font-size: 15px; }
+        .modal-close {
+          background: none;
+          border: none;
+          color: #888;
+          cursor: pointer;
+          font-size: 20px;
+          transition: color 0.2s;
+          padding: 4px;
+          border-radius: 50%;
+          width: 36px;
+          height: 36px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+        .modal-close:hover { color: #111; background: #f0f0f0; }
       `}</style>
 
-      <main style={{ backgroundColor: "#111", minHeight: "100vh", fontFamily: "-apple-system, sans-serif" }}>
+      <main style={{ backgroundColor: "#ffffff", minHeight: "100vh" }}>
 
         {/* Header */}
         <header className="header">
@@ -396,15 +552,28 @@ export default function Home() {
           <form style={{ flex: 1, display: "flex", minWidth: 0 }} onSubmit={handleSearch}>
             <div className="search-wrap">
               <input className="search-input" placeholder="Search..." value={search} onChange={e => setSearch(e.target.value)} />
-              <button type="submit" className="search-btn">⌕</button>
+              <button type="submit" className="search-btn">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="11" cy="11" r="8"/>
+                  <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                </svg>
+              </button>
             </div>
           </form>
 
           <button className={`icon-btn ${showSaved ? "active" : ""}`} onClick={() => setShowSaved(!showSaved)} title="Saved">
-            ♡{saved.length > 0 && <span className="badge">{saved.length}</span>}
+            <svg width="18" height="18" viewBox="0 0 24 24" fill={showSaved ? "white" : "none"} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
+            </svg>
+            {saved.length > 0 && <span className="badge">{saved.length}</span>}
           </button>
 
-          <button className="icon-btn" onClick={() => setShowUpload(true)} title="Add photo">+</button>
+          <button className="icon-btn" onClick={() => setShowUpload(true)} title="Add photo">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="12" y1="5" x2="12" y2="19"/>
+              <line x1="5" y1="12" x2="19" y2="12"/>
+            </svg>
+          </button>
 
           {session ? (
             <img src={session.user?.image || ""} className="avatar" onClick={() => signOut()} title="Sign out" />
@@ -417,42 +586,46 @@ export default function Home() {
         {!showSaved && !searchQuery && (
           <div className="cats">
             {categories.map(cat => (
-              <button key={cat} className={`cat-btn ${active === cat ? "active" : ""}`} onClick={() => setActive(cat)}>{cat}</button>
+              <button key={cat} className={`cat-btn ${active === cat ? "active" : ""}`} onClick={() => setActive(cat)}>
+                {cat}
+              </button>
             ))}
           </div>
         )}
 
         {/* Search status */}
         {searchQuery && (
-          <div style={{ padding: "10px 14px", color: "#666", fontSize: "12px", borderBottom: "1px solid #1a1a1a", display: "flex", alignItems: "center", gap: "8px" }}>
-            <span>Results: <span style={{ color: "#c0521a" }}>"{searchQuery}"</span></span>
-            <button onClick={() => { setSearchQuery(""); setSearch(""); }} style={{ background: "none", border: "none", color: "#555", cursor: "pointer", fontSize: "14px" }}>✕</button>
+          <div style={{ padding: "12px 16px", color: "#666", fontSize: "13px", borderBottom: "1px solid #f0f0f0", display: "flex", alignItems: "center", gap: "12px", maxWidth: "1280px", margin: "0 auto", width: "100%" }}>
+            <span>Results: <span style={{ color: "#e60023", fontWeight: 600 }}>"{searchQuery}"</span></span>
+            <button onClick={() => { setSearchQuery(""); setSearch(""); }} style={{ background: "none", border: "none", color: "#888", cursor: "pointer", fontSize: "16px", padding: "4px 8px", borderRadius: "50%", transition: "background 0.2s" }}>✕</button>
           </div>
         )}
 
         {showSaved && (
-          <div style={{ padding: "10px 14px", color: "#666", fontSize: "12px", borderBottom: "1px solid #1a1a1a" }}>
-            Saved: <span style={{ color: "#c0521a" }}>{saved.length} photos</span>
+          <div style={{ padding: "12px 16px", color: "#666", fontSize: "13px", borderBottom: "1px solid #f0f0f0", maxWidth: "1280px", margin: "0 auto", width: "100%" }}>
+            Saved: <span style={{ color: "#e60023", fontWeight: 600 }}>{saved.length} photos</span>
           </div>
         )}
 
         {/* Grid */}
-        <div className="grid">
-          {displayImages.map(img => (
-            <div key={img.id} className="card" onClick={() => setSelected(img)}>
-              <img src={img.src} alt={img.title} style={{ width: "100%", display: "block" }} loading="lazy" />
-              <div className="overlay">
-                <div />
-                <button className={`save-btn ${isSaved(img.id) ? "saved" : ""}`} onClick={e => { e.stopPropagation(); toggleSave(img); }}>
-                  {isSaved(img.id) ? "Saved" : "Save"}
-                </button>
+        <div className="app-container">
+          <div className="grid">
+            {displayImages.map(img => (
+              <div key={img.id} className="card" onClick={() => setSelected(img)}>
+                <img src={img.src} alt={img.title} loading="lazy" />
+                <div className="overlay">
+                  <div />
+                  <button className={`save-btn ${isSaved(img.id) ? "saved" : ""}`} onClick={e => { e.stopPropagation(); toggleSave(img); }}>
+                    {isSaved(img.id) ? "Saved" : "Save"}
+                  </button>
+                </div>
+                <div className="card-author">
+                  {img.authorAvatar && <img src={img.authorAvatar} alt={img.author} />}
+                  <span>{img.author}</span>
+                </div>
               </div>
-              <div className="card-author">
-                {img.authorAvatar && <img src={img.authorAvatar} style={{ width: "16px", height: "16px", borderRadius: "50%" }} />}
-                <span style={{ color: "#555", fontSize: "10px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{img.author}</span>
-              </div>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
 
         {displayImages.length === 0 && !loading && (
@@ -460,7 +633,7 @@ export default function Home() {
         )}
 
         {/* Infinite scroll */}
-        <div ref={bottomRef} style={{ padding: "20px", textAlign: "center" }}>
+        <div ref={bottomRef} style={{ padding: "24px", textAlign: "center" }}>
           {loading && <div className="spinner" />}
         </div>
 
@@ -471,16 +644,16 @@ export default function Home() {
               <img src={selected.src} alt={selected.title} className="modal-img" />
               <div className="modal-info">
                 <div style={{ display: "flex", justifyContent: "flex-end" }}>
-                  <button onClick={() => setSelected(null)} style={{ background: "none", border: "none", color: "#555", cursor: "pointer", fontSize: "18px" }}>✕</button>
+                  <button className="modal-close" onClick={() => setSelected(null)}>✕</button>
                 </div>
-                <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                  {selected.authorAvatar && <img src={selected.authorAvatar} style={{ width: "36px", height: "36px", borderRadius: "50%" }} />}
+                <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                  {selected.authorAvatar && <img src={selected.authorAvatar} style={{ width: "40px", height: "40px", borderRadius: "50%" }} />}
                   <div>
-                    <p style={{ color: "#e0d0c0", fontSize: "13px", fontWeight: 600 }}>{selected.author}</p>
-                    <p style={{ color: "#444", fontSize: "11px", textTransform: "uppercase", letterSpacing: "1px" }}>#{selected.category}</p>
+                    <p style={{ color: "#111", fontSize: "14px", fontWeight: 600 }}>{selected.author}</p>
+                    <p style={{ color: "#888", fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.5px" }}>#{selected.category}</p>
                   </div>
                 </div>
-                {selected.title && <p style={{ color: "#888", fontSize: "13px", lineHeight: 1.5 }}>{selected.title}</p>}
+                {selected.title && <p style={{ color: "#555", fontSize: "14px", lineHeight: 1.6 }}>{selected.title}</p>}
                 <button className={`primary-btn ${isSaved(selected.id) ? "saved-btn" : ""}`} onClick={() => toggleSave(selected)}>
                   {isSaved(selected.id) ? "Saved" : "Save"}
                 </button>
@@ -492,22 +665,22 @@ export default function Home() {
         {/* Modal - Upload */}
         {showUpload && (
           <div className="modal-backdrop" onClick={() => setShowUpload(false)}>
-            <div onClick={e => e.stopPropagation()} style={{ background: "#111", borderRadius: "16px", padding: "24px", maxWidth: "440px", width: "100%", display: "flex", flexDirection: "column", gap: "14px", maxHeight: "90vh", overflowY: "auto" }}>
+            <div onClick={e => e.stopPropagation()} style={{ background: "#ffffff", borderRadius: "20px", padding: "28px", maxWidth: "440px", width: "100%", display: "flex", flexDirection: "column", gap: "16px", maxHeight: "90vh", overflowY: "auto", boxShadow: "0 24px 64px rgba(0,0,0,0.2)", animation: "slideUp 0.25s ease" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <h2 style={{ color: "#e0d0c0", fontSize: "16px", fontWeight: 700 }}>Add Photo</h2>
-                <button onClick={() => setShowUpload(false)} style={{ background: "none", border: "none", color: "#555", cursor: "pointer", fontSize: "18px" }}>✕</button>
+                <h2 style={{ color: "#111", fontSize: "18px", fontWeight: 700 }}>Add Photo</h2>
+                <button onClick={() => setShowUpload(false)} style={{ background: "none", border: "none", color: "#888", cursor: "pointer", fontSize: "20px", padding: "4px 8px", borderRadius: "50%", transition: "background 0.2s" }}>✕</button>
               </div>
               <div className="upload-area" onClick={() => fileRef.current?.click()}>
-                {newSrc ? <img src={newSrc} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <span style={{ color: "#444", fontSize: "13px" }}>Click to select photo</span>}
+                {newSrc ? <img src={newSrc} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <span style={{ color: "#999", fontSize: "14px" }}>Click to select photo</span>}
               </div>
               <input ref={fileRef} type="file" accept="image/*" onChange={handleFile} style={{ display: "none" }} />
               <input className="field" placeholder="Title" value={newTitle} onChange={e => setNewTitle(e.target.value)} />
               <select className="field" value={newCategory} onChange={e => setNewCategory(e.target.value)}>
                 {categories.filter(c => c !== "All").map(c => <option key={c} value={c}>{c}</option>)}
               </select>
-              <div style={{ display: "flex", gap: "10px" }}>
+              <div style={{ display: "flex", gap: "12px" }}>
                 <button className="ghost-btn" onClick={() => setShowUpload(false)}>Cancel</button>
-                <button className="primary-btn" style={{ opacity: (!newSrc || !newTitle) ? 0.4 : 1 }} onClick={handleAdd}>Publish</button>
+                <button className="primary-btn" style={{ opacity: (!newSrc || !newTitle) ? 0.4 : 1, cursor: (!newSrc || !newTitle) ? "default" : "pointer" }} onClick={handleAdd}>Publish</button>
               </div>
             </div>
           </div>

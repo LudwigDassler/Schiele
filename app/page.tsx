@@ -1,26 +1,26 @@
 "use client";
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useSession, signIn, signOut } from "next-auth/react";
 
 const categories = [
-  "Всё", "Природа", "Город", "Еда", "Путешествия", "Архитектура",
-  "Мода", "Искусство", "Спорт", "Интерьер", "Животные", "Технологии",
-  "Музыка", "Кино", "Фотография", "Красота",
+  "All", "Nature", "City", "Food", "Travel", "Architecture",
+  "Fashion", "Art", "Sports", "Interior", "Animals", "Technology",
+  "Music", "Cinema", "Photography", "Beauty",
 ];
 
 const categoryMap: Record<string, string> = {
-  "Всё": "photography", "Природа": "nature", "Город": "city",
-  "Еда": "food", "Путешествия": "travel", "Архитектура": "architecture",
-  "Мода": "fashion", "Искусство": "art", "Спорт": "sport",
-  "Интерьер": "interior", "Животные": "animals", "Технологии": "technology",
-  "Музыка": "music", "Кино": "cinema", "Фотография": "portrait", "Красота": "beauty",
+  "All": "photography", "Nature": "nature", "City": "city",
+  "Food": "food", "Travel": "travel", "Architecture": "architecture",
+  "Fashion": "fashion", "Art": "art", "Sports": "sport",
+  "Interior": "interior", "Animals": "animals", "Technology": "technology",
+  "Music": "music", "Cinema": "cinema", "Photography": "portrait", "Beauty": "beauty",
 };
 
 type Image = { id: string; src: string; title: string; category: string; author: string; authorAvatar: string };
 
 export default function Home() {
   const { data: session } = useSession();
-  const [active, setActive] = useState("Всё");
+  const [active, setActive] = useState("All");
   const [selected, setSelected] = useState<Image | null>(null);
   const [images, setImages] = useState<Image[]>([]);
   const [saved, setSaved] = useState<Image[]>([]);
@@ -32,7 +32,7 @@ export default function Home() {
   const [search, setSearch] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [newTitle, setNewTitle] = useState("");
-  const [newCategory, setNewCategory] = useState("Природа");
+  const [newCategory, setNewCategory] = useState("Nature");
   const [newSrc, setNewSrc] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const observerRef = useRef<IntersectionObserver | null>(null);
@@ -42,14 +42,18 @@ export default function Home() {
     if (loading) return;
     setLoading(true);
     const key = process.env.NEXT_PUBLIC_UNSPLASH_ACCESS_KEY;
-    const res = await fetch(`https://api.unsplash.com/search/photos?query=${query}&per_page=20&page=${pageNum}&client_id=${key}`);
-    const data = await res.json();
-    const fetched: Image[] = (data.results || []).map((p: any) => ({
-      id: p.id, src: p.urls.regular, title: p.alt_description || query,
-      category: active, author: p.user.name, authorAvatar: p.user.profile_image.small,
-    }));
-    setImages(prev => reset ? fetched : [...prev, ...fetched]);
-    setHasMore(fetched.length === 20);
+    try {
+      const res = await fetch(`https://api.unsplash.com/search/photos?query=${query}&per_page=20&page=${pageNum}&client_id=${key}`);
+      const data = await res.json();
+      const fetched: Image[] = (data.results || []).map((p: any) => ({
+        id: p.id, src: p.urls.regular, title: p.alt_description || query,
+        category: active, author: p.user.name, authorAvatar: p.user.profile_image.small,
+      }));
+      setImages(prev => reset ? fetched : [...prev, ...fetched]);
+      setHasMore(fetched.length === 20);
+    } catch (error) {
+      console.error("Error fetching images:", error);
+    }
     setLoading(false);
   }
 
@@ -89,7 +93,7 @@ export default function Home() {
 
   function handleAdd() {
     if (!newSrc || !newTitle) return;
-    setImages(prev => [{ id: String(Date.now()), src: newSrc!, title: newTitle, category: newCategory, author: session?.user?.name || "Аноним", authorAvatar: session?.user?.image || "" }, ...prev]);
+    setImages(prev => [{ id: String(Date.now()), src: newSrc!, title: newTitle, category: newCategory, author: session?.user?.name || "Anonymous", authorAvatar: session?.user?.image || "" }, ...prev]);
     setShowUpload(false); setNewTitle(""); setNewSrc(null);
   }
 
@@ -385,31 +389,31 @@ export default function Home() {
 
       <main style={{ backgroundColor: "#111", minHeight: "100vh", fontFamily: "-apple-system, sans-serif" }}>
 
-        {/* Шапка */}
+        {/* Header */}
         <header className="header">
-          <span className="logo">S</span>
+          <span className="logo">SCHIELE</span>
 
           <form style={{ flex: 1, display: "flex", minWidth: 0 }} onSubmit={handleSearch}>
             <div className="search-wrap">
-              <input className="search-input" placeholder="Поиск..." value={search} onChange={e => setSearch(e.target.value)} />
+              <input className="search-input" placeholder="Search..." value={search} onChange={e => setSearch(e.target.value)} />
               <button type="submit" className="search-btn">⌕</button>
             </div>
           </form>
 
-          <button className={`icon-btn ${showSaved ? "active" : ""}`} onClick={() => setShowSaved(!showSaved)} title="Сохранённые">
+          <button className={`icon-btn ${showSaved ? "active" : ""}`} onClick={() => setShowSaved(!showSaved)} title="Saved">
             ♡{saved.length > 0 && <span className="badge">{saved.length}</span>}
           </button>
 
-          <button className="icon-btn" onClick={() => setShowUpload(true)} title="Добавить фото">+</button>
+          <button className="icon-btn" onClick={() => setShowUpload(true)} title="Add photo">+</button>
 
           {session ? (
-            <img src={session.user?.image || ""} className="avatar" onClick={() => signOut()} title="Выйти" />
+            <img src={session.user?.image || ""} className="avatar" onClick={() => signOut()} title="Sign out" />
           ) : (
-            <button className="sign-btn" onClick={() => signIn("google")}>Войти</button>
+            <button className="sign-btn" onClick={() => signIn("google")}>Sign in</button>
           )}
         </header>
 
-        {/* Категории */}
+        {/* Categories */}
         {!showSaved && !searchQuery && (
           <div className="cats">
             {categories.map(cat => (
@@ -418,21 +422,21 @@ export default function Home() {
           </div>
         )}
 
-        {/* Статус поиска */}
+        {/* Search status */}
         {searchQuery && (
           <div style={{ padding: "10px 14px", color: "#666", fontSize: "12px", borderBottom: "1px solid #1a1a1a", display: "flex", alignItems: "center", gap: "8px" }}>
-            <span>Результаты: <span style={{ color: "#c0521a" }}>"{searchQuery}"</span></span>
+            <span>Results: <span style={{ color: "#c0521a" }}>"{searchQuery}"</span></span>
             <button onClick={() => { setSearchQuery(""); setSearch(""); }} style={{ background: "none", border: "none", color: "#555", cursor: "pointer", fontSize: "14px" }}>✕</button>
           </div>
         )}
 
         {showSaved && (
           <div style={{ padding: "10px 14px", color: "#666", fontSize: "12px", borderBottom: "1px solid #1a1a1a" }}>
-            Сохранено: <span style={{ color: "#c0521a" }}>{saved.length} фото</span>
+            Saved: <span style={{ color: "#c0521a" }}>{saved.length} photos</span>
           </div>
         )}
 
-        {/* Лента */}
+        {/* Grid */}
         <div className="grid">
           {displayImages.map(img => (
             <div key={img.id} className="card" onClick={() => setSelected(img)}>
@@ -440,7 +444,7 @@ export default function Home() {
               <div className="overlay">
                 <div />
                 <button className={`save-btn ${isSaved(img.id) ? "saved" : ""}`} onClick={e => { e.stopPropagation(); toggleSave(img); }}>
-                  {isSaved(img.id) ? "Сохранено" : "Сохранить"}
+                  {isSaved(img.id) ? "Saved" : "Save"}
                 </button>
               </div>
               <div className="card-author">
@@ -452,15 +456,15 @@ export default function Home() {
         </div>
 
         {displayImages.length === 0 && !loading && (
-          <div className="empty">{showSaved ? "Нет сохранённых фото" : "Ничего не найдено"}</div>
+          <div className="empty">{showSaved ? "No saved photos" : "Nothing found"}</div>
         )}
 
-        {/* Бесконечная прокрутка */}
+        {/* Infinite scroll */}
         <div ref={bottomRef} style={{ padding: "20px", textAlign: "center" }}>
           {loading && <div className="spinner" />}
         </div>
 
-        {/* Модальное — просмотр */}
+        {/* Modal - View */}
         {selected && (
           <div className="modal-backdrop" onClick={() => setSelected(null)}>
             <div className="modal-inner" onClick={e => e.stopPropagation()}>
@@ -478,32 +482,32 @@ export default function Home() {
                 </div>
                 {selected.title && <p style={{ color: "#888", fontSize: "13px", lineHeight: 1.5 }}>{selected.title}</p>}
                 <button className={`primary-btn ${isSaved(selected.id) ? "saved-btn" : ""}`} onClick={() => toggleSave(selected)}>
-                  {isSaved(selected.id) ? "Сохранено" : "Сохранить"}
+                  {isSaved(selected.id) ? "Saved" : "Save"}
                 </button>
               </div>
             </div>
           </div>
         )}
 
-        {/* Модальное — загрузка */}
+        {/* Modal - Upload */}
         {showUpload && (
           <div className="modal-backdrop" onClick={() => setShowUpload(false)}>
             <div onClick={e => e.stopPropagation()} style={{ background: "#111", borderRadius: "16px", padding: "24px", maxWidth: "440px", width: "100%", display: "flex", flexDirection: "column", gap: "14px", maxHeight: "90vh", overflowY: "auto" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <h2 style={{ color: "#e0d0c0", fontSize: "16px", fontWeight: 700 }}>Добавить фото</h2>
+                <h2 style={{ color: "#e0d0c0", fontSize: "16px", fontWeight: 700 }}>Add Photo</h2>
                 <button onClick={() => setShowUpload(false)} style={{ background: "none", border: "none", color: "#555", cursor: "pointer", fontSize: "18px" }}>✕</button>
               </div>
               <div className="upload-area" onClick={() => fileRef.current?.click()}>
-                {newSrc ? <img src={newSrc} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <span style={{ color: "#444", fontSize: "13px" }}>Нажмите чтобы выбрать фото</span>}
+                {newSrc ? <img src={newSrc} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <span style={{ color: "#444", fontSize: "13px" }}>Click to select photo</span>}
               </div>
               <input ref={fileRef} type="file" accept="image/*" onChange={handleFile} style={{ display: "none" }} />
-              <input className="field" placeholder="Название" value={newTitle} onChange={e => setNewTitle(e.target.value)} />
+              <input className="field" placeholder="Title" value={newTitle} onChange={e => setNewTitle(e.target.value)} />
               <select className="field" value={newCategory} onChange={e => setNewCategory(e.target.value)}>
-                {categories.filter(c => c !== "Всё").map(c => <option key={c} value={c}>{c}</option>)}
+                {categories.filter(c => c !== "All").map(c => <option key={c} value={c}>{c}</option>)}
               </select>
               <div style={{ display: "flex", gap: "10px" }}>
-                <button className="ghost-btn" onClick={() => setShowUpload(false)}>Отмена</button>
-                <button className="primary-btn" style={{ opacity: (!newSrc || !newTitle) ? 0.4 : 1 }} onClick={handleAdd}>Опубликовать</button>
+                <button className="ghost-btn" onClick={() => setShowUpload(false)}>Cancel</button>
+                <button className="primary-btn" style={{ opacity: (!newSrc || !newTitle) ? 0.4 : 1 }} onClick={handleAdd}>Publish</button>
               </div>
             </div>
           </div>

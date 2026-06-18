@@ -105,7 +105,6 @@ export default function Home() {
         html { scroll-behavior: smooth; }
         body { overflow-x: hidden; background: #f8f8f8; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
 
-        /* HEADER */
         .header {
           position: sticky; top: 0; z-index: 100;
           background: rgba(255,255,255,0.95);
@@ -160,7 +159,6 @@ export default function Home() {
         .sign-btn { background: #111; color: white; border: none; border-radius: 24px; padding: 8px 16px; cursor: pointer; font-size: 12px; font-weight: 600; flex-shrink: 0; transition: background 0.2s; }
         .sign-btn:hover { background: #333; }
 
-        /* BURGER MENU */
         .burger-overlay {
           position: fixed; inset: 0; z-index: 150;
           background: rgba(0,0,0,0.4);
@@ -186,7 +184,7 @@ export default function Home() {
         .burger-logo { font-size: 16px; font-weight: 800; letter-spacing: 3px; color: #111; font-family: Georgia, serif; text-transform: uppercase; }
         .burger-logo span { color: #c0521a; }
         .burger-close { background: none; border: none; font-size: 20px; cursor: pointer; color: #888; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 50%; transition: background 0.2s; }
-        .burger-close:hover { background: #f0f0f0; color: #111; }
+        .burger-close:hover { background: #f0f0f0; }
 
         .burger-section { padding: 16px 20px 8px; }
         .burger-section-title { font-size: 11px; font-weight: 700; color: #999; letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 10px; }
@@ -201,10 +199,10 @@ export default function Home() {
         }
         .burger-cat:hover { background: #f5f5f5; }
         .burger-cat.active { background: #fff3ee; color: #c0521a; font-weight: 600; }
-        .burger-cat-icon { width: 32px; height: 32px; border-radius: 8px; background: #f0f0f0; display: flex; align-items: center; justify-content: center; font-size: 16px; flex-shrink: 0; }
+        .burger-cat-icon { width: 32px; height: 32px; border-radius: 8px; background: #f0f0f0; display: flex; align-items: center; justify-content: center; font-size: 15px; flex-shrink: 0; }
         .burger-cat.active .burger-cat-icon { background: #c0521a22; }
 
-        .burger-divider { height: 1px; background: #f0f0f0; margin: 8px 20px; }
+        .burger-divider { height: 1px; background: #f0f0f0; margin: 8px 0; }
 
         .burger-action {
           display: flex; align-items: center; gap: 12px;
@@ -217,18 +215,20 @@ export default function Home() {
         .burger-action:hover { background: #f5f5f5; }
         .burger-action-icon { width: 36px; height: 36px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0; }
 
-        /* GRID */
+        /* MASONRY GRID */
         .grid-wrap { padding: 12px; }
         .grid {
-          columns: 2; gap: 10px;
+          display: grid;
+          grid-template-columns: repeat(2, 1fr);
+          gap: 10px;
+          align-items: start;
         }
-        @media (min-width: 540px) { .grid { columns: 3; } }
-        @media (min-width: 768px) { .grid { columns: 4; } }
-        @media (min-width: 1024px) { .grid { columns: 5; } }
-        @media (min-width: 1280px) { .grid { columns: 6; } }
+        @media (min-width: 480px) { .grid { grid-template-columns: repeat(3, 1fr); } }
+        @media (min-width: 768px) { .grid { grid-template-columns: repeat(4, 1fr); } }
+        @media (min-width: 1024px) { .grid { grid-template-columns: repeat(5, 1fr); } }
+        @media (min-width: 1280px) { .grid { grid-template-columns: repeat(6, 1fr); } }
 
         .card {
-          break-inside: avoid; margin-bottom: 10px;
           border-radius: 14px; overflow: hidden;
           background: white; position: relative; cursor: pointer;
           transition: transform 0.2s ease, box-shadow 0.2s ease;
@@ -236,7 +236,7 @@ export default function Home() {
         }
         .card:hover { transform: scale(1.02); box-shadow: 0 8px 24px rgba(0,0,0,0.12); z-index: 10; }
         .card:hover .overlay { opacity: 1; }
-        .card img { width: 100%; display: block; background: #f0f0f0; }
+        .card img { width: 100%; display: block; background: #f0f0f0; height: auto; }
 
         .overlay {
           opacity: 0; position: absolute; inset: 0;
@@ -258,17 +258,16 @@ export default function Home() {
 
         .source-badge {
           align-self: flex-start;
-          background: rgba(0,0,0,0.5); color: white;
+          background: rgba(0,0,0,0.45); color: white;
           border-radius: 6px; padding: 3px 8px;
           font-size: 9px; font-weight: 600; letter-spacing: 0.5px;
           text-transform: uppercase; backdrop-filter: blur(4px);
         }
 
         .card-footer { padding: 8px 10px; display: flex; align-items: center; gap: 6px; background: white; }
-        .card-footer img { width: 18px; height: 18px; border-radius: 50%; background: #e0e0e0; }
+        .card-footer img { width: 18px; height: 18px; border-radius: 50%; background: #e0e0e0; flex-shrink: 0; }
         .card-footer span { color: #888; font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-        /* MODAL */
         .modal-backdrop {
           position: fixed; inset: 0; z-index: 200;
           background: rgba(0,0,0,0.7);
@@ -326,11 +325,7 @@ export default function Home() {
         .spinner { width: 28px; height: 28px; border: 3px solid #e0e0e0; border-top-color: #c0521a; border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto; }
         @keyframes spin { to { transform: rotate(360deg); } }
 
-        .status-bar {
-          padding: 10px 16px; font-size: 12px; color: #888;
-          border-bottom: 1px solid #f0f0f0;
-          display: flex; align-items: center; gap: 10px;
-        }
+        .status-bar { padding: 10px 16px; font-size: 12px; color: #888; border-bottom: 1px solid #f0f0f0; display: flex; align-items: center; gap: 10px; }
         .status-bar button { background: none; border: none; color: #bbb; cursor: pointer; font-size: 14px; padding: 2px 6px; border-radius: 4px; }
         .status-bar button:hover { background: #f0f0f0; color: #666; }
 
@@ -341,9 +336,8 @@ export default function Home() {
 
       <main style={{ minHeight: "100vh", background: "#f8f8f8" }}>
 
-        {/* Header */}
         <header className="header">
-          <button className="hbtn" onClick={() => setShowMenu(true)} aria-label="Menu">
+          <button className="hbtn" onClick={() => setShowMenu(true)}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
               <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
             </svg>
@@ -364,14 +358,14 @@ export default function Home() {
             </div>
           </form>
 
-          <button className={`hbtn ${showSaved ? "active" : ""}`} onClick={() => setShowSaved(!showSaved)} aria-label="Saved">
+          <button className={`hbtn ${showSaved ? "active" : ""}`} onClick={() => setShowSaved(!showSaved)}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill={showSaved ? "white" : "none"} stroke={showSaved ? "white" : "currentColor"} strokeWidth="2" strokeLinecap="round">
               <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
             </svg>
             {saved.length > 0 && <span className="badge">{saved.length}</span>}
           </button>
 
-          <button className="hbtn" onClick={() => setShowUpload(true)} aria-label="Add photo">
+          <button className="hbtn" onClick={() => setShowUpload(true)}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
               <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
             </svg>
@@ -384,18 +378,16 @@ export default function Home() {
           )}
         </header>
 
-        {/* Status bar */}
         {(searchQuery || showSaved) && (
           <div className="status-bar">
             {searchQuery && <>
               <span>Results for <strong style={{ color: "#c0521a" }}>"{searchQuery}"</strong></span>
               <button onClick={() => { setSearchQuery(""); setSearch(""); }}>✕</button>
             </>}
-            {showSaved && <span>Saved photos: <strong style={{ color: "#c0521a" }}>{saved.length}</strong></span>}
+            {showSaved && <span>Saved: <strong style={{ color: "#c0521a" }}>{saved.length} photos</strong></span>}
           </div>
         )}
 
-        {/* Grid */}
         <div className="grid-wrap">
           <div className="grid">
             {displayPhotos.map(photo => (
@@ -424,7 +416,6 @@ export default function Home() {
           {loading && <div className="spinner" />}
         </div>
 
-        {/* Burger Menu */}
         {showMenu && (
           <>
             <div className="burger-overlay" onClick={() => setShowMenu(false)} />
@@ -433,7 +424,6 @@ export default function Home() {
                 <span className="burger-logo">SCH<span>IE</span>LE</span>
                 <button className="burger-close" onClick={() => setShowMenu(false)}>✕</button>
               </div>
-
               <div className="burger-section">
                 <div className="burger-section-title">Categories</div>
                 {categories.map(cat => (
@@ -450,20 +440,16 @@ export default function Home() {
                   </button>
                 ))}
               </div>
-
               <div className="burger-divider" />
-
               <button className="burger-action" onClick={() => { setShowSaved(true); setShowMenu(false); }}>
                 <span className="burger-action-icon" style={{ background: "#fff3ee", color: "#c0521a" }}>♡</span>
                 <span style={{ fontWeight: 500 }}>Saved Photos</span>
                 {saved.length > 0 && <span style={{ marginLeft: "auto", background: "#c0521a", color: "white", borderRadius: "10px", padding: "1px 8px", fontSize: "11px", fontWeight: 700 }}>{saved.length}</span>}
               </button>
-
               <button className="burger-action" onClick={() => { setShowUpload(true); setShowMenu(false); }}>
                 <span className="burger-action-icon" style={{ background: "#f0f0f0", color: "#555" }}>+</span>
                 <span style={{ fontWeight: 500 }}>Add Photo</span>
               </button>
-
               {session ? (
                 <button className="burger-action" onClick={() => signOut()}>
                   <img src={session.user?.image || ""} style={{ width: 36, height: 36, borderRadius: "50%" }} alt="avatar" />
@@ -482,7 +468,6 @@ export default function Home() {
           </>
         )}
 
-        {/* Modal - View */}
         {selected && (
           <div className="modal-backdrop" onClick={() => setSelected(null)}>
             <div className="modal-box" onClick={e => e.stopPropagation()}>
@@ -512,7 +497,6 @@ export default function Home() {
           </div>
         )}
 
-        {/* Modal - Upload */}
         {showUpload && (
           <div className="modal-backdrop" onClick={() => setShowUpload(false)}>
             <div onClick={e => e.stopPropagation()} style={{ background: "white", borderRadius: 20, padding: 28, maxWidth: 440, width: "100%", display: "flex", flexDirection: "column", gap: 16, maxHeight: "90vh", overflowY: "auto", boxShadow: "0 32px 80px rgba(0,0,0,0.25)" }}>

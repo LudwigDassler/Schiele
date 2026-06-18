@@ -1,4 +1,4 @@
-headersOrigin = "inline"
+﻿headersOrigin = "inline"
 redirectsOrigin = "inline"
 
 [functions]
@@ -13,7 +13,7 @@ pinned_version = "5"
 [plugins.inputs]
 
 [build]
-publish = "C:\\Users\\Admin\\my-pinterest\\.next"
+publish = ".next"
 publishOrigin = "ui"
 commandOrigin = "ui"
 command = "npm run build"

@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 import { useState, useEffect, useRef } from "react";
 import { useSession, signIn, signOut } from "next-auth/react";
 
@@ -8,27 +8,20 @@ const categories = [
   "Music", "Cinema", "Photography", "Beauty",
 ];
 
-const categoryMap: Record<string, string> = {
-  "All": "photography", "Nature": "nature", "City": "city",
-  "Food": "food", "Travel": "travel", "Architecture": "architecture",
-  "Fashion": "fashion", "Art": "art", "Sports": "sport",
-  "Interior": "interior", "Animals": "animals", "Technology": "technology",
-  "Music": "music", "Cinema": "cinema", "Photography": "portrait", "Beauty": "beauty",
-};
-
-type Image = { id: string; src: string; title: string; category: string; author: string; authorAvatar: string };
+type Photo = { id: string; src: string; thumb: string; title: string; author: string; authorAvatar: string; source: string; link: string };
 
 export default function Home() {
   const { data: session } = useSession();
   const [active, setActive] = useState("All");
-  const [selected, setSelected] = useState<Image | null>(null);
-  const [images, setImages] = useState<Image[]>([]);
-  const [saved, setSaved] = useState<Image[]>([]);
+  const [selected, setSelected] = useState<Photo | null>(null);
+  const [photos, setPhotos] = useState<Photo[]>([]);
+  const [saved, setSaved] = useState<Photo[]>([]);
   const [loading, setLoading] = useState(false);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
   const [showUpload, setShowUpload] = useState(false);
   const [showSaved, setShowSaved] = useState(false);
+  const [showMenu, setShowMenu] = useState(false);
   const [search, setSearch] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [newTitle, setNewTitle] = useState("");
@@ -37,50 +30,49 @@ export default function Home() {
   const fileRef = useRef<HTMLInputElement>(null);
   const observerRef = useRef<IntersectionObserver | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const loadingRef = useRef(false);
 
-  async function fetchImages(query: string, pageNum: number, reset: boolean) {
-    if (loading) return;
+  async function fetchPhotos(query: string, category: string, pageNum: number, reset: boolean) {
+    if (loadingRef.current) return;
+    loadingRef.current = true;
     setLoading(true);
-    const key = process.env.NEXT_PUBLIC_UNSPLASH_ACCESS_KEY;
     try {
-      const res = await fetch(`https://api.unsplash.com/search/photos?query=${query}&per_page=20&page=${pageNum}&client_id=${key}`);
+      const params = new URLSearchParams({ category, page: String(pageNum) });
+      if (query) params.set("query", query);
+      const res = await fetch(`/api/photos?${params}`);
       const data = await res.json();
-      const fetched: Image[] = (data.results || []).map((p: any) => ({
-        id: p.id, src: p.urls.regular, title: p.alt_description || query,
-        category: active, author: p.user.name, authorAvatar: p.user.profile_image.small,
-      }));
-      setImages(prev => reset ? fetched : [...prev, ...fetched]);
-      setHasMore(fetched.length === 20);
-    } catch (error) {
-      console.error("Error fetching images:", error);
-    }
+      const fetched = data.photos || [];
+      setPhotos(prev => reset ? fetched : [...prev, ...fetched]);
+      setHasMore(fetched.length >= 20);
+    } catch (e) { console.error(e); }
     setLoading(false);
+    loadingRef.current = false;
   }
 
   useEffect(() => {
     setPage(1);
     setHasMore(true);
-    const q = searchQuery || categoryMap[active] || "photography";
-    fetchImages(q, 1, true);
+    fetchPhotos(searchQuery, active, 1, true);
   }, [active, searchQuery]);
 
   useEffect(() => {
     if (!bottomRef.current) return;
+    observerRef.current?.disconnect();
     observerRef.current = new IntersectionObserver(entries => {
-      if (entries[0].isIntersecting && hasMore && !loading) {
+      if (entries[0].isIntersecting && hasMore && !loadingRef.current) {
         const next = page + 1;
         setPage(next);
-        const q = searchQuery || categoryMap[active] || "photography";
-        fetchImages(q, next, false);
+        fetchPhotos(searchQuery, active, next, false);
       }
     }, { threshold: 0.1 });
     observerRef.current.observe(bottomRef.current);
     return () => observerRef.current?.disconnect();
-  }, [hasMore, loading, page, active, searchQuery]);
+  }, [hasMore, page, active, searchQuery]);
 
   function handleSearch(e: React.FormEvent) {
     e.preventDefault();
     setSearchQuery(search);
+    setShowMenu(false);
   }
 
   function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
@@ -93,570 +85,428 @@ export default function Home() {
 
   function handleAdd() {
     if (!newSrc || !newTitle) return;
-    setImages(prev => [{ id: String(Date.now()), src: newSrc!, title: newTitle, category: newCategory, author: session?.user?.name || "Anonymous", authorAvatar: session?.user?.image || "" }, ...prev]);
+    const newPhoto: Photo = { id: String(Date.now()), src: newSrc!, thumb: newSrc!, title: newTitle, author: session?.user?.name || "Anonymous", authorAvatar: session?.user?.image || "", source: "user", link: "" };
+    setPhotos(prev => [newPhoto, ...prev]);
     setShowUpload(false); setNewTitle(""); setNewSrc(null);
   }
 
-  function toggleSave(img: Image) {
-    setSaved(prev => prev.find(i => i.id === img.id) ? prev.filter(i => i.id !== img.id) : [...prev, img]);
+  function toggleSave(photo: Photo) {
+    setSaved(prev => prev.find(i => i.id === photo.id) ? prev.filter(i => i.id !== photo.id) : [...prev, photo]);
   }
 
   function isSaved(id: string) { return saved.some(i => i.id === id); }
 
-  const displayImages = showSaved ? saved : images;
+  const displayPhotos = showSaved ? saved : photos;
 
   return (
     <>
       <style>{`
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { 
-          overflow-x: hidden; 
-          background: #ffffff;
-          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        html { scroll-behavior: smooth; }
+        body { overflow-x: hidden; background: #f8f8f8; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+
+        /* HEADER */
+        .header {
+          position: sticky; top: 0; z-index: 100;
+          background: rgba(255,255,255,0.95);
+          backdrop-filter: blur(12px);
+          border-bottom: 1px solid #ebebeb;
+          padding: 10px 16px;
+          display: flex; align-items: center; gap: 10px;
         }
 
-        .app-container {
-          max-width: 1280px;
-          margin: 0 auto;
-          padding: 0 16px;
+        .logo {
+          font-size: 17px; font-weight: 800;
+          color: #111; letter-spacing: 3px;
+          text-transform: uppercase;
+          font-family: Georgia, serif;
+          flex-shrink: 0; cursor: pointer;
+          user-select: none;
+        }
+        .logo span { color: #c0521a; }
+
+        .search-wrap {
+          flex: 1; display: flex;
+          background: #f0f0f0; border-radius: 24px;
+          overflow: hidden; border: 2px solid transparent;
+          transition: all 0.2s; min-width: 0;
+        }
+        .search-wrap:focus-within { border-color: #c0521a; background: white; box-shadow: 0 0 0 3px rgba(192,82,26,0.1); }
+        .search-input { flex: 1; padding: 9px 14px; background: transparent; border: none; color: #111; font-size: 14px; outline: none; min-width: 0; }
+        .search-input::placeholder { color: #999; }
+        .search-btn { padding: 9px 14px; background: transparent; border: none; color: #888; cursor: pointer; font-size: 15px; transition: color 0.2s; }
+        .search-btn:hover { color: #c0521a; }
+
+        .hbtn {
+          background: transparent; border: none;
+          width: 38px; height: 38px; border-radius: 50%;
+          display: flex; align-items: center; justify-content: center;
+          cursor: pointer; color: #555; flex-shrink: 0;
+          transition: all 0.2s; position: relative;
+        }
+        .hbtn:hover { background: #f0f0f0; color: #111; }
+        .hbtn.active { background: #c0521a; color: white; }
+
+        .badge {
+          position: absolute; top: 2px; right: 2px;
+          background: #c0521a; color: white;
+          border-radius: 10px; padding: 1px 5px;
+          font-size: 9px; font-weight: 700;
+          border: 2px solid white;
         }
 
-        /* Masonry Grid */
+        .avatar { width: 32px; height: 32px; border-radius: 50%; cursor: pointer; border: 2px solid #e0e0e0; flex-shrink: 0; transition: border-color 0.2s; }
+        .avatar:hover { border-color: #c0521a; }
+        .sign-btn { background: #111; color: white; border: none; border-radius: 24px; padding: 8px 16px; cursor: pointer; font-size: 12px; font-weight: 600; flex-shrink: 0; transition: background 0.2s; }
+        .sign-btn:hover { background: #333; }
+
+        /* BURGER MENU */
+        .burger-overlay {
+          position: fixed; inset: 0; z-index: 150;
+          background: rgba(0,0,0,0.4);
+          animation: fadeIn 0.2s ease;
+        }
+        .burger-panel {
+          position: fixed; top: 0; left: 0; bottom: 0;
+          width: min(320px, 85vw); z-index: 151;
+          background: white;
+          box-shadow: 4px 0 24px rgba(0,0,0,0.15);
+          display: flex; flex-direction: column;
+          animation: slideRight 0.25s ease;
+          overflow-y: auto;
+        }
+        @keyframes slideRight { from { transform: translateX(-100%); } to { transform: translateX(0); } }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+        .burger-header {
+          padding: 20px 20px 16px;
+          border-bottom: 1px solid #f0f0f0;
+          display: flex; align-items: center; justify-content: space-between;
+        }
+        .burger-logo { font-size: 16px; font-weight: 800; letter-spacing: 3px; color: #111; font-family: Georgia, serif; text-transform: uppercase; }
+        .burger-logo span { color: #c0521a; }
+        .burger-close { background: none; border: none; font-size: 20px; cursor: pointer; color: #888; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 50%; transition: background 0.2s; }
+        .burger-close:hover { background: #f0f0f0; color: #111; }
+
+        .burger-section { padding: 16px 20px 8px; }
+        .burger-section-title { font-size: 11px; font-weight: 700; color: #999; letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 10px; }
+
+        .burger-cat {
+          display: flex; align-items: center; gap: 12px;
+          padding: 10px 12px; border-radius: 10px;
+          cursor: pointer; transition: background 0.15s;
+          border: none; background: none; width: 100%;
+          text-align: left; color: #333; font-size: 14px;
+          font-family: -apple-system, sans-serif;
+        }
+        .burger-cat:hover { background: #f5f5f5; }
+        .burger-cat.active { background: #fff3ee; color: #c0521a; font-weight: 600; }
+        .burger-cat-icon { width: 32px; height: 32px; border-radius: 8px; background: #f0f0f0; display: flex; align-items: center; justify-content: center; font-size: 16px; flex-shrink: 0; }
+        .burger-cat.active .burger-cat-icon { background: #c0521a22; }
+
+        .burger-divider { height: 1px; background: #f0f0f0; margin: 8px 20px; }
+
+        .burger-action {
+          display: flex; align-items: center; gap: 12px;
+          padding: 12px 20px; cursor: pointer;
+          border: none; background: none; width: 100%;
+          text-align: left; color: #333; font-size: 14px;
+          font-family: -apple-system, sans-serif;
+          transition: background 0.15s;
+        }
+        .burger-action:hover { background: #f5f5f5; }
+        .burger-action-icon { width: 36px; height: 36px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0; }
+
+        /* GRID */
+        .grid-wrap { padding: 12px; }
         .grid {
-          display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-          gap: 12px;
-          padding: 12px 0;
+          columns: 2; gap: 10px;
         }
-
-        @media (min-width: 640px) {
-          .grid { grid-template-columns: repeat(2, 1fr); gap: 16px; }
-        }
-        @media (min-width: 768px) {
-          .grid { grid-template-columns: repeat(3, 1fr); }
-        }
-        @media (min-width: 1024px) {
-          .grid { grid-template-columns: repeat(4, 1fr); }
-        }
-        @media (min-width: 1280px) {
-          .grid { grid-template-columns: repeat(5, 1fr); }
-        }
+        @media (min-width: 540px) { .grid { columns: 3; } }
+        @media (min-width: 768px) { .grid { columns: 4; } }
+        @media (min-width: 1024px) { .grid { columns: 5; } }
+        @media (min-width: 1280px) { .grid { columns: 6; } }
 
         .card {
-          border-radius: 16px;
-          overflow: hidden;
-          background: #ffffff;
-          position: relative;
-          cursor: pointer;
+          break-inside: avoid; margin-bottom: 10px;
+          border-radius: 14px; overflow: hidden;
+          background: white; position: relative; cursor: pointer;
           transition: transform 0.2s ease, box-shadow 0.2s ease;
-          box-shadow: 0 1px 3px rgba(0,0,0,0.06);
-          border: 1px solid #f0f0f0;
+          box-shadow: 0 1px 4px rgba(0,0,0,0.06);
         }
-
-        .card:hover {
-          transform: scale(1.02);
-          box-shadow: 0 8px 24px rgba(0,0,0,0.12);
-          z-index: 10;
-        }
+        .card:hover { transform: scale(1.02); box-shadow: 0 8px 24px rgba(0,0,0,0.12); z-index: 10; }
         .card:hover .overlay { opacity: 1; }
-
-        .card img {
-          width: 100%;
-          display: block;
-          height: auto;
-          background: #f5f5f5;
-        }
+        .card img { width: 100%; display: block; background: #f0f0f0; }
 
         .overlay {
-          opacity: 0;
-          position: absolute;
-          inset: 0;
-          background: linear-gradient(to bottom, rgba(0,0,0,0.1) 0%, transparent 30%, transparent 60%, rgba(0,0,0,0.3) 100%);
-          transition: opacity 0.25s ease;
-          display: flex;
-          flex-direction: column;
-          justify-content: space-between;
-          padding: 12px;
+          opacity: 0; position: absolute; inset: 0;
+          background: linear-gradient(to bottom, rgba(0,0,0,0.05) 0%, transparent 35%, transparent 55%, rgba(0,0,0,0.25) 100%);
+          transition: opacity 0.2s ease;
+          display: flex; flex-direction: column; justify-content: space-between; padding: 10px;
         }
 
         .save-btn {
           align-self: flex-end;
-          background: #e60023;
-          color: white;
-          border: none;
-          border-radius: 24px;
-          padding: 8px 18px;
-          cursor: pointer;
-          font-weight: 700;
-          font-size: 13px;
+          background: #c0521a; color: white; border: none;
+          border-radius: 20px; padding: 7px 16px;
+          cursor: pointer; font-weight: 700; font-size: 12px;
           font-family: -apple-system, sans-serif;
-          transition: background 0.15s ease, transform 0.1s ease;
-          letter-spacing: 0.3px;
-          box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+          transition: all 0.15s; box-shadow: 0 2px 8px rgba(0,0,0,0.2);
         }
-        .save-btn:hover { background: #c0001f; transform: scale(1.04); }
-        .save-btn.saved { 
-          background: #efefef; 
-          color: #111;
-          box-shadow: none;
-        }
-        .save-btn.saved:hover { background: #e0e0e0; }
+        .save-btn:hover { background: #a04015; transform: scale(1.05); }
+        .save-btn.saved { background: rgba(255,255,255,0.9); color: #333; box-shadow: none; }
 
-        .card-author {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          padding: 10px 12px;
-          background: white;
-        }
-        .card-author img {
-          width: 20px;
-          height: 20px;
-          border-radius: 50%;
-          flex-shrink: 0;
-          background: #e0e0e0;
-        }
-        .card-author span {
-          color: #666;
-          font-size: 11px;
-          font-weight: 500;
-          overflow: hidden;
-          text-overflow: ellipsis;
-          white-space: nowrap;
+        .source-badge {
+          align-self: flex-start;
+          background: rgba(0,0,0,0.5); color: white;
+          border-radius: 6px; padding: 3px 8px;
+          font-size: 9px; font-weight: 600; letter-spacing: 0.5px;
+          text-transform: uppercase; backdrop-filter: blur(4px);
         }
 
-        /* ===== HEADER ===== */
-        .header {
-          position: sticky;
-          top: 0;
-          z-index: 100;
-          background: #ffffff;
-          border-bottom: 1px solid #e5e5e5;
-          padding: 10px 16px;
-          display: flex;
-          align-items: center;
-          gap: 10px;
-          max-width: 1280px;
-          margin: 0 auto;
-        }
+        .card-footer { padding: 8px 10px; display: flex; align-items: center; gap: 6px; background: white; }
+        .card-footer img { width: 18px; height: 18px; border-radius: 50%; background: #e0e0e0; }
+        .card-footer span { color: #888; font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-        /* Логотип — видимый, но не кричащий */
-        .logo {
-          font-size: 20px;
-          font-weight: 700;
-          color: #111;
-          letter-spacing: 4px;
-          text-transform: uppercase;
-          font-family: Georgia, serif;
-          flex-shrink: 0;
-          padding: 4px 10px;
-          border-radius: 8px;
-          transition: background 0.2s;
-          cursor: pointer;
-          background: #f5f5f5;
-          border: 1px solid #e8e8e8;
-          line-height: 1.2;
-        }
-        .logo:hover { background: #eeeeee; }
-
-        /* Поиск — компактный */
-        .search-wrap {
-          flex: 0 1 420px;
-          display: flex;
-          min-width: 120px;
-          background: #efefef;
-          border-radius: 24px;
-          overflow: hidden;
-          border: 2px solid transparent;
-          transition: border-color 0.2s, background 0.2s, flex 0.2s;
-        }
-        .search-wrap:focus-within { 
-          border-color: #e60023; 
-          background: #ffffff;
-          flex: 0 1 480px;
-        }
-
-        .search-input {
-          flex: 1;
-          padding: 8px 14px;
-          background: transparent;
-          border: none;
-          color: #111;
-          font-size: 13px;
-          outline: none;
-          min-width: 60px;
-          font-weight: 400;
-        }
-        .search-input::placeholder { color: #888; }
-
-        .search-btn {
-          padding: 8px 14px;
-          background: transparent;
-          border: none;
-          color: #666;
-          cursor: pointer;
-          font-size: 15px;
-          flex-shrink: 0;
-          transition: color 0.2s;
-        }
-        .search-btn:hover { color: #e60023; }
-
-        /* Кнопки-иконки */
-        .icon-btn {
-          background: transparent;
-          border: none;
-          border-radius: 50%;
-          width: 38px;
-          height: 38px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          cursor: pointer;
-          color: #555;
-          font-size: 18px;
-          flex-shrink: 0;
-          transition: all 0.2s;
-        }
-        .icon-btn:hover { background: #f0f0f0; color: #111; }
-        .icon-btn.active { background: #e60023; color: white; }
-        .icon-btn.active:hover { background: #c0001f; }
-
-        .badge {
-          background: #e60023;
-          color: white;
-          border-radius: 10px;
-          padding: 1px 7px;
-          font-size: 10px;
-          font-weight: 700;
-          margin-left: 2px;
-        }
-
-        .avatar {
-          width: 32px;
-          height: 32px;
-          border-radius: 50%;
-          cursor: pointer;
-          border: 2px solid #e0e0e0;
-          flex-shrink: 0;
-          transition: border-color 0.2s;
-        }
-        .avatar:hover { border-color: #e60023; }
-
-        .sign-btn {
-          background: transparent;
-          border: 1px solid #ddd;
-          color: #333;
-          border-radius: 24px;
-          padding: 6px 14px;
-          cursor: pointer;
-          font-size: 12px;
-          font-weight: 600;
-          font-family: -apple-system, sans-serif;
-          flex-shrink: 0;
-          transition: all 0.2s;
-        }
-        .sign-btn:hover { 
-          border-color: #e60023; 
-          color: #e60023;
-          background: #fff5f5;
-        }
-
-        /* Категории */
-        .cats {
-          display: flex;
-          gap: 6px;
-          overflow-x: auto;
-          padding: 10px 0;
-          background: #ffffff;
-          border-bottom: 1px solid #f0f0f0;
-          scrollbar-width: none;
-          max-width: 1280px;
-          margin: 0 auto;
-          padding-left: 16px;
-          padding-right: 16px;
-        }
-        .cats::-webkit-scrollbar { display: none; }
-
-        .cat-btn {
-          white-space: nowrap;
-          padding: 6px 18px;
-          border-radius: 24px;
-          border: none;
-          cursor: pointer;
-          font-size: 13px;
-          font-family: -apple-system, sans-serif;
-          font-weight: 500;
-          transition: all 0.2s;
-          background: #f0f0f0;
-          color: #555;
-        }
-        .cat-btn.active { background: #111; color: white; }
-        .cat-btn:hover { background: #e0e0e0; color: #111; }
-        .cat-btn.active:hover { background: #222; }
-
-        /* Модалки */
+        /* MODAL */
         .modal-backdrop {
-          position: fixed;
-          inset: 0;
-          z-index: 200;
-          background: rgba(0,0,0,0.65);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          padding: 20px;
+          position: fixed; inset: 0; z-index: 200;
+          background: rgba(0,0,0,0.7);
+          display: flex; align-items: center; justify-content: center; padding: 16px;
           animation: fadeIn 0.2s ease;
         }
-        @keyframes fadeIn {
-          from { opacity: 0; }
-          to { opacity: 1; }
-        }
-
-        .modal-inner {
-          background: #ffffff;
-          border-radius: 20px;
-          overflow: hidden;
-          max-width: 880px;
-          width: 100%;
-          display: flex;
-          flex-direction: column;
-          max-height: 92vh;
-          box-shadow: 0 24px 64px rgba(0,0,0,0.3);
+        .modal-box {
+          background: white; border-radius: 20px; overflow: hidden;
+          max-width: 900px; width: 100%;
+          display: flex; flex-direction: column;
+          max-height: 90vh;
+          box-shadow: 0 32px 80px rgba(0,0,0,0.3);
           animation: slideUp 0.25s ease;
         }
-        @keyframes slideUp {
-          from { transform: translateY(20px); opacity: 0; }
-          to { transform: translateY(0); opacity: 1; }
-        }
-
-        @media (min-width: 640px) { 
-          .modal-inner { flex-direction: row; } 
-        }
-
-        .modal-img {
-          width: 100%;
-          max-height: 45vh;
-          object-fit: cover;
-          display: block;
-          background: #f5f5f5;
-        }
-        @media (min-width: 640px) { 
-          .modal-img { width: 56%; max-height: 92vh; } 
-        }
-
-        .modal-info {
-          flex: 1;
-          padding: 24px 28px;
-          display: flex;
-          flex-direction: column;
-          gap: 16px;
-          overflow-y: auto;
-        }
+        @keyframes slideUp { from { transform: translateY(16px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+        @media (min-width: 640px) { .modal-box { flex-direction: row; } }
+        .modal-img { width: 100%; max-height: 45vh; object-fit: cover; display: block; background: #f0f0f0; }
+        @media (min-width: 640px) { .modal-img { width: 55%; max-height: 90vh; } }
+        .modal-info { flex: 1; padding: 24px; display: flex; flex-direction: column; gap: 16px; overflow-y: auto; }
 
         .primary-btn {
-          background: #e60023;
-          color: white;
-          border: none;
-          border-radius: 24px;
-          padding: 14px 24px;
-          cursor: pointer;
-          font-weight: 700;
+          background: #c0521a; color: white; border: none;
+          border-radius: 24px; padding: 13px 24px;
+          cursor: pointer; font-weight: 700; font-size: 14px;
+          width: 100%; transition: background 0.2s;
           font-family: -apple-system, sans-serif;
-          font-size: 15px;
-          letter-spacing: 0.3px;
-          transition: background 0.2s;
-          width: 100%;
         }
-        .primary-btn:hover { background: #c0001f; }
-        .primary-btn.saved-btn { background: #efefef; color: #111; }
-        .primary-btn.saved-btn:hover { background: #e0e0e0; }
+        .primary-btn:hover { background: #a04015; }
+        .primary-btn.saved-state { background: #f0f0f0; color: #333; }
+        .primary-btn.saved-state:hover { background: #e0e0e0; }
 
         .ghost-btn {
-          background: transparent;
-          color: #555;
-          border: 1px solid #ddd;
-          border-radius: 24px;
-          padding: 13px 24px;
-          cursor: pointer;
-          font-weight: 600;
-          font-family: -apple-system, sans-serif;
-          font-size: 14px;
-          transition: all 0.2s;
-          flex: 1;
+          background: transparent; color: #666; border: 1.5px solid #ddd;
+          border-radius: 24px; padding: 12px 24px;
+          cursor: pointer; font-weight: 600; font-size: 14px; flex: 1;
+          transition: all 0.2s; font-family: -apple-system, sans-serif;
         }
-        .ghost-btn:hover { border-color: #999; color: #111; background: #f5f5f5; }
+        .ghost-btn:hover { border-color: #999; color: #111; }
 
-        .upload-area {
-          border: 2px dashed #ddd;
-          border-radius: 16px;
-          height: 180px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          cursor: pointer;
-          overflow: hidden;
-          transition: border-color 0.2s, background 0.2s;
-          background: #fafafa;
+        .upload-zone {
+          border: 2px dashed #e0e0e0; border-radius: 14px; height: 170px;
+          display: flex; align-items: center; justify-content: center;
+          cursor: pointer; overflow: hidden; transition: all 0.2s; background: #fafafa;
         }
-        .upload-area:hover { border-color: #e60023; background: #fff5f5; }
+        .upload-zone:hover { border-color: #c0521a; background: #fff8f5; }
 
         .field {
-          width: 100%;
-          padding: 12px 16px;
-          border-radius: 12px;
-          border: 1px solid #ddd;
-          background: #fafafa;
-          color: #111;
-          font-size: 14px;
-          outline: none;
-          transition: border-color 0.2s, box-shadow 0.2s;
-          font-family: -apple-system, sans-serif;
+          width: 100%; padding: 12px 16px; border-radius: 12px;
+          border: 1.5px solid #e0e0e0; background: #fafafa;
+          color: #111; font-size: 14px; outline: none;
+          transition: all 0.2s; font-family: -apple-system, sans-serif;
         }
-        .field:focus { border-color: #e60023; box-shadow: 0 0 0 3px rgba(230,0,35,0.1); background: #ffffff; }
+        .field:focus { border-color: #c0521a; background: white; box-shadow: 0 0 0 3px rgba(192,82,26,0.1); }
 
-        .spinner {
-          width: 28px;
-          height: 28px;
-          border: 3px solid #e0e0e0;
-          border-top-color: #e60023;
-          border-radius: 50%;
-          animation: spin 0.8s linear infinite;
-          margin: 0 auto;
-        }
+        .spinner { width: 28px; height: 28px; border: 3px solid #e0e0e0; border-top-color: #c0521a; border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto; }
         @keyframes spin { to { transform: rotate(360deg); } }
 
-        .empty { text-align: center; padding: 80px 20px; color: #888; font-size: 15px; }
-        .modal-close {
-          background: none;
-          border: none;
-          color: #888;
-          cursor: pointer;
-          font-size: 20px;
-          transition: color 0.2s;
-          padding: 4px;
-          border-radius: 50%;
-          width: 36px;
-          height: 36px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
+        .status-bar {
+          padding: 10px 16px; font-size: 12px; color: #888;
+          border-bottom: 1px solid #f0f0f0;
+          display: flex; align-items: center; gap: 10px;
         }
-        .modal-close:hover { color: #111; background: #f0f0f0; }
+        .status-bar button { background: none; border: none; color: #bbb; cursor: pointer; font-size: 14px; padding: 2px 6px; border-radius: 4px; }
+        .status-bar button:hover { background: #f0f0f0; color: #666; }
+
+        .empty { text-align: center; padding: 80px 20px; color: #bbb; font-size: 15px; }
+        .modal-close { background: none; border: none; color: #aaa; cursor: pointer; font-size: 18px; width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; transition: all 0.2s; }
+        .modal-close:hover { background: #f0f0f0; color: #333; }
       `}</style>
 
-      <main style={{ backgroundColor: "#ffffff", minHeight: "100vh" }}>
+      <main style={{ minHeight: "100vh", background: "#f8f8f8" }}>
 
         {/* Header */}
         <header className="header">
-          <span className="logo">SCHIELE</span>
+          <button className="hbtn" onClick={() => setShowMenu(true)} aria-label="Menu">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+              <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
+            </svg>
+          </button>
+
+          <span className="logo" onClick={() => { setShowSaved(false); setSearchQuery(""); setSearch(""); setActive("All"); }}>
+            SCH<span>IE</span>LE
+          </span>
 
           <form style={{ flex: 1, display: "flex", minWidth: 0 }} onSubmit={handleSearch}>
             <div className="search-wrap">
               <input className="search-input" placeholder="Search..." value={search} onChange={e => setSearch(e.target.value)} />
               <button type="submit" className="search-btn">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <circle cx="11" cy="11" r="8"/>
-                  <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                  <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
                 </svg>
               </button>
             </div>
           </form>
 
-          <button className={`icon-btn ${showSaved ? "active" : ""}`} onClick={() => setShowSaved(!showSaved)} title="Saved">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill={showSaved ? "white" : "none"} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <button className={`hbtn ${showSaved ? "active" : ""}`} onClick={() => setShowSaved(!showSaved)} aria-label="Saved">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill={showSaved ? "white" : "none"} stroke={showSaved ? "white" : "currentColor"} strokeWidth="2" strokeLinecap="round">
               <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
             </svg>
             {saved.length > 0 && <span className="badge">{saved.length}</span>}
           </button>
 
-          <button className="icon-btn" onClick={() => setShowUpload(true)} title="Add photo">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="12" y1="5" x2="12" y2="19"/>
-              <line x1="5" y1="12" x2="19" y2="12"/>
+          <button className="hbtn" onClick={() => setShowUpload(true)} aria-label="Add photo">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+              <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
             </svg>
           </button>
 
           {session ? (
-            <img src={session.user?.image || ""} className="avatar" onClick={() => signOut()} title="Sign out" />
+            <img src={session.user?.image || ""} className="avatar" onClick={() => signOut()} title="Sign out" alt="avatar" />
           ) : (
             <button className="sign-btn" onClick={() => signIn("google")}>Sign in</button>
           )}
         </header>
 
-        {/* Categories */}
-        {!showSaved && !searchQuery && (
-          <div className="cats">
-            {categories.map(cat => (
-              <button key={cat} className={`cat-btn ${active === cat ? "active" : ""}`} onClick={() => setActive(cat)}>
-                {cat}
-              </button>
-            ))}
-          </div>
-        )}
-
-        {/* Search status */}
-        {searchQuery && (
-          <div style={{ padding: "12px 16px", color: "#666", fontSize: "13px", borderBottom: "1px solid #f0f0f0", display: "flex", alignItems: "center", gap: "12px", maxWidth: "1280px", margin: "0 auto", width: "100%" }}>
-            <span>Results: <span style={{ color: "#e60023", fontWeight: 600 }}>"{searchQuery}"</span></span>
-            <button onClick={() => { setSearchQuery(""); setSearch(""); }} style={{ background: "none", border: "none", color: "#888", cursor: "pointer", fontSize: "16px", padding: "4px 8px", borderRadius: "50%", transition: "background 0.2s" }}>✕</button>
-          </div>
-        )}
-
-        {showSaved && (
-          <div style={{ padding: "12px 16px", color: "#666", fontSize: "13px", borderBottom: "1px solid #f0f0f0", maxWidth: "1280px", margin: "0 auto", width: "100%" }}>
-            Saved: <span style={{ color: "#e60023", fontWeight: 600 }}>{saved.length} photos</span>
+        {/* Status bar */}
+        {(searchQuery || showSaved) && (
+          <div className="status-bar">
+            {searchQuery && <>
+              <span>Results for <strong style={{ color: "#c0521a" }}>"{searchQuery}"</strong></span>
+              <button onClick={() => { setSearchQuery(""); setSearch(""); }}>✕</button>
+            </>}
+            {showSaved && <span>Saved photos: <strong style={{ color: "#c0521a" }}>{saved.length}</strong></span>}
           </div>
         )}
 
         {/* Grid */}
-        <div className="app-container">
+        <div className="grid-wrap">
           <div className="grid">
-            {displayImages.map(img => (
-              <div key={img.id} className="card" onClick={() => setSelected(img)}>
-                <img src={img.src} alt={img.title} loading="lazy" />
+            {displayPhotos.map(photo => (
+              <div key={photo.id} className="card" onClick={() => setSelected(photo)}>
+                <img src={photo.src} alt={photo.title} loading="lazy" />
                 <div className="overlay">
-                  <div />
-                  <button className={`save-btn ${isSaved(img.id) ? "saved" : ""}`} onClick={e => { e.stopPropagation(); toggleSave(img); }}>
-                    {isSaved(img.id) ? "Saved" : "Save"}
+                  <span className="source-badge">{photo.source}</span>
+                  <button className={`save-btn ${isSaved(photo.id) ? "saved" : ""}`} onClick={e => { e.stopPropagation(); toggleSave(photo); }}>
+                    {isSaved(photo.id) ? "Saved" : "Save"}
                   </button>
                 </div>
-                <div className="card-author">
-                  {img.authorAvatar && <img src={img.authorAvatar} alt={img.author} />}
-                  <span>{img.author}</span>
+                <div className="card-footer">
+                  {photo.authorAvatar && <img src={photo.authorAvatar} alt={photo.author} />}
+                  <span>{photo.author}</span>
                 </div>
               </div>
             ))}
           </div>
         </div>
 
-        {displayImages.length === 0 && !loading && (
-          <div className="empty">{showSaved ? "No saved photos" : "Nothing found"}</div>
+        {displayPhotos.length === 0 && !loading && (
+          <div className="empty">{showSaved ? "No saved photos yet" : "Nothing found"}</div>
         )}
 
-        {/* Infinite scroll */}
-        <div ref={bottomRef} style={{ padding: "24px", textAlign: "center" }}>
+        <div ref={bottomRef} style={{ padding: "28px", textAlign: "center" }}>
           {loading && <div className="spinner" />}
         </div>
+
+        {/* Burger Menu */}
+        {showMenu && (
+          <>
+            <div className="burger-overlay" onClick={() => setShowMenu(false)} />
+            <div className="burger-panel">
+              <div className="burger-header">
+                <span className="burger-logo">SCH<span>IE</span>LE</span>
+                <button className="burger-close" onClick={() => setShowMenu(false)}>✕</button>
+              </div>
+
+              <div className="burger-section">
+                <div className="burger-section-title">Categories</div>
+                {categories.map(cat => (
+                  <button key={cat} className={`burger-cat ${active === cat && !showSaved && !searchQuery ? "active" : ""}`}
+                    onClick={() => { setActive(cat); setShowSaved(false); setSearchQuery(""); setSearch(""); setShowMenu(false); }}>
+                    <span className="burger-cat-icon">
+                      {cat === "All" ? "✦" : cat === "Nature" ? "🌿" : cat === "City" ? "🏙" : cat === "Food" ? "🍽" :
+                       cat === "Travel" ? "✈" : cat === "Architecture" ? "🏛" : cat === "Fashion" ? "👗" :
+                       cat === "Art" ? "🎨" : cat === "Sports" ? "⚡" : cat === "Interior" ? "🛋" :
+                       cat === "Animals" ? "🐾" : cat === "Technology" ? "💡" : cat === "Music" ? "♪" :
+                       cat === "Cinema" ? "◉" : cat === "Photography" ? "◎" : "✿"}
+                    </span>
+                    {cat}
+                  </button>
+                ))}
+              </div>
+
+              <div className="burger-divider" />
+
+              <button className="burger-action" onClick={() => { setShowSaved(true); setShowMenu(false); }}>
+                <span className="burger-action-icon" style={{ background: "#fff3ee", color: "#c0521a" }}>♡</span>
+                <span style={{ fontWeight: 500 }}>Saved Photos</span>
+                {saved.length > 0 && <span style={{ marginLeft: "auto", background: "#c0521a", color: "white", borderRadius: "10px", padding: "1px 8px", fontSize: "11px", fontWeight: 700 }}>{saved.length}</span>}
+              </button>
+
+              <button className="burger-action" onClick={() => { setShowUpload(true); setShowMenu(false); }}>
+                <span className="burger-action-icon" style={{ background: "#f0f0f0", color: "#555" }}>+</span>
+                <span style={{ fontWeight: 500 }}>Add Photo</span>
+              </button>
+
+              {session ? (
+                <button className="burger-action" onClick={() => signOut()}>
+                  <img src={session.user?.image || ""} style={{ width: 36, height: 36, borderRadius: "50%" }} alt="avatar" />
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: 13 }}>{session.user?.name}</div>
+                    <div style={{ color: "#999", fontSize: 11 }}>Sign out</div>
+                  </div>
+                </button>
+              ) : (
+                <button className="burger-action" onClick={() => { signIn("google"); setShowMenu(false); }}>
+                  <span className="burger-action-icon" style={{ background: "#f0f0f0" }}>G</span>
+                  <span style={{ fontWeight: 500 }}>Sign in with Google</span>
+                </button>
+              )}
+            </div>
+          </>
+        )}
 
         {/* Modal - View */}
         {selected && (
           <div className="modal-backdrop" onClick={() => setSelected(null)}>
-            <div className="modal-inner" onClick={e => e.stopPropagation()}>
+            <div className="modal-box" onClick={e => e.stopPropagation()}>
               <img src={selected.src} alt={selected.title} className="modal-img" />
               <div className="modal-info">
                 <div style={{ display: "flex", justifyContent: "flex-end" }}>
                   <button className="modal-close" onClick={() => setSelected(null)}>✕</button>
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                  {selected.authorAvatar && <img src={selected.authorAvatar} style={{ width: "40px", height: "40px", borderRadius: "50%" }} />}
+                  {selected.authorAvatar && <img src={selected.authorAvatar} style={{ width: 40, height: 40, borderRadius: "50%" }} alt="avatar" />}
                   <div>
-                    <p style={{ color: "#111", fontSize: "14px", fontWeight: 600 }}>{selected.author}</p>
-                    <p style={{ color: "#888", fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.5px" }}>#{selected.category}</p>
+                    <p style={{ fontWeight: 600, fontSize: 14, color: "#111" }}>{selected.author}</p>
+                    <p style={{ fontSize: 11, color: "#999", textTransform: "uppercase", letterSpacing: "0.5px" }}>{selected.source}</p>
                   </div>
                 </div>
-                {selected.title && <p style={{ color: "#555", fontSize: "14px", lineHeight: 1.6 }}>{selected.title}</p>}
-                <button className={`primary-btn ${isSaved(selected.id) ? "saved-btn" : ""}`} onClick={() => toggleSave(selected)}>
+                {selected.title && <p style={{ color: "#666", fontSize: 14, lineHeight: 1.6 }}>{selected.title}</p>}
+                <button className={`primary-btn ${isSaved(selected.id) ? "saved-state" : ""}`} onClick={() => toggleSave(selected)}>
                   {isSaved(selected.id) ? "Saved" : "Save"}
                 </button>
+                {selected.link && (
+                  <a href={selected.link} target="_blank" rel="noopener noreferrer" style={{ textAlign: "center", color: "#999", fontSize: 12, textDecoration: "none" }}>
+                    View on {selected.source} ↗
+                  </a>
+                )}
               </div>
             </div>
           </div>
@@ -665,22 +515,22 @@ export default function Home() {
         {/* Modal - Upload */}
         {showUpload && (
           <div className="modal-backdrop" onClick={() => setShowUpload(false)}>
-            <div onClick={e => e.stopPropagation()} style={{ background: "#ffffff", borderRadius: "20px", padding: "28px", maxWidth: "440px", width: "100%", display: "flex", flexDirection: "column", gap: "16px", maxHeight: "90vh", overflowY: "auto", boxShadow: "0 24px 64px rgba(0,0,0,0.2)", animation: "slideUp 0.25s ease" }}>
+            <div onClick={e => e.stopPropagation()} style={{ background: "white", borderRadius: 20, padding: 28, maxWidth: 440, width: "100%", display: "flex", flexDirection: "column", gap: 16, maxHeight: "90vh", overflowY: "auto", boxShadow: "0 32px 80px rgba(0,0,0,0.25)" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <h2 style={{ color: "#111", fontSize: "18px", fontWeight: 700 }}>Add Photo</h2>
-                <button onClick={() => setShowUpload(false)} style={{ background: "none", border: "none", color: "#888", cursor: "pointer", fontSize: "20px", padding: "4px 8px", borderRadius: "50%", transition: "background 0.2s" }}>✕</button>
+                <h2 style={{ fontSize: 18, fontWeight: 700, color: "#111" }}>Add Photo</h2>
+                <button className="modal-close" onClick={() => setShowUpload(false)}>✕</button>
               </div>
-              <div className="upload-area" onClick={() => fileRef.current?.click()}>
-                {newSrc ? <img src={newSrc} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <span style={{ color: "#999", fontSize: "14px" }}>Click to select photo</span>}
+              <div className="upload-zone" onClick={() => fileRef.current?.click()}>
+                {newSrc ? <img src={newSrc} style={{ width: "100%", height: "100%", objectFit: "cover" }} alt="preview" /> : <span style={{ color: "#bbb", fontSize: 14 }}>Click to select photo</span>}
               </div>
               <input ref={fileRef} type="file" accept="image/*" onChange={handleFile} style={{ display: "none" }} />
               <input className="field" placeholder="Title" value={newTitle} onChange={e => setNewTitle(e.target.value)} />
               <select className="field" value={newCategory} onChange={e => setNewCategory(e.target.value)}>
                 {categories.filter(c => c !== "All").map(c => <option key={c} value={c}>{c}</option>)}
               </select>
-              <div style={{ display: "flex", gap: "12px" }}>
+              <div style={{ display: "flex", gap: 12 }}>
                 <button className="ghost-btn" onClick={() => setShowUpload(false)}>Cancel</button>
-                <button className="primary-btn" style={{ opacity: (!newSrc || !newTitle) ? 0.4 : 1, cursor: (!newSrc || !newTitle) ? "default" : "pointer" }} onClick={handleAdd}>Publish</button>
+                <button className="primary-btn" style={{ flex: 1, opacity: (!newSrc || !newTitle) ? 0.4 : 1 }} onClick={handleAdd}>Publish</button>
               </div>
             </div>
           </div>

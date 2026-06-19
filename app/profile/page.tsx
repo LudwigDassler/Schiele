@@ -30,14 +30,22 @@ export default function Profile() {
       updated_at: new Date().toISOString(),
     };
 
-    const { error } = await supabase
-      .from('profiles')
-      .upsert({ id: user?.id, ...updates });
-
-    if (error) {
-      setMessage("❌ " + error.message);
-    } else {
+    const token = (await supabase.auth.getSession()).data.session?.access_token;
+    
+    const res = await fetch("/api/user", {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": Bearer 
+      },
+      body: JSON.stringify(updates)
+    });
+    
+    const data = await res.json();
+    if (data.success) {
       setMessage("✅ Profile updated!");
+    } else {
+      setMessage("❌ " + data.error);
     }
     setLoading(false);
   }

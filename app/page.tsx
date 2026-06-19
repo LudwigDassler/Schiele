@@ -1,7 +1,7 @@
 ﻿"use client";
 import { useState, useEffect, useRef } from "react";
-import { useSession, signIn, signOut } from "next-auth/react";
 import { supabase } from "../lib/supabase";
+import type { User } from "@supabase/supabase-js";
 
 const categories = [
   "All", "Nature", "City", "Food", "Travel", "Architecture",
@@ -10,11 +10,11 @@ const categories = [
 ];
 
 type Photo = { id: string; src: string; thumb: string; title: string; author: string; authorAvatar: string; source: string; link: string };
-type Board = { id: string; name: string; description?: string; cover_url?: string };
+type Board = { id: string; name: string; description?: string };
 type Pin = { id: string; image_url: string; title: string; board_id?: string; source_url?: string };
 
 export default function Home() {
-  const { data: session } = useSession();
+  const [user, setUser] = useState<User | null>(null);
   const [active, setActive] = useState("All");
   const [selected, setSelected] = useState<Photo | null>(null);
   const [photos, setPhotos] = useState<Photo[]>([]);
@@ -43,18 +43,19 @@ export default function Home() {
   const bottomRef = useRef<HTMLDivElement>(null);
   const loadingRef = useRef(false);
 
-  // Загрузка досок и пинов пользователя
   useEffect(() => {
-    if (!session?.user?.email) return;
-    fetchUserData();
-  }, [session]);
+    supabase.auth.getSession().then(({ data }) => setUser(data.session?.user ?? null));
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_, session) => {
+      setUser(session?.user ?? null);
+      if (session?.user) fetchUserData(session.user.id);
+    });
+    return () => subscription.unsubscribe();
+  }, []);
 
-  async function fetchUserData() {
-    const email = session?.user?.email;
-    if (!email) return;
+  async function fetchUserData(userId: string) {
     const [pinsRes, boardsRes] = await Promise.all([
-      fetch(`/api/pins?user_id=${email}`),
-      fetch(`/api/boards?user_id=${email}`)
+      fetch(`/api/pins?user_id=${userId}`),
+      fetch(`/api/boards?user_id=${userId}`)
     ]);
     const pinsData = await pinsRes.json();
     const boardsData = await boardsRes.json();
@@ -114,102 +115,84 @@ export default function Home() {
 
   function handleAdd() {
     if (!newSrc || !newTitle) return;
-    const newPhoto: Photo = { id: String(Date.now()), src: newSrc!, thumb: newSrc!, title: newTitle, author: session?.user?.name || "Anonymous", authorAvatar: session?.user?.image || "", source: "user", link: "" };
+    const newPhoto: Photo = { id: String(Date.now()), src: newSrc!, thumb: newSrc!, title: newTitle, author: user?.email || "Anonymous", authorAvatar: "", source: "user", link: "" };
     setPhotos(prev => [newPhoto, ...prev]);
     setShowUpload(false); setNewTitle(""); setNewSrc(null);
   }
 
   async function savePin(photo: Photo, boardId?: string) {
-    if (!session?.user?.email) { signIn(); return; }
+    if (!user) { window.location.href = "/auth"; return; }
     const res = await fetch("/api/pins", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        user_id: session.user.email,
-        image_url: photo.src,
-        title: photo.title,
-        board_id: boardId || null,
-        source_url: photo.link,
-        source: photo.source,
-        author: photo.author,
-      })
+      body: JSON.stringify({ user_id: user.id, image_url: photo.src, title: photo.title, board_id: boardId || null, source_url: photo.link, source: photo.source, author: photo.author })
     });
     const data = await res.json();
     if (data.pin) setPins(prev => [data.pin, ...prev]);
-    setShowSaveToBoard(null);
-    setSelected(null);
-  }
-
-  async function deletePin(pinId: string) {
-    await fetch(`/api/pins?id=${pinId}`, { method: "DELETE" });
-    setPins(prev => prev.filter(p => p.id !== pinId));
+    setShowSaveToBoard(null); setSelected(null);
   }
 
   async function createBoard() {
-    if (!newBoardName || !session?.user?.email) return;
+    if (!newBoardName || !user) return;
     const res = await fetch("/api/boards", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ user_id: session.user.email, name: newBoardName, description: newBoardDesc })
+      body: JSON.stringify({ user_id: user.id, name: newBoardName, description: newBoardDesc })
     });
     const data = await res.json();
     if (data.board) setBoards(prev => [data.board, ...prev]);
     setNewBoardName(""); setNewBoardDesc(""); setShowNewBoard(false);
   }
 
-  async function deleteBoard(boardId: string) {
-    await fetch(`/api/boards?id=${boardId}`, { method: "DELETE" });
-    setBoards(prev => prev.filter(b => b.id !== boardId));
-  }
-
-  function isPinned(id: string) { return pins.some(p => p.image_url === photos.find(ph => ph.id === id)?.src); }
+  function isPinned(photo: Photo) { return pins.some(p => p.image_url === photo.src); }
 
   function sharePhoto(photo: Photo) {
     const url = photo.link || window.location.href;
-    if (navigator.share) {
-      navigator.share({ title: photo.title, url });
-    } else {
+    if (navigator.share) navigator.share({ title: photo.title, url });
+    else {
       navigator.clipboard.writeText(url);
-      setShareMsg("Link copied!");
-      setTimeout(() => setShareMsg(""), 2000);
+      setShareMsg("Link copied!"); setTimeout(() => setShareMsg(""), 2000);
     }
     setShowShare(null);
+  }
+
+  async function signOut() {
+    await supabase.auth.signOut();
+    setPins([]); setBoards([]);
   }
 
   const displayPhotos = showSaved
     ? pins.map(p => ({ id: p.id, src: p.image_url, thumb: p.image_url, title: p.title || "", author: "", authorAvatar: "", source: "", link: p.source_url || "" }))
     : photos;
 
+  const userAvatar = user?.user_metadata?.avatar_url || "";
+  const userName = user?.user_metadata?.full_name || user?.email || "";
+
   return (
     <>
       <style>{`
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
         body { overflow-x: hidden; background: #f8f8f8; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-
-        .header {
-          position: sticky; top: 0; z-index: 100;
-          background: rgba(255,255,255,0.95); backdrop-filter: blur(12px);
-          border-bottom: 1px solid #ebebeb;
-          padding: 10px 16px; display: flex; align-items: center; gap: 10px;
-        }
+        .header { position: sticky; top: 0; z-index: 100; background: rgba(255,255,255,0.95); backdrop-filter: blur(12px); border-bottom: 1px solid #ebebeb; padding: 10px 16px; display: flex; align-items: center; gap: 10px; }
         .logo { font-size: 17px; font-weight: 800; color: #111; letter-spacing: 3px; text-transform: uppercase; font-family: Georgia, serif; flex-shrink: 0; cursor: pointer; user-select: none; }
         .logo span { color: #c0521a; }
         .search-wrap { flex: 1; display: flex; background: #f0f0f0; border-radius: 24px; overflow: hidden; border: 2px solid transparent; transition: all 0.2s; min-width: 0; }
         .search-wrap:focus-within { border-color: #c0521a; background: white; box-shadow: 0 0 0 3px rgba(192,82,26,0.1); }
         .search-input { flex: 1; padding: 9px 14px; background: transparent; border: none; color: #111; font-size: 14px; outline: none; min-width: 0; }
         .search-input::placeholder { color: #999; }
-        .search-btn { padding: 9px 14px; background: transparent; border: none; color: #888; cursor: pointer; font-size: 15px; }
+        .search-btn { padding: 9px 14px; background: transparent; border: none; color: #888; cursor: pointer; }
         .hbtn { background: transparent; border: none; width: 38px; height: 38px; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; color: #555; flex-shrink: 0; transition: all 0.2s; position: relative; }
         .hbtn:hover { background: #f0f0f0; color: #111; }
         .hbtn.active { background: #c0521a; color: white; }
         .badge { position: absolute; top: 2px; right: 2px; background: #c0521a; color: white; border-radius: 10px; padding: 1px 5px; font-size: 9px; font-weight: 700; border: 2px solid white; }
-        .avatar { width: 32px; height: 32px; border-radius: 50%; cursor: pointer; border: 2px solid #e0e0e0; flex-shrink: 0; }
-        .sign-btn { background: #111; color: white; border: none; border-radius: 24px; padding: 8px 16px; cursor: pointer; font-size: 12px; font-weight: 600; flex-shrink: 0; }
-
+        .avatar { width: 32px; height: 32px; border-radius: 50%; cursor: pointer; border: 2px solid #e0e0e0; flex-shrink: 0; object-fit: cover; background: #f0f0f0; }
+        .avatar-placeholder { width: 32px; height: 32px; border-radius: 50%; cursor: pointer; border: 2px solid #e0e0e0; flex-shrink: 0; background: #c0521a; display: flex; align-items: center; justify-content: center; color: white; font-size: 13px; font-weight: 700; }
+        .sign-btn { background: #111; color: white; border: none; border-radius: 24px; padding: 8px 16px; cursor: pointer; font-size: 12px; font-weight: 600; flex-shrink: 0; text-decoration: none; display: flex; align-items: center; }
         .burger-overlay { position: fixed; inset: 0; z-index: 150; background: rgba(0,0,0,0.4); animation: fadeIn 0.2s ease; }
         .burger-panel { position: fixed; top: 0; left: 0; bottom: 0; width: min(320px, 85vw); z-index: 151; background: white; box-shadow: 4px 0 24px rgba(0,0,0,0.15); display: flex; flex-direction: column; animation: slideRight 0.25s ease; overflow-y: auto; }
         @keyframes slideRight { from { transform: translateX(-100%); } to { transform: translateX(0); } }
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes slideUp { from { transform: translateY(16px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
         .burger-header { padding: 20px 20px 16px; border-bottom: 1px solid #f0f0f0; display: flex; align-items: center; justify-content: space-between; }
         .burger-logo { font-size: 16px; font-weight: 800; letter-spacing: 3px; color: #111; font-family: Georgia, serif; text-transform: uppercase; }
         .burger-logo span { color: #c0521a; }
@@ -225,14 +208,12 @@ export default function Home() {
         .burger-action { display: flex; align-items: center; gap: 12px; padding: 12px 20px; cursor: pointer; border: none; background: none; width: 100%; text-align: left; color: #333; font-size: 14px; font-family: -apple-system, sans-serif; transition: background 0.15s; }
         .burger-action:hover { background: #f5f5f5; }
         .burger-action-icon { width: 36px; height: 36px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 16px; flex-shrink: 0; }
-
         .grid-wrap { padding: 12px; }
         .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; align-items: start; }
         @media (min-width: 480px) { .grid { grid-template-columns: repeat(3, 1fr); } }
         @media (min-width: 768px) { .grid { grid-template-columns: repeat(4, 1fr); } }
         @media (min-width: 1024px) { .grid { grid-template-columns: repeat(5, 1fr); } }
         @media (min-width: 1280px) { .grid { grid-template-columns: repeat(6, 1fr); } }
-
         .card { border-radius: 14px; overflow: hidden; background: white; position: relative; cursor: pointer; transition: transform 0.2s ease, box-shadow 0.2s ease; box-shadow: 0 1px 4px rgba(0,0,0,0.06); }
         .card:hover { transform: scale(1.02); box-shadow: 0 8px 24px rgba(0,0,0,0.12); z-index: 10; }
         .card:hover .overlay { opacity: 1; }
@@ -247,15 +228,12 @@ export default function Home() {
         .card-footer { padding: 8px 10px; display: flex; align-items: center; gap: 6px; background: white; }
         .card-footer img { width: 18px; height: 18px; border-radius: 50%; background: #e0e0e0; flex-shrink: 0; }
         .card-footer span { color: #888; font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
         .modal-backdrop { position: fixed; inset: 0; z-index: 200; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; padding: 16px; animation: fadeIn 0.2s ease; }
         .modal-box { background: white; border-radius: 20px; overflow: hidden; max-width: 900px; width: 100%; display: flex; flex-direction: column; max-height: 90vh; box-shadow: 0 32px 80px rgba(0,0,0,0.3); animation: slideUp 0.25s ease; }
-        @keyframes slideUp { from { transform: translateY(16px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
         @media (min-width: 640px) { .modal-box { flex-direction: row; } }
         .modal-img { width: 100%; max-height: 45vh; object-fit: cover; display: block; background: #f0f0f0; }
         @media (min-width: 640px) { .modal-img { width: 55%; max-height: 90vh; } }
         .modal-info { flex: 1; padding: 24px; display: flex; flex-direction: column; gap: 16px; overflow-y: auto; }
-
         .primary-btn { background: #c0521a; color: white; border: none; border-radius: 24px; padding: 13px 24px; cursor: pointer; font-weight: 700; font-size: 14px; width: 100%; transition: background 0.2s; font-family: -apple-system, sans-serif; }
         .primary-btn:hover { background: #a04015; }
         .primary-btn.pinned-state { background: #f0f0f0; color: #333; }
@@ -263,21 +241,18 @@ export default function Home() {
         .ghost-btn:hover { border-color: #999; color: #111; }
         .outline-btn { background: transparent; color: #c0521a; border: 1.5px solid #c0521a; border-radius: 24px; padding: 11px 24px; cursor: pointer; font-weight: 600; font-size: 14px; width: 100%; transition: all 0.2s; font-family: -apple-system, sans-serif; }
         .outline-btn:hover { background: #fff3ee; }
-
         .upload-zone { border: 2px dashed #e0e0e0; border-radius: 14px; height: 170px; display: flex; align-items: center; justify-content: center; cursor: pointer; overflow: hidden; transition: all 0.2s; background: #fafafa; }
         .upload-zone:hover { border-color: #c0521a; background: #fff8f5; }
         .field { width: 100%; padding: 12px 16px; border-radius: 12px; border: 1.5px solid #e0e0e0; background: #fafafa; color: #111; font-size: 14px; outline: none; transition: all 0.2s; font-family: -apple-system, sans-serif; }
         .field:focus { border-color: #c0521a; background: white; box-shadow: 0 0 0 3px rgba(192,82,26,0.1); }
-
         .boards-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
         @media (min-width: 480px) { .boards-grid { grid-template-columns: repeat(3, 1fr); } }
         .board-card { border-radius: 12px; overflow: hidden; border: 1.5px solid #e0e0e0; cursor: pointer; transition: all 0.2s; background: #fafafa; }
         .board-card:hover { border-color: #c0521a; box-shadow: 0 4px 12px rgba(192,82,26,0.1); }
-        .board-cover { height: 80px; background: linear-gradient(135deg, #f0e6dc, #e8d5c4); display: flex; align-items: center; justify-content: center; font-size: 28px; }
+        .board-cover { height: 80px; background: linear-gradient(135deg, #f0e6dc, #e8d5c4); display: flex; align-items: center; justify-content: center; }
         .board-info { padding: 10px 12px; }
         .board-name { font-size: 13px; font-weight: 600; color: #111; }
         .board-count { font-size: 11px; color: #999; margin-top: 2px; }
-
         .spinner { width: 28px; height: 28px; border: 3px solid #e0e0e0; border-top-color: #c0521a; border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto; }
         @keyframes spin { to { transform: rotate(360deg); } }
         .status-bar { padding: 10px 16px; font-size: 12px; color: #888; border-bottom: 1px solid #f0f0f0; display: flex; align-items: center; gap: 10px; }
@@ -285,13 +260,14 @@ export default function Home() {
         .empty { text-align: center; padding: 80px 20px; color: #bbb; font-size: 15px; }
         .modal-close { background: none; border: none; color: #aaa; cursor: pointer; font-size: 18px; width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; transition: all 0.2s; }
         .modal-close:hover { background: #f0f0f0; color: #333; }
-        .share-toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: #111; color: white; padding: 10px 20px; border-radius: 24px; font-size: 13px; font-weight: 600; z-index: 300; animation: slideUp 0.3s ease; }
+        .share-toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: #111; color: white; padding: 10px 20px; border-radius: 24px; font-size: 13px; font-weight: 600; z-index: 300; }
         .pin-tag { display: inline-block; background: #fff3ee; color: #c0521a; border-radius: 6px; padding: 2px 8px; font-size: 10px; font-weight: 600; }
+        .user-menu { position: absolute; top: 44px; right: 0; background: white; border-radius: 12px; box-shadow: 0 8px 32px rgba(0,0,0,0.15); padding: 8px; min-width: 180px; z-index: 200; animation: slideUp 0.2s ease; }
+        .user-menu-item { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 8px; cursor: pointer; font-size: 13px; color: #333; border: none; background: none; width: 100%; text-align: left; transition: background 0.15s; }
+        .user-menu-item:hover { background: #f5f5f5; }
       `}</style>
 
       <main style={{ minHeight: "100vh", background: "#f8f8f8" }}>
-
-        {/* Header */}
         <header className="header">
           <button className="hbtn" onClick={() => setShowMenu(true)}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
@@ -314,71 +290,70 @@ export default function Home() {
             </div>
           </form>
 
-          <button className={`hbtn ${showBoards ? "active" : ""}`} onClick={() => { setShowBoards(!showBoards); setShowSaved(false); }} title="Boards">
+          <button className={`hbtn ${showBoards ? "active" : ""}`} onClick={() => { setShowBoards(!showBoards); setShowSaved(false); }}>
             <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
               <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/>
             </svg>
           </button>
 
-          <button className={`hbtn ${showSaved ? "active" : ""}`} onClick={() => { setShowSaved(!showSaved); setShowBoards(false); }} title="Pins">
+          <button className={`hbtn ${showSaved ? "active" : ""}`} onClick={() => { setShowSaved(!showSaved); setShowBoards(false); }}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill={showSaved ? "white" : "none"} stroke={showSaved ? "white" : "currentColor"} strokeWidth="2" strokeLinecap="round">
               <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
             </svg>
             {pins.length > 0 && <span className="badge">{pins.length}</span>}
           </button>
 
-          <button className="hbtn" onClick={() => setShowUpload(true)} title="Add">
+          <button className="hbtn" onClick={() => setShowUpload(true)}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
               <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
             </svg>
           </button>
 
-          {session ? (
-            <img src={session.user?.image || ""} className="avatar" onClick={() => signOut()} title="Sign out" alt="avatar" />
+          {user ? (
+            <div style={{ position: "relative" }}>
+              {userAvatar
+                ? <img src={userAvatar} className="avatar" onClick={() => signOut()} title="Sign out" alt="avatar" />
+                : <div className="avatar-placeholder" onClick={() => signOut()} title="Sign out">{(userName[0] || "U").toUpperCase()}</div>
+              }
+            </div>
           ) : (
-            <button className="sign-btn" onClick={() => signIn("google")}>Sign in</button>
+            <a href="/auth" className="sign-btn">Sign in</a>
           )}
         </header>
 
         {(searchQuery || showSaved || showBoards) && (
           <div className="status-bar">
-            {searchQuery && <>
-              <span>Results for <strong style={{ color: "#c0521a" }}>"{searchQuery}"</strong></span>
-              <button onClick={() => { setSearchQuery(""); setSearch(""); }}>✕</button>
-            </>}
+            {searchQuery && <><span>Results for <strong style={{ color: "#c0521a" }}>"{searchQuery}"</strong></span><button onClick={() => { setSearchQuery(""); setSearch(""); }}>✕</button></>}
             {showSaved && <span>Pins: <strong style={{ color: "#c0521a" }}>{pins.length}</strong></span>}
             {showBoards && <span>Boards: <strong style={{ color: "#c0521a" }}>{boards.length}</strong></span>}
           </div>
         )}
 
-        {/* Boards view */}
         {showBoards && (
           <div style={{ padding: 16 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-              <h2 style={{ fontSize: 18, fontWeight: 700, color: "#111" }}>My Boards</h2>
+              <h2 style={{ fontSize: 18, fontWeight: 700 }}>My Boards</h2>
               <button className="primary-btn" style={{ width: "auto", padding: "8px 16px", fontSize: 13 }} onClick={() => setShowNewBoard(true)}>+ New Board</button>
             </div>
-            {boards.length === 0 ? (
-              <div className="empty">No boards yet. Create your first board!</div>
-            ) : (
-              <div className="boards-grid">
-                {boards.map(board => (
-                  <div key={board.id} className="board-card">
-                    <div className="board-cover">
-                      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#c0521a" strokeWidth="1.5"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+            {boards.length === 0
+              ? <div className="empty">No boards yet. Create your first!</div>
+              : <div className="boards-grid">
+                  {boards.map(board => (
+                    <div key={board.id} className="board-card">
+                      <div className="board-cover">
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#c0521a" strokeWidth="1.5"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+                      </div>
+                      <div className="board-info">
+                        <div className="board-name">{board.name}</div>
+                        <div className="board-count">{pins.filter(p => p.board_id === board.id).length} pins</div>
+                      </div>
                     </div>
-                    <div className="board-info">
-                      <div className="board-name">{board.name}</div>
-                      <div className="board-count">{pins.filter(p => p.board_id === board.id).length} pins</div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
+                  ))}
+                </div>
+            }
           </div>
         )}
 
-        {/* Photos grid */}
         {!showBoards && (
           <>
             <div className="grid-wrap">
@@ -388,12 +363,12 @@ export default function Home() {
                     <img src={photo.src} alt={photo.title} loading="lazy" />
                     <div className="overlay">
                       <div className="card-actions">
-                        <button className="card-action-btn" onClick={e => { e.stopPropagation(); setShowShare(photo); }} title="Share">
+                        <button className="card-action-btn" onClick={e => { e.stopPropagation(); setShowShare(photo); }}>
                           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
                         </button>
                       </div>
-                      <button className={`save-btn ${isPinned(photo.id) ? "pinned" : ""}`} onClick={e => { e.stopPropagation(); isPinned(photo.id) ? null : setShowSaveToBoard(photo); }}>
-                        {isPinned(photo.id) ? "Pinned" : "Save"}
+                      <button className={`save-btn ${isPinned(photo) ? "pinned" : ""}`} onClick={e => { e.stopPropagation(); isPinned(photo) ? null : setShowSaveToBoard(photo); }}>
+                        {isPinned(photo) ? "Pinned" : "Save"}
                       </button>
                     </div>
                     <div className="card-footer">
@@ -404,16 +379,8 @@ export default function Home() {
                 ))}
               </div>
             </div>
-
-            {displayPhotos.length === 0 && !loading && (
-              <div className="empty">{showSaved ? "No pins yet" : "Nothing found"}</div>
-            )}
-
-            {!showSaved && (
-              <div ref={bottomRef} style={{ padding: "28px", textAlign: "center" }}>
-                {loading && <div className="spinner" />}
-              </div>
-            )}
+            {displayPhotos.length === 0 && !loading && <div className="empty">{showSaved ? "No pins yet" : "Nothing found"}</div>}
+            {!showSaved && <div ref={bottomRef} style={{ padding: "28px", textAlign: "center" }}>{loading && <div className="spinner" />}</div>}
           </>
         )}
 
@@ -426,13 +393,21 @@ export default function Home() {
                 <span className="burger-logo">SCH<span>IE</span>LE</span>
                 <button className="burger-close" onClick={() => setShowMenu(false)}>✕</button>
               </div>
+              {user && (
+                <div style={{ padding: "16px 20px", borderBottom: "1px solid #f0f0f0", display: "flex", alignItems: "center", gap: 12 }}>
+                  {userAvatar ? <img src={userAvatar} style={{ width: 40, height: 40, borderRadius: "50%" }} alt="avatar" /> : <div style={{ width: 40, height: 40, borderRadius: "50%", background: "#c0521a", display: "flex", alignItems: "center", justifyContent: "center", color: "white", fontWeight: 700 }}>{(userName[0] || "U").toUpperCase()}</div>}
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: 14 }}>{userName}</div>
+                    <button onClick={signOut} style={{ background: "none", border: "none", color: "#999", fontSize: 11, cursor: "pointer", padding: 0 }}>Sign out</button>
+                  </div>
+                </div>
+              )}
               <div className="burger-section">
                 <div className="burger-section-title">Categories</div>
                 {categories.map(cat => (
                   <button key={cat} className={`burger-cat ${active === cat && !showSaved && !showBoards && !searchQuery ? "active" : ""}`}
                     onClick={() => { setActive(cat); setShowSaved(false); setShowBoards(false); setSearchQuery(""); setSearch(""); setShowMenu(false); }}>
-                    <span className="burger-cat-dot" />
-                    {cat}
+                    <span className="burger-cat-dot" />{cat}
                   </button>
                 ))}
               </div>
@@ -457,38 +432,29 @@ export default function Home() {
                 </span>
                 <span style={{ fontWeight: 500 }}>Add Photo</span>
               </button>
-              <div className="burger-divider" />
-              {session ? (
-                <button className="burger-action" onClick={() => signOut()}>
-                  <img src={session.user?.image || ""} style={{ width: 36, height: 36, borderRadius: "50%" }} alt="avatar" />
-                  <div>
-                    <div style={{ fontWeight: 600, fontSize: 13 }}>{session.user?.name}</div>
-                    <div style={{ color: "#999", fontSize: 11 }}>Sign out</div>
-                  </div>
-                </button>
-              ) : (
-                <button className="burger-action" onClick={() => { signIn("google"); setShowMenu(false); }}>
-                  <span className="burger-action-icon" style={{ background: "#f0f0f0", fontWeight: 700, color: "#555" }}>G</span>
-                  <span style={{ fontWeight: 500 }}>Sign in with Google</span>
-                </button>
+              {!user && (
+                <a href="/auth" className="burger-action" style={{ textDecoration: "none" }}>
+                  <span className="burger-action-icon" style={{ background: "#c0521a", color: "white", fontWeight: 700, fontSize: 14 }}>→</span>
+                  <span style={{ fontWeight: 600, color: "#c0521a" }}>Sign In / Register</span>
+                </a>
               )}
             </div>
           </>
         )}
 
-        {/* Modal - View photo */}
+        {/* Modal - View */}
         {selected && (
           <div className="modal-backdrop" onClick={() => setSelected(null)}>
             <div className="modal-box" onClick={e => e.stopPropagation()}>
               <img src={selected.src} alt={selected.title} className="modal-img" />
               <div className="modal-info">
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
                   <button className="card-action-btn" style={{ background: "#f0f0f0", width: 36, height: 36 }} onClick={() => { setShowShare(selected); setSelected(null); }}>
                     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
                   </button>
                   <button className="modal-close" onClick={() => setSelected(null)}>✕</button>
                 </div>
-                <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                   {selected.authorAvatar && <img src={selected.authorAvatar} style={{ width: 40, height: 40, borderRadius: "50%" }} alt="avatar" />}
                   <div>
                     <p style={{ fontWeight: 600, fontSize: 14, color: "#111" }}>{selected.author}</p>
@@ -496,14 +462,10 @@ export default function Home() {
                   </div>
                 </div>
                 {selected.title && <p style={{ color: "#666", fontSize: 14, lineHeight: 1.6 }}>{selected.title}</p>}
-                <button className={`primary-btn ${isPinned(selected.id) ? "pinned-state" : ""}`} onClick={() => isPinned(selected.id) ? null : setShowSaveToBoard(selected)}>
-                  {isPinned(selected.id) ? "Already pinned" : "Save to board"}
+                <button className={`primary-btn ${isPinned(selected) ? "pinned-state" : ""}`} onClick={() => isPinned(selected) ? null : setShowSaveToBoard(selected)}>
+                  {isPinned(selected) ? "Already pinned" : "Save to board"}
                 </button>
-                {selected.link && (
-                  <a href={selected.link} target="_blank" rel="noopener noreferrer" style={{ textAlign: "center", color: "#999", fontSize: 12, textDecoration: "none" }}>
-                    View original ↗
-                  </a>
-                )}
+                {selected.link && <a href={selected.link} target="_blank" rel="noopener noreferrer" style={{ textAlign: "center", color: "#999", fontSize: 12, textDecoration: "none" }}>View original ↗</a>}
               </div>
             </div>
           </div>
@@ -518,14 +480,10 @@ export default function Home() {
                 <button className="modal-close" onClick={() => setShowSaveToBoard(null)}>✕</button>
               </div>
               <button className="primary-btn" onClick={() => savePin(showSaveToBoard)}>Save without board</button>
-              {boards.length > 0 && (
-                <>
-                  <p style={{ color: "#999", fontSize: 12, textAlign: "center" }}>— or choose a board —</p>
-                  {boards.map(board => (
-                    <button key={board.id} className="outline-btn" onClick={() => savePin(showSaveToBoard, board.id)}>{board.name}</button>
-                  ))}
-                </>
-              )}
+              {boards.length > 0 && <>
+                <p style={{ color: "#999", fontSize: 12, textAlign: "center" }}>— or choose a board —</p>
+                {boards.map(board => <button key={board.id} className="outline-btn" onClick={() => savePin(showSaveToBoard, board.id)}>{board.name}</button>)}
+              </>}
               <button className="ghost-btn" onClick={() => { setShowNewBoard(true); setShowSaveToBoard(null); }}>+ Create new board</button>
             </div>
           </div>
@@ -559,11 +517,7 @@ export default function Home() {
               </div>
               <img src={showShare.src} style={{ width: "100%", borderRadius: 12, maxHeight: 200, objectFit: "cover" }} alt="share" />
               <button className="primary-btn" onClick={() => sharePhoto(showShare)}>Copy link</button>
-              {showShare.link && (
-                <a href={showShare.link} target="_blank" rel="noopener noreferrer">
-                  <button className="outline-btn">View original source</button>
-                </a>
-              )}
+              {showShare.link && <a href={showShare.link} target="_blank" rel="noopener noreferrer"><button className="outline-btn">View original source</button></a>}
             </div>
           </div>
         )}

@@ -1,4 +1,4 @@
-п»їimport { NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -36,7 +36,7 @@ export async function GET(request: Request) {
   }
 }
 
-// === 1. Imgflip API (РјРµРјС‹, Р±РµСЃРїР»Р°С‚РЅРѕ Р±РµР· РєР»СЋС‡Р°) ===
+// === 1. Imgflip API (мемы, бесплатно без ключа) ===
 async function fetchMemes(query: string, page: number) {
   try {
     const res = await fetch('https://api.imgflip.com/get_memes');
@@ -62,7 +62,7 @@ async function fetchMemes(query: string, page: number) {
       author: 'Imgflip',
       authorAvatar: '',
       source: 'Meme',
-      link: https://imgflip.com/meme/,
+      link: `https://imgflip.com/meme/${m.id}`,
     }));
   } catch (e) {
     console.error('Imgflip error:', e);
@@ -75,7 +75,7 @@ async function fetchLastFM(query: string, page: number) {
   const key = process.env.NEXT_PUBLIC_LASTFM_API_KEY;
   
   if (!key) {
-    console.error('вќЊ Last.fm API key not found!');
+    console.error('? Last.fm API key not found!');
     return [];
   }
 

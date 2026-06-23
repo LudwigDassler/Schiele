@@ -10,11 +10,9 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const user_id = searchParams.get("user_id");
   const board_id = searchParams.get("board_id");
-
   let query = supabase.from("pins").select("*").order("created_at", { ascending: false });
   if (user_id) query = query.eq("user_id", user_id);
   if (board_id) query = query.eq("board_id", board_id);
-
   const { data, error } = await query;
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ pins: data || [] });
@@ -23,29 +21,9 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const body = await req.json();
   const { user_id, image_url, title, board_id, source_url, source, author } = body;
-
-  if (!user_id || !image_url) {
-    return NextResponse.json({ error: "user_id and image_url required" }, { status: 400 });
-  }
-
-  // Убедимся что профиль существует
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("id")
-    .eq("id", user_id)
-    .single();
-
-  if (!profile) {
-    // Создаём профиль если не существует
-    await supabase.from("profiles").insert({ id: user_id });
-  }
-
-  const { data, error } = await supabase
-    .from("pins")
-    .insert({ user_id, image_url, title, board_id: board_id || null, source_url, source, author })
-    .select()
-    .single();
-
+  if (!user_id || !image_url) return NextResponse.json({ error: "user_id and image_url required" }, { status: 400 });
+  await supabase.from("profiles").upsert({ id: user_id }, { onConflict: "id" });
+  const { data, error } = await supabase.from("pins").insert({ user_id, image_url, title, board_id: board_id || null, source_url, source, author }).select().single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ pin: data });
 }
@@ -53,14 +31,8 @@ export async function POST(req: NextRequest) {
 export async function DELETE(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const id = searchParams.get("id");
-  const user_id = searchParams.get("user_id");
-
   if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
-
-  let query = supabase.from("pins").delete().eq("id", id);
-  if (user_id) query = query.eq("user_id", user_id);
-
-  const { error } = await query;
+  const { error } = await supabase.from("pins").delete().eq("id", id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ success: true });
 }

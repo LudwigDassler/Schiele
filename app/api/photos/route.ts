@@ -1,30 +1,33 @@
-﻿import { NextRequest, NextResponse } from "next/server";
+﻿import { NextRequest, NextResponse } from 'next/server';
 
 const UNSPLASH_KEY = process.env.NEXT_PUBLIC_UNSPLASH_ACCESS_KEY;
 const PEXELS_KEY = process.env.PEXELS_API_KEY;
+const PIXABAY_KEY = process.env.PIXABAY_API_KEY;
 
 const categoryMap: Record<string, string> = {
-  "All": "photography", "Nature": "nature", "City": "city",
-  "Food": "food", "Travel": "travel", "Architecture": "architecture",
-  "Fashion": "fashion", "Art": "art", "Sports": "sport",
-  "Interior": "interior", "Animals": "animals", "Technology": "technology",
-  "Music": "music", "Cinema": "cinema", "Photography": "portrait", "Beauty": "beauty",
+  'All': 'photography', 'Nature': 'nature', 'City': 'city',
+  'Food': 'food', 'Travel': 'travel', 'Architecture': 'architecture',
+  'Fashion': 'fashion', 'Art': 'art', 'Sports': 'sport',
+  'Interior': 'interior', 'Animals': 'animals', 'Technology': 'technology',
+  'Music': 'music', 'Cinema': 'cinema', 'Photography': 'portrait', 'Beauty': 'beauty',
 };
 
 async function fetchUnsplash(query: string, page: number) {
   try {
     const res = await fetch(
-      `https://api.unsplash.com/search/photos?query=${query}&per_page=15&page=${page}&client_id=${UNSPLASH_KEY}`
+      'https://api.unsplash.com/search/photos?query=' + query + '&per_page=12&page=' + page + '&client_id=' + UNSPLASH_KEY,
+      { next: { revalidate: 0 } }
     );
+    if (!res.ok) return [];
     const data = await res.json();
     return (data.results || []).map((p: any) => ({
-      id: `u_${p.id}`,
+      id: 'u_' + p.id,
       src: p.urls.regular,
       thumb: p.urls.small,
       title: p.alt_description || query,
       author: p.user.name,
       authorAvatar: p.user.profile_image.small,
-      source: "unsplash",
+      source: 'unsplash',
       link: p.links.html,
     }));
   } catch { return []; }
@@ -33,19 +36,41 @@ async function fetchUnsplash(query: string, page: number) {
 async function fetchPexels(query: string, page: number) {
   try {
     const res = await fetch(
-      `https://api.pexels.com/v1/search?query=${query}&per_page=15&page=${page}`,
-      { headers: { Authorization: PEXELS_KEY! } }
+      'https://api.pexels.com/v1/search?query=' + query + '&per_page=12&page=' + page,
+      { headers: { Authorization: PEXELS_KEY! }, next: { revalidate: 0 } }
     );
+    if (!res.ok) return [];
     const data = await res.json();
     return (data.photos || []).map((p: any) => ({
-      id: `p_${p.id}`,
+      id: 'p_' + p.id,
       src: p.src.large,
       thumb: p.src.medium,
       title: p.alt || query,
       author: p.photographer,
-      authorAvatar: "",
-      source: "pexels",
+      authorAvatar: '',
+      source: 'pexels',
       link: p.url,
+    }));
+  } catch { return []; }
+}
+
+async function fetchPixabay(query: string, page: number) {
+  try {
+    const res = await fetch(
+      'https://pixabay.com/api/?key=' + PIXABAY_KEY + '&q=' + encodeURIComponent(query) + '&per_page=12&page=' + page + '&image_type=photo&safesearch=true',
+      { next: { revalidate: 0 } }
+    );
+    if (!res.ok) return [];
+    const data = await res.json();
+    return (data.hits || []).map((p: any) => ({
+      id: 'px_' + p.id,
+      src: p.largeImageURL,
+      thumb: p.previewURL,
+      title: p.tags || query,
+      author: p.user,
+      authorAvatar: p.userImageURL || '',
+      source: 'pixabay',
+      link: p.pageURL,
     }));
   } catch { return []; }
 }
@@ -60,16 +85,17 @@ function shuffle(arr: any[]) {
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
-  const category = searchParams.get("category") || "All";
-  const query = searchParams.get("query") || categoryMap[category] || "photography";
-  const page = parseInt(searchParams.get("page") || "1");
+  const category = searchParams.get('category') || 'All';
+  const query = searchParams.get('query') || categoryMap[category] || 'photography';
+  const page = parseInt(searchParams.get('page') || '1');
 
-  const [unsplash, pexels] = await Promise.all([
+  const [unsplash, pexels, pixabay] = await Promise.all([
     fetchUnsplash(query, page),
     fetchPexels(query, page),
+    fetchPixabay(query, page),
   ]);
 
-  const mixed = shuffle([...unsplash, ...pexels]);
+  const mixed = shuffle([...unsplash, ...pexels, ...pixabay]);
 
   return NextResponse.json({ photos: mixed });
 }

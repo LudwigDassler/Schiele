@@ -36,7 +36,7 @@ export async function GET(request: Request) {
   }
 }
 
-// === 1. Imgflip API (мемы, бесплатно без ключа) ===
+// === Imgflip API (РјРµРјС‹) ===
 async function fetchMemes(query: string, page: number) {
   try {
     const res = await fetch('https://api.imgflip.com/get_memes');
@@ -55,7 +55,7 @@ async function fetchMemes(query: string, page: number) {
     const paginated = memes.slice(start, start + 20);
     
     return paginated.map((m: any) => ({
-      id: meme_,
+      id: `meme_${m.id}`,
       src: m.url,
       thumb: m.url,
       title: m.name,
@@ -70,19 +70,19 @@ async function fetchMemes(query: string, page: number) {
   }
 }
 
-// === 2. Last.fm API ===
+// === Last.fm API ===
 async function fetchLastFM(query: string, page: number) {
   const key = process.env.NEXT_PUBLIC_LASTFM_API_KEY;
   
   if (!key) {
-    console.error('? Last.fm API key not found!');
+    console.error('вќЊ Last.fm API key not found!');
     return [];
   }
 
   try {
     const url = query && query !== 'music'
-      ? https://ws.audioscrobbler.com/2.0/?method=artist.search&artist=&api_key=&format=json&limit=20&page=
-      : https://ws.audioscrobbler.com/2.0/?method=chart.gettopartists&api_key=&format=json&limit=20&page=;
+      ? `https://ws.audioscrobbler.com/2.0/?method=artist.search&artist=${encodeURIComponent(query)}&api_key=${key}&format=json&limit=20&page=${page}`
+      : `https://ws.audioscrobbler.com/2.0/?method=chart.gettopartists&api_key=${key}&format=json&limit=20&page=${page}`;
     
     const res = await fetch(url);
     const data = await res.json();
@@ -90,8 +90,8 @@ async function fetchLastFM(query: string, page: number) {
     const artists = data.results?.artistmatches?.artist || data.artists?.artist || [];
     
     return artists.map((p: any) => ({
-      id: lastfm_,
-      src: p.image?.[3]?.['#text'] || https://ui-avatars.com/api/?name=&background=c0521a&color=fff,
+      id: `lastfm_${p.mbid || p.name}`,
+      src: p.image?.[3]?.['#text'] || `https://ui-avatars.com/api/?name=${encodeURIComponent(p.name)}&background=c0521a&color=fff`,
       thumb: p.image?.[1]?.['#text'] || '',
       title: p.name,
       author: 'Last.fm',

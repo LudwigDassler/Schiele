@@ -61,16 +61,12 @@ async function fetchLastFm(query: string) {
     const artists = data.results?.artistmatches?.artist || [];
     const results = [];
     for (const artist of artists.slice(0, 4)) {
-      if (artist.image && artist.image[3] && artist.image[3]["#text"] && !artist.image[3]["#text"].includes("2a96cbd8b46e442fc41c2b86b821562f")) {
+      if (artist.image?.[3]?.["#text"] && !artist.image[3]["#text"].includes("2a96cbd8b46e442fc41c2b86b821562f")) {
         results.push({
           id: "lfm_" + artist.mbid + "_" + Math.random(),
-          src: artist.image[3]["#text"],
-          thumb: artist.image[1]["#text"],
-          title: artist.name,
-          author: "Last.fm",
-          authorAvatar: "",
-          source: "last.fm",
-          link: artist.url,
+          src: artist.image[3]["#text"], thumb: artist.image[1]["#text"],
+          title: artist.name, author: "Last.fm",
+          authorAvatar: "", source: "last.fm", link: artist.url,
         });
       }
     }
@@ -80,62 +76,102 @@ async function fetchLastFm(query: string) {
 
 async function fetchMetMuseum(query: string) {
   try {
-    const searchRes = await fetch(`https://collectionapi.metmuseum.org/public/collection/v1/search?q=${encodeURIComponent(query)}&hasImages=true&limit=6`);
+    const searchRes = await fetch(`https://collectionapi.metmuseum.org/public/collection/v1/search?q=${encodeURIComponent(query)}&hasImages=true`);
     if (!searchRes.ok) return [];
     const searchData = await searchRes.json();
-    const ids = (searchData.objectIDs || []).slice(0, 6);
+    const ids = (searchData.objectIDs || []).slice(0, 8);
     const objects = await Promise.all(
       ids.map((id: number) => fetch(`https://collectionapi.metmuseum.org/public/collection/v1/objects/${id}`).then(r => r.json()).catch(() => null))
     );
-    return objects.filter(o => o && o.primaryImage).map((o: any) => ({
-      id: "met_" + o.objectID,
-      src: o.primaryImage,
+    return objects.filter(o => o?.primaryImage).map((o: any) => ({
+      id: "met_" + o.objectID, src: o.primaryImage,
       thumb: o.primaryImageSmall || o.primaryImage,
-      title: o.title || query,
-      author: o.artistDisplayName || "The Met Museum",
-      authorAvatar: "",
-      source: "met museum",
-      link: o.objectURL,
+      title: o.title || query, author: o.artistDisplayName || "The Met",
+      authorAvatar: "", source: "met museum", link: o.objectURL,
     }));
   } catch { return []; }
 }
 
-async function fetchWikimedia(query: string) {
+async function fetchWikipedia(query: string) {
   try {
-    const res = await fetch(`https://en.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent(query)}&gsrlimit=6&prop=pageimages&piprop=original&format=json&origin=*`);
-    if (!res.ok) return [];
-    const data = await res.json();
-    const pages = Object.values(data.query?.pages || {}) as any[];
-    return pages.filter(p => p.original?.source).map((p: any) => ({
-      id: "wiki_" + p.pageid,
-      src: p.original.source,
-      thumb: p.thumbnail?.source || p.original.source,
-      title: p.title,
-      author: "Wikipedia",
-      authorAvatar: "",
-      source: "wikimedia",
-      link: `https://en.wikipedia.org/wiki/${encodeURIComponent(p.title)}`,
-    }));
+    const results = [];
+
+    // 1. Поиск главной статьи
+    const summaryRes = await fetch(`https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(query)}`);
+    if (summaryRes.ok) {
+      const summary = await summaryRes.json();
+      if (summary.thumbnail?.source) {
+        results.push({
+          id: "wiki_main_" + summary.pageid,
+          src: summary.originalimage?.source || summary.thumbnail.source,
+          thumb: summary.thumbnail.source,
+          title: summary.title,
+          author: summary.description || "Wikipedia",
+          authorAvatar: "",
+          source: "wikipedia",
+          link: summary.content_urls?.desktop?.page || `https://en.wikipedia.org/wiki/${encodeURIComponent(query)}`,
+          description: summary.extract?.slice(0, 200),
+        });
+      }
+    }
+
+    // 2. Поиск связанных статей с изображениями
+    const searchRes = await fetch(`https://en.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent(query)}&gsrlimit=10&prop=pageimages|pageterms&piprop=original|thumbnail&pilimit=10&format=json&origin=*`);
+    if (searchRes.ok) {
+      const searchData = await searchRes.json();
+      const pages = Object.values(searchData.query?.pages || {}) as any[];
+      for (const page of pages) {
+        if (page.original?.source || page.thumbnail?.source) {
+          results.push({
+            id: "wiki_" + page.pageid,
+            src: page.original?.source || page.thumbnail.source,
+            thumb: page.thumbnail?.source || page.original?.source,
+            title: page.title,
+            author: page.terms?.description?.[0] || "Wikipedia",
+            authorAvatar: "",
+            source: "wikipedia",
+            link: `https://en.wikipedia.org/wiki/${encodeURIComponent(page.title)}`,
+          });
+        }
+      }
+    }
+
+    // 3. Поиск изображений напрямую на Wikimedia Commons
+    const commonsRes = await fetch(`https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent(query)}&gsrnamespace=6&gsrlimit=8&prop=imageinfo&iiprop=url|extmetadata&iiurlwidth=800&format=json&origin=*`);
+    if (commonsRes.ok) {
+      const commonsData = await commonsRes.json();
+      const pages = Object.values(commonsData.query?.pages || {}) as any[];
+      for (const page of pages) {
+        const info = page.imageinfo?.[0];
+        if (info?.url && !info.url.endsWith(".svg") && !info.url.endsWith(".ogg") && !info.url.endsWith(".ogv")) {
+          const artist = info.extmetadata?.Artist?.value?.replace(/<[^>]*>/g, "") || "Wikimedia";
+          results.push({
+            id: "commons_" + page.pageid,
+            src: info.url,
+            thumb: info.thumburl || info.url,
+            title: info.extmetadata?.ObjectName?.value || page.title.replace("File:", ""),
+            author: artist,
+            authorAvatar: "",
+            source: "wikimedia",
+            link: `https://commons.wikimedia.org/wiki/${encodeURIComponent(page.title)}`,
+          });
+        }
+      }
+    }
+
+    return results;
   } catch { return []; }
 }
 
-async function fetchImgflip(query: string) {
+async function fetchImgflip() {
   try {
     const res = await fetch("https://api.imgflip.com/get_memes");
     if (!res.ok) return [];
     const data = await res.json();
-    const memes = (data.data?.memes || [])
-      .filter((m: any) => m.name.toLowerCase().includes(query.toLowerCase()) || query === "memes" || query === "photography")
-      .slice(0, 4);
-    return memes.map((m: any) => ({
-      id: "meme_" + m.id,
-      src: m.url,
-      thumb: m.url,
-      title: m.name,
-      author: "Imgflip",
-      authorAvatar: "",
-      source: "meme",
-      link: `https://imgflip.com/memetemplates`,
+    return (data.data?.memes || []).slice(0, 4).map((m: any) => ({
+      id: "meme_" + m.id, src: m.url, thumb: m.url,
+      title: m.name, author: "Imgflip",
+      authorAvatar: "", source: "meme", link: "https://imgflip.com/memetemplates",
     }));
   } catch { return []; }
 }
@@ -155,19 +191,19 @@ export async function GET(req: NextRequest) {
   const page = parseInt(searchParams.get("page") || "1");
   const isSearch = !!searchParams.get("query");
 
-  const sources = [
+  const sources: Promise<any[]>[] = [
     fetchUnsplash(query, page),
     fetchPexels(query, page),
     fetchPixabay(query, page),
+    fetchWikipedia(query),
     fetchMetMuseum(query),
-    fetchWikimedia(query),
   ];
 
-  if (category === "Music" || isSearch) sources.push(fetchLastFm(query));
-  if (category === "All" || isSearch) sources.push(fetchImgflip(query));
+  if (isSearch || category === "Music") sources.push(fetchLastFm(query));
+  if (category === "All" && !isSearch) sources.push(fetchImgflip());
 
   const results = await Promise.all(sources);
-  const mixed = shuffle(results.flat().filter(Boolean));
+  const mixed = shuffle(results.flat().filter(p => p?.src));
 
   return NextResponse.json({ photos: mixed });
 }

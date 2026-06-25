@@ -26,6 +26,15 @@ export async function POST(req: NextRequest) {
   return NextResponse.json({ board: data });
 }
 
+export async function PUT(req: NextRequest) {
+  const body = await req.json();
+  const { id, name, description } = body;
+  if (!id || !name) return NextResponse.json({ error: "id and name required" }, { status: 400 });
+  const { data, error } = await supabase.from("boards").update({ name, description: description || null }).eq("id", id).select().single();
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  return NextResponse.json({ board: data });
+}
+
 export async function DELETE(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const id = searchParams.get("id");

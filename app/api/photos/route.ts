@@ -92,14 +92,15 @@ async function fetchMetMuseum(query: string) {
   } catch { return []; }
 }
 
-async function fetchWikipedia(query: string) {
+async function fetchWikipediaExact(query: string) {
   try {
     const results = [];
 
+    // Точный поиск страницы
     const summaryRes = await fetch(`https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(query)}`);
     if (summaryRes.ok) {
       const summary = await summaryRes.json();
-      if (summary.thumbnail?.source) {
+      if (summary.thumbnail?.source && summary.type !== "disambiguation") {
         results.push({
           id: "wiki_main_" + summary.pageid,
           src: summary.originalimage?.source || summary.thumbnail.source,
@@ -107,37 +108,51 @@ async function fetchWikipedia(query: string) {
           title: summary.title,
           author: summary.description || "Wikipedia",
           authorAvatar: "", source: "wikipedia",
-          link: summary.content_urls?.desktop?.page || `https://en.wikipedia.org/wiki/${encodeURIComponent(query)}`,
+          link: summary.content_urls?.desktop?.page || "",
         });
       }
     }
 
-    const searchRes = await fetch(`https://en.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent(query)}&gsrlimit=15&prop=pageimages|pageterms&piprop=original|thumbnail&pilimit=15&format=json&origin=*`);
-    if (searchRes.ok) {
-      const searchData = await searchRes.json();
-      const pages = Object.values(searchData.query?.pages || {}) as any[];
-      for (const page of pages) {
-        if (page.original?.source || page.thumbnail?.source) {
-          results.push({
-            id: "wiki_" + page.pageid,
-            src: page.original?.source || page.thumbnail.source,
-            thumb: page.thumbnail?.source || page.original?.source,
-            title: page.title,
-            author: page.terms?.description?.[0] || "Wikipedia",
-            authorAvatar: "", source: "wikipedia",
-            link: `https://en.wikipedia.org/wiki/${encodeURIComponent(page.title)}`,
-          });
+    // Поиск изображений со страницы Wikipedia
+    const imagesRes = await fetch(`https://en.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(query)}&prop=images&imlimit=20&format=json&origin=*`);
+    if (imagesRes.ok) {
+      const imagesData = await imagesRes.json();
+      const pages = Object.values(imagesData.query?.pages || {}) as any[];
+      const imageFiles = pages.flatMap((p: any) => p.images || [])
+        .filter((img: any) => !img.title.match(/\.(svg|gif|ogg|webm|pdf)$/i))
+        .slice(0, 10);
+
+      for (const imgFile of imageFiles) {
+        const infoRes = await fetch(`https://en.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(imgFile.title)}&prop=imageinfo&iiprop=url&iiurlwidth=800&format=json&origin=*`);
+        if (infoRes.ok) {
+          const infoData = await infoRes.json();
+          const infoPages = Object.values(infoData.query?.pages || {}) as any[];
+          for (const p of infoPages) {
+            const info = p.imageinfo?.[0];
+            if (info?.url && !info.url.match(/\.(svg|gif|ogg|webm|pdf)$/i)) {
+              results.push({
+                id: "wiki_img_" + p.pageid + "_" + Math.random(),
+                src: info.thumburl || info.url,
+                thumb: info.thumburl || info.url,
+                title: query,
+                author: "Wikipedia",
+                authorAvatar: "", source: "wikipedia",
+                link: `https://en.wikipedia.org/wiki/${encodeURIComponent(query)}`,
+              });
+            }
+          }
         }
       }
     }
 
-    const commonsRes = await fetch(`https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent(query)}&gsrnamespace=6&gsrlimit=15&prop=imageinfo&iiprop=url|extmetadata&iiurlwidth=800&format=json&origin=*`);
+    // Wikimedia Commons — строгий поиск
+    const commonsRes = await fetch(`https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent('"' + query + '"')}&gsrnamespace=6&gsrlimit=20&prop=imageinfo&iiprop=url|extmetadata&iiurlwidth=800&format=json&origin=*`);
     if (commonsRes.ok) {
       const commonsData = await commonsRes.json();
       const pages = Object.values(commonsData.query?.pages || {}) as any[];
       for (const page of pages) {
         const info = page.imageinfo?.[0];
-        if (info?.url && !info.url.endsWith(".svg") && !info.url.endsWith(".ogg") && !info.url.endsWith(".ogv") && !info.url.endsWith(".webm") && !info.url.endsWith(".pdf")) {
+        if (info?.url && !info.url.match(/\.(svg|ogg|ogv|webm|pdf)$/i)) {
           results.push({
             id: "commons_" + page.pageid,
             src: info.url, thumb: info.thumburl || info.url,
@@ -177,12 +192,11 @@ export async function GET(req: NextRequest) {
   ];
 
   if (isSearch) {
-    sources.push(fetchWikipedia(query));
+    sources.push(fetchWikipediaExact(query));
     sources.push(fetchLastFm(query));
     sources.push(fetchMetMuseum(query));
   } else if (category === "Art") {
     sources.push(fetchMetMuseum(query));
-    sources.push(fetchWikipedia(query));
   } else if (category === "Music") {
     sources.push(fetchLastFm(query));
   }

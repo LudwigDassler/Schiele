@@ -4,14 +4,13 @@ const UNSPLASH_KEY = process.env.NEXT_PUBLIC_UNSPLASH_ACCESS_KEY;
 const PEXELS_KEY = process.env.PEXELS_API_KEY;
 const PIXABAY_KEY = process.env.PIXABAY_API_KEY;
 const LASTFM_KEY = process.env.LASTFM_API_KEY;
-const OMDB_KEY = process.env.OMDB_API_KEY;
 
 const categoryMap: Record<string, string> = {
-  "All": "photography", "Nature": "nature", "City": "city",
-  "Food": "food", "Travel": "travel", "Architecture": "architecture",
-  "Fashion": "fashion", "Art": "art", "Sports": "sport",
-  "Interior": "interior", "Animals": "animals", "Technology": "technology",
-  "Music": "music", "Cinema": "cinema", "Photography": "portrait", "Beauty": "beauty",
+  "All": "photography", "Nature": "nature", "City": "city street",
+  "Food": "food cuisine", "Travel": "travel destination", "Architecture": "architecture building",
+  "Fashion": "fashion style", "Art": "artwork painting", "Sports": "sports action",
+  "Interior": "interior design", "Animals": "animals wildlife", "Technology": "technology digital",
+  "Music": "music musician", "Cinema": "cinema film movie", "Photography": "photography portrait", "Beauty": "beauty makeup",
 };
 
 async function fetchUnsplash(query: string, page: number) {
@@ -138,7 +137,7 @@ async function fetchWikipedia(query: string) {
       const pages = Object.values(commonsData.query?.pages || {}) as any[];
       for (const page of pages) {
         const info = page.imageinfo?.[0];
-        if (info?.url && !info.url.endsWith(".svg") && !info.url.endsWith(".ogg") && !info.url.endsWith(".ogv") && !info.url.endsWith(".webm")) {
+        if (info?.url && !info.url.endsWith(".svg") && !info.url.endsWith(".ogg") && !info.url.endsWith(".ogv") && !info.url.endsWith(".webm") && !info.url.endsWith(".pdf")) {
           results.push({
             id: "commons_" + page.pageid,
             src: info.url, thumb: info.thumburl || info.url,
@@ -146,52 +145,6 @@ async function fetchWikipedia(query: string) {
             author: info.extmetadata?.Artist?.value?.replace(/<[^>]*>/g, "") || "Wikimedia",
             authorAvatar: "", source: "wikimedia",
             link: `https://commons.wikimedia.org/wiki/${encodeURIComponent(page.title)}`,
-          });
-        }
-      }
-    }
-
-    return results;
-  } catch { return []; }
-}
-
-async function fetchOMDB(query: string) {
-  try {
-    const results = [];
-
-    // Поиск фильмов и сериалов
-    const searchRes = await fetch(`https://www.omdbapi.com/?s=${encodeURIComponent(query)}&apikey=${OMDB_KEY}&type=movie`);
-    if (searchRes.ok) {
-      const searchData = await searchRes.json();
-      for (const movie of (searchData.Search || []).slice(0, 8)) {
-        if (movie.Poster && movie.Poster !== "N/A") {
-          results.push({
-            id: "omdb_" + movie.imdbID,
-            src: movie.Poster.replace("_SX300", "_SX800"),
-            thumb: movie.Poster,
-            title: movie.Title + " (" + movie.Year + ")",
-            author: "IMDB",
-            authorAvatar: "", source: "cinema",
-            link: `https://www.imdb.com/title/${movie.imdbID}`,
-          });
-        }
-      }
-    }
-
-    // Поиск сериалов
-    const seriesRes = await fetch(`https://www.omdbapi.com/?s=${encodeURIComponent(query)}&apikey=${OMDB_KEY}&type=series`);
-    if (seriesRes.ok) {
-      const seriesData = await seriesRes.json();
-      for (const show of (seriesData.Search || []).slice(0, 5)) {
-        if (show.Poster && show.Poster !== "N/A") {
-          results.push({
-            id: "omdb_series_" + show.imdbID,
-            src: show.Poster.replace("_SX300", "_SX800"),
-            thumb: show.Poster,
-            title: show.Title + " (" + show.Year + ")",
-            author: "IMDB Series",
-            authorAvatar: "", source: "cinema",
-            link: `https://www.imdb.com/title/${show.imdbID}`,
           });
         }
       }
@@ -212,22 +165,30 @@ function shuffle(arr: any[]) {
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const category = searchParams.get("category") || "All";
-  const query = searchParams.get("query") || categoryMap[category] || "photography";
+  const customQuery = searchParams.get("query");
+  const query = customQuery || categoryMap[category] || "photography";
   const page = parseInt(searchParams.get("page") || "1");
-  const isSearch = !!searchParams.get("query");
+  const isSearch = !!customQuery;
 
   const sources: Promise<any[]>[] = [
     fetchUnsplash(query, page),
     fetchPexels(query, page),
     fetchPixabay(query, page),
-    fetchWikipedia(query),
-    fetchMetMuseum(query),
-    fetchLastFm(query),
-    fetchOMDB(query),
   ];
 
+  if (isSearch) {
+    sources.push(fetchWikipedia(query));
+    sources.push(fetchLastFm(query));
+    sources.push(fetchMetMuseum(query));
+  } else if (category === "Art") {
+    sources.push(fetchMetMuseum(query));
+    sources.push(fetchWikipedia(query));
+  } else if (category === "Music") {
+    sources.push(fetchLastFm(query));
+  }
+
   const results = await Promise.all(sources);
-  const mixed = shuffle(results.flat().filter(p => p?.src));
+  const mixed = shuffle(results.flat().filter(p => p?.src && p.src.startsWith("http")));
 
   return NextResponse.json({ photos: mixed });
 }

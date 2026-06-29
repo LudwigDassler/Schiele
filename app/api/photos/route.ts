@@ -4,6 +4,7 @@ const UNSPLASH_KEY = process.env.NEXT_PUBLIC_UNSPLASH_ACCESS_KEY;
 const PEXELS_KEY = process.env.PEXELS_API_KEY;
 const PIXABAY_KEY = process.env.PIXABAY_API_KEY;
 const LASTFM_KEY = process.env.LASTFM_API_KEY;
+const OPENVERSE_KEY = process.env.OPENVERSE_API_KEY;
 
 const categoryMap: Record<string, string> = {
   "All": "photography", "Nature": "nature", "City": "city street",
@@ -53,6 +54,27 @@ async function fetchPixabay(query: string, page: number) {
   } catch { return []; }
 }
 
+async function fetchOpenVerse(query: string, page: number) {
+  try {
+    const res = await fetch(
+      `https://api.openverse.org/v1/images/?q=${encodeURIComponent(query)}&page=${page}&page_size=20&license_type=all`,
+      { headers: { Authorization: `Bearer ${OPENVERSE_KEY}` } }
+    );
+    if (!res.ok) return [];
+    const data = await res.json();
+    return (data.results || []).map((p: any) => ({
+      id: "ov_" + p.id,
+      src: p.url,
+      thumb: p.thumbnail || p.url,
+      title: p.title || query,
+      author: p.creator || "OpenVerse",
+      authorAvatar: "",
+      source: "openverse",
+      link: p.foreign_landing_url || p.url,
+    }));
+  } catch { return []; }
+}
+
 async function fetchLastFm(query: string) {
   try {
     const res = await fetch(`https://ws.audioscrobbler.com/2.0/?method=artist.search&artist=${encodeURIComponent(query)}&api_key=${LASTFM_KEY}&format=json&limit=10`);
@@ -96,7 +118,6 @@ async function fetchWikipediaExact(query: string) {
   try {
     const results = [];
 
-    // Точный поиск страницы
     const summaryRes = await fetch(`https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(query)}`);
     if (summaryRes.ok) {
       const summary = await summaryRes.json();
@@ -113,7 +134,6 @@ async function fetchWikipediaExact(query: string) {
       }
     }
 
-    // Поиск изображений со страницы Wikipedia
     const imagesRes = await fetch(`https://en.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(query)}&prop=images&imlimit=20&format=json&origin=*`);
     if (imagesRes.ok) {
       const imagesData = await imagesRes.json();
@@ -145,7 +165,6 @@ async function fetchWikipediaExact(query: string) {
       }
     }
 
-    // Wikimedia Commons — строгий поиск
     const commonsRes = await fetch(`https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent('"' + query + '"')}&gsrnamespace=6&gsrlimit=20&prop=imageinfo&iiprop=url|extmetadata&iiurlwidth=800&format=json&origin=*`);
     if (commonsRes.ok) {
       const commonsData = await commonsRes.json();
@@ -189,6 +208,7 @@ export async function GET(req: NextRequest) {
     fetchUnsplash(query, page),
     fetchPexels(query, page),
     fetchPixabay(query, page),
+    fetchOpenVerse(query, page),
   ];
 
   if (isSearch) {

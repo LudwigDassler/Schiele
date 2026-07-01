@@ -1,45 +1,72 @@
-export const dynamic = 'force-dynamic';
-import { NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
+import { pipeline } from "@xenova/transformers";
 
-// –ò–Ω–∏—Ü–∏–∞–ª–∏–∑–∏—Ä—É–µ–º –∫–ª–∏–µ–Ω—Ç Supabase (–∏—Å–ø–æ–ª—å–∑—É–µ–º —Å–µ—Ä–≤–µ—Ä–Ω—ã–µ –ø–µ—Ä–µ–º–µ–Ω–Ω—ã–µ –∏–∑ .env.local)
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!; // –∏–ª–∏ –∏—Å–ø–æ–ª—å–∑—É–π —Å–≤–æ–π —Å–µ–∫—Ä–µ—Ç–Ω—ã–π sb_secret
+export const dynamic = "force-dynamic";
 
-const supabase = createClient(supabaseUrl, supabaseKey);
+const SUPABASE_URL = "https://kefdjxsmyarwfqqkfgcx.supabase.co"; 
+const SUPABASE_KEY = "sb_secret_2UZY3PLCKoIznRnZoCoPDg_wsv6lYp7"; 
+
+const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+
+function cosineSimilarity(vecA: number[], vecB: number[]): number {
+  let dotProduct = 0, normA = 0, normB = 0;
+  for (let i = 0; i < vecA.length; i++) {
+    dotProduct += vecA[i] * vecB[i];
+    normA += vecA[i] * vecA[i];
+    normB += vecB[i] * vecB[i];
+  }
+  return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
+}
+
+let extractor: any = null;
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
-  const query = searchParams.get('q');
-
-  if (!query) {
-    // –ï—Å–ª–∏ –∑–∞–ø—Ä–æ—Å –ø—É—Å—Ç–æ–π, –º–æ–∂–Ω–æ –≤–µ—Ä–Ω—É—Ç—å –ø—É—Å—Ç–æ–π –º–∞—Å—Å–∏–≤ –∏–ª–∏ –ø–µ—Ä–≤—ã–µ 20 –ø–∏–Ω–æ–≤
-    const { data, error } = await supabase.from('pins').select('*').limit(20);
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    return NextResponse.json({ pins: data });
-  }
-
-  // –ü—Ä–µ–æ–±—Ä–∞–∑—É–µ–º –ø–æ–∏—Å–∫–æ–≤—É—é —Å—Ç—Ä–æ–∫—É (–Ω–∞–ø—Ä–∏–º–µ—Ä, "white sneakers" -> "white & sneakers")
-  // –≠—Ç–æ –Ω—É–∂–Ω–æ –¥–ª—è –∫–æ—Ä—Ä–µ–∫—Ç–Ω–æ–π —Ä–∞–±–æ—Ç—ã –æ–ø–µ—Ä–∞—Ç–æ—Ä–∞ @@ –≤ to_tsquery
-  const formattedQuery = query
-    .trim()
-    .split(/\s+/)
-    .map(word => `${word}:*`) // :* –ø–æ–∑–≤–æ–ª—è–µ—Ç –∏—Å–∫–∞—Ç—å –ø–æ —á–∞—Å—Ç–∏ —Å–ª–æ–≤–∞ (–Ω–∞–ø—Ä–∏–º–µ—Ä, "conv" –Ω–∞–π–¥–µ—Ç "converse")
-    .join(' & ');
+  const query = searchParams.get("q")?.toLowerCase() || "";
 
   try {
-    const { data, error } = await supabase
-      .from('pins')
-      .select('*')
-      .textSearch('fts_tokens', formattedQuery);
+    const { data: pins, error } = await supabase.from("pins").select("*");
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+    if (!query.trim()) return NextResponse.json({ pins: pins.slice(0, 30) });
+
+    if (!extractor) {
+      extractor = await pipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2");
     }
 
-    return NextResponse.json({ pins: data });
+    const queryResult = await extractor(query, { pooling: "mean", normalize: true });
+    const queryVector = Array.from(queryResult.data) as number[];
+
+    const scoredPins = await Promise.all(
+      pins.map(async (pin: any) => {
+        const brand = (pin.brand || "").toLowerCase();
+        const category = (pin.category || "").toLowerCase();
+        const description = (pin.description || "").toLowerCase();
+        const textToEmbed = `${brand} ${category} ${description}`;
+
+        // 1. œÓ‚ÂˇÂÏ ÚÓ˜ÌÓÂ ÒÓ‚Ô‡‰ÂÌËÂ ÒÎÓ‚ (“ÂÍÒÚÓ‚˚È ·ÛÒÚ)
+        const isExactMatch = description.includes(query) || brand.includes(query) || category.includes(query);
+
+        // 2. —˜ËÚ‡ÂÏ ‚ÂÍÚÓÌÓÂ ÒıÓ‰ÒÚ‚Ó
+        const pinResult = await extractor(textToEmbed, { pooling: "mean", normalize: true });
+        const pinVector = Array.from(pinResult.data) as number[];
+        let similarity = cosineSimilarity(queryVector, pinVector);
+
+        // ≈ÒÎË ÂÒÚ¸ ÚÓ˜ÌÓÂ ÒÓ‚Ô‡‰ÂÌËÂ ·ÛÍ‚ ó ËÒÍÛÒÒÚ‚ÂÌÌÓ Á‡‰Ë‡ÂÏ ‚ÂÒ ‚ ÚÓÔ
+        if (isExactMatch) similarity += 0.5;
+
+        return { ...pin, similarity };
+      })
+    );
+
+    // —ÓÚËÛÂÏ Ë ÓÚÒÂÍ‡ÂÏ ‚ÂÒ¸ ˇ‚Ì˚È ·Â‰ (ÔÓÓ„ ÚÂÔÂ¸ ‚˚¯Â, Ú‡Í Í‡Í Û ÚÓ˜Ì˚ı ÒÓ‚Ô‡‰ÂÌËÈ ‚ÂÒ > 0.8)
+    const sortedPins = scoredPins
+      .sort((a, b) => b.similarity - a.similarity)
+      .filter(pin => pin.similarity > 0.45);
+
+    return NextResponse.json({ pins: sortedPins });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
-

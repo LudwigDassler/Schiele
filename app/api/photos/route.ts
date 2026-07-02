@@ -8,65 +8,89 @@ const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY;
 const GOOGLE_CX = process.env.GOOGLE_CX;
 
 const categoryMap: Record<string, string> = {
-  \"All\": \"photography\", \"Nature\": \"nature\", \"City\": \"city street\",
-  \"Food\": \"food cuisine\", \"Travel\": \"travel destination\", \"Architecture\": \"architecture building\",
-  \"Fashion\": \"fashion style\", \"Art\": \"artwork painting\", \"Sports\": \"sports action\",
-  \"Interior\": \"interior design\", \"Animals\": \"animals wildlife\", \"Technology\": \"technology digital\",
-  \"Music\": \"music musician\", \"Cinema\": \"cinema film movie\", \"Photography\": \"photography portrait\", \"Beauty\": \"beauty makeup\",
+  "All": "photography",
+  "Nature": "nature",
+  "City": "city street",
+  "Food": "food cuisine",
+  "Travel": "travel destination",
+  "Architecture": "architecture building",
+  "Fashion": "fashion style",
+  "Art": "artwork painting",
+  "Sports": "sports action",
+  "Interior": "interior design",
+  "Animals": "animals wildlife",
+  "Technology": "technology digital",
+  "Music": "music musician",
+  "Cinema": "cinema film movie",
+  "Photography": "photography portrait",
+  "Beauty": "beauty makeup",
 };
 
 async function fetchGoogle(query: string, page: number) {
   try {
-    const start = ((page - 1) * 10) + 1;
+    const start = (page - 1) * 10 + 1;
     const res = await fetch(
-      https://www.googleapis.com/customsearch/v1?key=\&cx=\&q=\&searchType=image&num=10&start=\
+      `https://www.googleapis.com/customsearch/v1?key=${GOOGLE_API_KEY}&cx=${GOOGLE_CX}&q=${encodeURIComponent(query)}&searchType=image&num=10&start=${start}`
     );
     if (!res.ok) return [];
     const data = await res.json();
     return (data.items || []).map((p: any) => ({
-      id: \"g_\" + Math.random().toString(36).slice(2),
+      id: "g_" + Math.random().toString(36).slice(2),
       src: p.link,
       thumb: p.image?.thumbnailLink || p.link,
       title: p.title || query,
-      author: p.displayLink || \"Google\",
-      authorAvatar: \"\",
-      source: \"google\",
+      author: p.displayLink || "Google",
+      authorAvatar: "",
+      source: "google",
       link: p.image?.contextLink || p.link,
     }));
-  } catch { return []; }
+  } catch {
+    return [];
+  }
 }
 
 async function fetchWikipediaExact(query: string) {
   try {
-    const results = [];
+    const results: any[] = [];
 
-    const summaryRes = await fetch(https://en.wikipedia.org/api/rest_v1/page/summary/\);
+    // Главная страница
+    const summaryRes = await fetch(
+      `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(query)}`
+    );
     if (summaryRes.ok) {
       const summary = await summaryRes.json();
-      if (summary.thumbnail?.source && summary.type !== \"disambiguation\") {
+      if (summary.thumbnail?.source && summary.type !== "disambiguation") {
         results.push({
-          id: \"wiki_main_\" + summary.pageid,
+          id: "wiki_main_" + summary.pageid,
           src: summary.originalimage?.source || summary.thumbnail.source,
           thumb: summary.thumbnail.source,
           title: summary.title,
-          author: summary.description || \"Wikipedia\",
-          authorAvatar: \"\", source: \"wikipedia\",
-          link: summary.content_urls?.desktop?.page || \"\",
+          author: summary.description || "Wikipedia",
+          authorAvatar: "",
+          source: "wikipedia",
+          link: summary.content_urls?.desktop?.page || "",
         });
       }
     }
 
-    const imagesRes = await fetch(https://en.wikipedia.org/w/api.php?action=query&titles=\&prop=images&imlimit=30&format=json&origin=*);
+    // Изображения со страницы
+    const imagesRes = await fetch(
+      `https://en.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(query)}&prop=images&imlimit=30&format=json&origin=*`
+    );
     if (imagesRes.ok) {
       const imagesData = await imagesRes.json();
       const pages = Object.values(imagesData.query?.pages || {}) as any[];
-      const imageFiles = pages.flatMap((p: any) => p.images || [])
-        .filter((img: any) => !img.title.match(/\\.(svg|gif|ogg|webm|pdf|png)\$/i) || img.title.match(/\\.jpg\$/i) || img.title.match(/\\.jpeg\$/i))
+      const imageFiles = pages
+        .flatMap((p: any) => p.images || [])
+        .filter((img: any) => !img.title.match(/\.(svg|gif|ogg|webm|pdf|png)$/i) || img.title.match(/\.jpg$/i) || img.title.match(/\.jpeg$/i))
         .slice(0, 15);
 
       const infoPromises = imageFiles.map((imgFile: any) =>
-        fetch(https://en.wikipedia.org/w/api.php?action=query&titles=\&prop=imageinfo&iiprop=url&iiurlwidth=800&format=json&origin=*)
-          .then(r => r.json()).catch(() => null)
+        fetch(
+          `https://en.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(imgFile.title)}&prop=imageinfo&iiprop=url&iiurlwidth=800&format=json&origin=*`
+        )
+          .then((r) => r.json())
+          .catch(() => null)
       );
       const infoResults = await Promise.all(infoPromises);
 
@@ -75,121 +99,178 @@ async function fetchWikipediaExact(query: string) {
         const infoPages = Object.values(infoData.query?.pages || {}) as any[];
         for (const p of infoPages) {
           const info = p.imageinfo?.[0];
-          if (info?.url && info.url.match(/\\.(jpg|jpeg|png|webp)\$/i)) {
+          if (info?.url && info.url.match(/\.(jpg|jpeg|png|webp)$/i)) {
             results.push({
-              id: \"wiki_img_\" + p.pageid + \"_\" + Math.random(),
+              id: "wiki_img_" + p.pageid + "_" + Math.random(),
               src: info.thumburl || info.url,
               thumb: info.thumburl || info.url,
               title: query,
-              author: \"Wikipedia\",
-              authorAvatar: \"\", source: \"wikipedia\",
-              link: https://en.wikipedia.org/wiki/\,
+              author: "Wikipedia",
+              authorAvatar: "",
+              source: "wikipedia",
+              link: `https://en.wikipedia.org/wiki/${encodeURIComponent(query)}`,
             });
           }
         }
       }
     }
 
-    const commonsRes = await fetch(https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrsearch=\&gsrnamespace=6&gsrlimit=20&prop=imageinfo&iiprop=url|extmetadata&iiurlwidth=800&format=json&origin=*);
+    // Wikimedia Commons
+    const commonsRes = await fetch(
+      `https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent('"' + query + '"')}&gsrnamespace=6&gsrlimit=20&prop=imageinfo&iiprop=url|extmetadata&iiurlwidth=800&format=json&origin=*`
+    );
     if (commonsRes.ok) {
       const commonsData = await commonsRes.json();
       const pages = Object.values(commonsData.query?.pages || {}) as any[];
       for (const page of pages) {
         const info = page.imageinfo?.[0];
-        if (info?.url && !info.url.match(/\\.(svg|ogg|ogv|webm|pdf)\$/i)) {
+        if (info?.url && !info.url.match(/\.(svg|ogg|ogv|webm|pdf)$/i)) {
           results.push({
-            id: \"commons_\" + page.pageid,
-            src: info.url, thumb: info.thumburl || info.url,
-            title: info.extmetadata?.ObjectName?.value || page.title.replace(\"File:\", \"\"),
-            author: info.extmetadata?.Artist?.value?.replace(/<[^>]*>/g, \"\") || \"Wikimedia\",
-            authorAvatar: \"\", source: \"wikimedia\",
-            link: https://commons.wikimedia.org/wiki/\,
+            id: "commons_" + page.pageid,
+            src: info.url,
+            thumb: info.thumburl || info.url,
+            title: info.extmetadata?.ObjectName?.value || page.title.replace("File:", ""),
+            author: info.extmetadata?.Artist?.value?.replace(/<[^>]*>/g, "") || "Wikimedia",
+            authorAvatar: "",
+            source: "wikimedia",
+            link: `https://commons.wikimedia.org/wiki/${encodeURIComponent(page.title)}`,
           });
         }
       }
     }
 
     return results;
-  } catch { return []; }
+  } catch {
+    return [];
+  }
 }
 
 async function fetchLastFm(query: string) {
   try {
-    const res = await fetch(https://ws.audioscrobbler.com/2.0/?method=artist.search&artist=\&api_key=\&format=json&limit=10);
+    const res = await fetch(
+      `https://ws.audioscrobbler.com/2.0/?method=artist.search&artist=${encodeURIComponent(query)}&api_key=${LASTFM_KEY}&format=json&limit=10`
+    );
     if (!res.ok) return [];
     const data = await res.json();
     const artists = data.results?.artistmatches?.artist || [];
-    const results = [];
+    const results: any[] = [];
     for (const artist of artists) {
-      if (artist.image?.[3]?.[\"#text\"] && !artist.image[3][\"#text\"].includes(\"2a96cbd8b46e442fc41c2b86b821562f\")) {
+      if (artist.image?.[3]?.["#text"] && !artist.image[3]["#text"].includes("2a96cbd8b46e442fc41c2b86b821562f")) {
         results.push({
-          id: \"lfm_\" + artist.mbid + \"_\" + Math.random(),
-          src: artist.image[3][\"#text\"], thumb: artist.image[1][\"#text\"],
-          title: artist.name, author: \"Last.fm\",
-          authorAvatar: \"\", source: \"last.fm\", link: artist.url,
+          id: "lfm_" + artist.mbid + "_" + Math.random(),
+          src: artist.image[3]["#text"],
+          thumb: artist.image[1]["#text"],
+          title: artist.name,
+          author: "Last.fm",
+          authorAvatar: "",
+          source: "last.fm",
+          link: artist.url,
         });
       }
     }
     return results;
-  } catch { return []; }
+  } catch {
+    return [];
+  }
 }
 
 async function fetchMetMuseum(query: string) {
   try {
-    const searchRes = await fetch(https://collectionapi.metmuseum.org/public/collection/v1/search?q=\&hasImages=true);
+    const searchRes = await fetch(
+      `https://collectionapi.metmuseum.org/public/collection/v1/search?q=${encodeURIComponent(query)}&hasImages=true`
+    );
     if (!searchRes.ok) return [];
     const searchData = await searchRes.json();
     const ids = (searchData.objectIDs || []).slice(0, 10);
     const objects = await Promise.all(
-      ids.map((id: number) => fetch(https://collectionapi.metmuseum.org/public/collection/v1/objects/\).then(r => r.json()).catch(() => null))
+      ids.map((id: number) =>
+        fetch(`https://collectionapi.metmuseum.org/public/collection/v1/objects/${id}`)
+          .then((r) => r.json())
+          .catch(() => null)
+      )
     );
-    return objects.filter(o => o?.primaryImage).map((o: any) => ({
-      id: \"met_\" + o.objectID, src: o.primaryImage,
-      thumb: o.primaryImageSmall || o.primaryImage,
-      title: o.title || query, author: o.artistDisplayName || \"The Met\",
-      authorAvatar: \"\", source: \"met museum\", link: o.objectURL,
-    }));
-  } catch { return []; }
+    return objects
+      .filter((o) => o?.primaryImage)
+      .map((o: any) => ({
+        id: "met_" + o.objectID,
+        src: o.primaryImage,
+        thumb: o.primaryImageSmall || o.primaryImage,
+        title: o.title || query,
+        author: o.artistDisplayName || "The Met",
+        authorAvatar: "",
+        source: "met museum",
+        link: o.objectURL,
+      }));
+  } catch {
+    return [];
+  }
 }
 
 async function fetchUnsplash(query: string, page: number) {
   try {
-    const res = await fetch(https://api.unsplash.com/search/photos?query=\&per_page=20&page=\&client_id=\);
+    const res = await fetch(
+      `https://api.unsplash.com/search/photos?query=${encodeURIComponent(query)}&per_page=20&page=${page}&client_id=${UNSPLASH_KEY}`
+    );
     if (!res.ok) return [];
     const data = await res.json();
     return (data.results || []).map((p: any) => ({
-      id: \"u_\" + p.id, src: p.urls.regular, thumb: p.urls.small,
-      title: p.alt_description || query, author: p.user.name,
-      authorAvatar: p.user.profile_image.small, source: \"unsplash\", link: p.links.html,
+      id: "u_" + p.id,
+      src: p.urls.regular,
+      thumb: p.urls.small,
+      title: p.alt_description || query,
+      author: p.user.name,
+      authorAvatar: p.user.profile_image.small,
+      source: "unsplash",
+      link: p.links.html,
     }));
-  } catch { return []; }
+  } catch {
+    return [];
+  }
 }
 
 async function fetchPexels(query: string, page: number) {
   try {
-    const res = await fetch(https://api.pexels.com/v1/search?query=\&per_page=20&page=\,
-      { headers: { Authorization: PEXELS_KEY! } });
+    const res = await fetch(
+      `https://api.pexels.com/v1/search?query=${encodeURIComponent(query)}&per_page=20&page=${page}`,
+      { headers: { Authorization: PEXELS_KEY! } }
+    );
     if (!res.ok) return [];
     const data = await res.json();
     return (data.photos || []).map((p: any) => ({
-      id: \"p_\" + p.id, src: p.src.large, thumb: p.src.medium,
-      title: p.alt || query, author: p.photographer,
-      authorAvatar: \"\", source: \"pexels\", link: p.url,
+      id: "p_" + p.id,
+      src: p.src.large,
+      thumb: p.src.medium,
+      title: p.alt || query,
+      author: p.photographer,
+      authorAvatar: "",
+      source: "pexels",
+      link: p.url,
     }));
-  } catch { return []; }
+  } catch {
+    return [];
+  }
 }
 
 async function fetchPixabay(query: string, page: number) {
   try {
-    const res = await fetch(https://pixabay.com/api/?key=\&q=\&per_page=20&page=\&image_type=all&safesearch=true);
+    const res = await fetch(
+      `https://pixabay.com/api/?key=${PIXABAY_KEY}&q=${encodeURIComponent(query)}&per_page=20&page=${page}&image_type=all&safesearch=true`
+    );
     if (!res.ok) return [];
     const data = await res.json();
     return (data.hits || []).map((p: any) => ({
-      id: \"px_\" + p.id, src: p.largeImageURL, thumb: p.previewURL,
-      title: p.tags || query, author: p.user,
-      authorAvatar: p.userImageURL || \"\", source: \"pixabay\", link: p.pageURL,
+      id: "px_" + p.id,
+      src: p.largeImageURL,
+      thumb: p.previewURL,
+      title: p.tags || query,
+      author: p.user,
+      authorAvatar: p.userImageURL || "",
+      source: "pixabay",
+      link: p.pageURL,
     }));
-  } catch { return []; }
+  } catch {
+    return [];
+  }
 }
 
 function shuffle(arr: any[]) {
@@ -202,10 +283,10 @@ function shuffle(arr: any[]) {
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
-  const category = searchParams.get(\"category\") || \"All\";
-  const customQuery = searchParams.get(\"query\");
-  const query = customQuery || categoryMap[category] || \"photography\";
-  const page = parseInt(searchParams.get(\"page\") || \"1\");
+  const category = searchParams.get("category") || "All";
+  const customQuery = searchParams.get("query");
+  const query = customQuery || categoryMap[category] || "photography";
+  const page = parseInt(searchParams.get("page") || "1");
   const isSearch = !!customQuery;
 
   let results: any[][] = [];
@@ -221,13 +302,11 @@ export async function GET(req: NextRequest) {
       fetchPixabay(query, page),
     ]);
 
-    // 🔥 ТОЧНЫЕ ИСТОЧНИКИ ПЕРВЫМИ
     const precise = [...google, ...wiki, ...lastfm, ...met];
     const general = shuffle([...unsplash, ...pexels, ...pixabay]);
 
-    // Если точных мало — добавляем общие, но точные всегда сверху
-    const combined = precise.length > 0 
-      ? [...precise, ...general.slice(0, 20)] 
+    const combined = precise.length > 0
+      ? [...precise, ...general.slice(0, 20)]
       : general;
 
     results = [combined];
@@ -237,12 +316,12 @@ export async function GET(req: NextRequest) {
       fetchPexels(query, page),
       fetchPixabay(query, page),
     ]);
-    const extra = category === \"Art\" ? await fetchMetMuseum(query) : [];
-    const music = category === \"Music\" ? await fetchLastFm(query) : [];
+    const extra = category === "Art" ? await fetchMetMuseum(query) : [];
+    const music = category === "Music" ? await fetchLastFm(query) : [];
     results = [shuffle([...unsplash, ...pexels, ...pixabay, ...extra, ...music])];
   }
 
-  const photos = results.flat().filter(p => p?.src && p.src.startsWith(\"http\"));
+  const photos = results.flat().filter((p) => p?.src && p.src.startsWith("http"));
 
   return NextResponse.json({ photos });
 }

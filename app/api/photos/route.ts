@@ -15,15 +15,16 @@ const categoryMap: Record<string, string> = {
   "Music": "music musician", "Cinema": "cinema film movie", "Photography": "photography portrait", "Beauty": "beauty makeup",
 };
 
-async function fetchGoogle(query: string, start: number = 1) {
+async function fetchGoogle(query: string, page: number) {
   try {
+    const start = ((page - 1) * 10) + 1;
     const res = await fetch(
-      `https://www.googleapis.com/customsearch/v1?key=${GOOGLE_API_KEY}&cx=${GOOGLE_CX}&q=${encodeURIComponent(query)}&searchType=image&num=10&start=${start}&safe=active`
+      `https://www.googleapis.com/customsearch/v1?key=${GOOGLE_API_KEY}&cx=${GOOGLE_CX}&q=${encodeURIComponent(query)}&searchType=image&num=10&start=${start}`
     );
     if (!res.ok) return [];
     const data = await res.json();
     return (data.items || []).map((p: any) => ({
-      id: "g_" + encodeURIComponent(p.link).slice(0, 20) + "_" + Math.random(),
+      id: "g_" + Math.random().toString(36).slice(2),
       src: p.link,
       thumb: p.image?.thumbnailLink || p.link,
       title: p.title || query,
@@ -35,43 +36,83 @@ async function fetchGoogle(query: string, start: number = 1) {
   } catch { return []; }
 }
 
-async function fetchUnsplash(query: string, page: number) {
+async function fetchWikipediaExact(query: string) {
   try {
-    const res = await fetch(`https://api.unsplash.com/search/photos?query=${encodeURIComponent(query)}&per_page=15&page=${page}&client_id=${UNSPLASH_KEY}`);
-    if (!res.ok) return [];
-    const data = await res.json();
-    return (data.results || []).map((p: any) => ({
-      id: "u_" + p.id, src: p.urls.regular, thumb: p.urls.small,
-      title: p.alt_description || query, author: p.user.name,
-      authorAvatar: p.user.profile_image.small, source: "unsplash", link: p.links.html,
-    }));
-  } catch { return []; }
-}
+    const results = [];
 
-async function fetchPexels(query: string, page: number) {
-  try {
-    const res = await fetch(`https://api.pexels.com/v1/search?query=${encodeURIComponent(query)}&per_page=15&page=${page}`,
-      { headers: { Authorization: PEXELS_KEY! } });
-    if (!res.ok) return [];
-    const data = await res.json();
-    return (data.photos || []).map((p: any) => ({
-      id: "p_" + p.id, src: p.src.large, thumb: p.src.medium,
-      title: p.alt || query, author: p.photographer,
-      authorAvatar: "", source: "pexels", link: p.url,
-    }));
-  } catch { return []; }
-}
+    // Главная страница
+    const summaryRes = await fetch(`https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(query)}`);
+    if (summaryRes.ok) {
+      const summary = await summaryRes.json();
+      if (summary.thumbnail?.source && summary.type !== "disambiguation") {
+        results.push({
+          id: "wiki_main_" + summary.pageid,
+          src: summary.originalimage?.source || summary.thumbnail.source,
+          thumb: summary.thumbnail.source,
+          title: summary.title,
+          author: summary.description || "Wikipedia",
+          authorAvatar: "", source: "wikipedia",
+          link: summary.content_urls?.desktop?.page || "",
+        });
+      }
+    }
 
-async function fetchPixabay(query: string, page: number) {
-  try {
-    const res = await fetch(`https://pixabay.com/api/?key=${PIXABAY_KEY}&q=${encodeURIComponent(query)}&per_page=15&page=${page}&image_type=all&safesearch=true`);
-    if (!res.ok) return [];
-    const data = await res.json();
-    return (data.hits || []).map((p: any) => ({
-      id: "px_" + p.id, src: p.largeImageURL, thumb: p.previewURL,
-      title: p.tags || query, author: p.user,
-      authorAvatar: p.userImageURL || "", source: "pixabay", link: p.pageURL,
-    }));
+    // Все изображения со страницы Wikipedia
+    const imagesRes = await fetch(`https://en.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(query)}&prop=images&imlimit=30&format=json&origin=*`);
+    if (imagesRes.ok) {
+      const imagesData = await imagesRes.json();
+      const pages = Object.values(imagesData.query?.pages || {}) as any[];
+      const imageFiles = pages.flatMap((p: any) => p.images || [])
+        .filter((img: any) => !img.title.match(/\.(svg|gif|ogg|webm|pdf|png)$/i) || img.title.match(/\.jpg$/i) || img.title.match(/\.jpeg$/i))
+        .slice(0, 15);
+
+      const infoPromises = imageFiles.map((imgFile: any) =>
+        fetch(`https://en.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(imgFile.title)}&prop=imageinfo&iiprop=url&iiurlwidth=800&format=json&origin=*`)
+          .then(r => r.json()).catch(() => null)
+      );
+      const infoResults = await Promise.all(infoPromises);
+
+      for (const infoData of infoResults) {
+        if (!infoData) continue;
+        const infoPages = Object.values(infoData.query?.pages || {}) as any[];
+        for (const p of infoPages) {
+          const info = p.imageinfo?.[0];
+          if (info?.url && info.url.match(/\.(jpg|jpeg|png|webp)$/i)) {
+            results.push({
+              id: "wiki_img_" + p.pageid + "_" + Math.random(),
+              src: info.thumburl || info.url,
+              thumb: info.thumburl || info.url,
+              title: query,
+              author: "Wikipedia",
+              authorAvatar: "", source: "wikipedia",
+              link: `https://en.wikipedia.org/wiki/${encodeURIComponent(query)}`,
+            });
+          }
+        }
+      }
+    }
+
+    // Wikimedia Commons — точный поиск в кавычках
+    const commonsRes = await fetch(`https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent('"' + query + '"')}&gsrnamespace=6&gsrlimit=20&prop=imageinfo&iiprop=url|extmetadata&iiurlwidth=800&format=json&origin=*`);
+    if (commonsRes.ok) {
+      const commonsData = await commonsRes.json();
+      const pages = Object.values(commonsData.query?.pages || {}) as any[];
+      for (const page of pages) {
+        const info = page.imageinfo?.[0];
+        if (info?.url && !info.url.match(/\.(svg|ogg|ogv|webm|pdf)$/i)) {
+          results.push({
+            id: "commons_" + page.pageid,
+            src: info.url, thumb: info.thumburl || info.url,
+            title: info.extmetadata?.ObjectName?.value || page.title.replace("File:", ""),
+            author: info.extmetadata?.Artist?.value?.replace(/<[^>]*>/g, "") || "Wikimedia",
+            authorAvatar: "", source: "wikimedia",
+            link: `https://commons.wikimedia.org/wiki/${encodeURIComponent(page.title)}`,
+          });
+        }
+      }
+    }
+
+    return results;
   } catch { return []; }
 }
 
@@ -114,44 +155,43 @@ async function fetchMetMuseum(query: string) {
   } catch { return []; }
 }
 
-async function fetchWikipediaExact(query: string) {
+async function fetchUnsplash(query: string, page: number) {
   try {
-    const results = [];
-    const summaryRes = await fetch(`https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(query)}`);
-    if (summaryRes.ok) {
-      const summary = await summaryRes.json();
-      if (summary.thumbnail?.source && summary.type !== "disambiguation") {
-        results.push({
-          id: "wiki_main_" + summary.pageid,
-          src: summary.originalimage?.source || summary.thumbnail.source,
-          thumb: summary.thumbnail.source,
-          title: summary.title,
-          author: summary.description || "Wikipedia",
-          authorAvatar: "", source: "wikipedia",
-          link: summary.content_urls?.desktop?.page || "",
-        });
-      }
-    }
+    const res = await fetch(`https://api.unsplash.com/search/photos?query=${encodeURIComponent(query)}&per_page=20&page=${page}&client_id=${UNSPLASH_KEY}`);
+    if (!res.ok) return [];
+    const data = await res.json();
+    return (data.results || []).map((p: any) => ({
+      id: "u_" + p.id, src: p.urls.regular, thumb: p.urls.small,
+      title: p.alt_description || query, author: p.user.name,
+      authorAvatar: p.user.profile_image.small, source: "unsplash", link: p.links.html,
+    }));
+  } catch { return []; }
+}
 
-    const commonsRes = await fetch(`https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent('"' + query + '"')}&gsrnamespace=6&gsrlimit=15&prop=imageinfo&iiprop=url|extmetadata&iiurlwidth=800&format=json&origin=*`);
-    if (commonsRes.ok) {
-      const commonsData = await commonsRes.json();
-      const pages = Object.values(commonsData.query?.pages || {}) as any[];
-      for (const page of pages) {
-        const info = page.imageinfo?.[0];
-        if (info?.url && !info.url.match(/\.(svg|ogg|ogv|webm|pdf)$/i)) {
-          results.push({
-            id: "commons_" + page.pageid,
-            src: info.url, thumb: info.thumburl || info.url,
-            title: info.extmetadata?.ObjectName?.value || page.title.replace("File:", ""),
-            author: info.extmetadata?.Artist?.value?.replace(/<[^>]*>/g, "") || "Wikimedia",
-            authorAvatar: "", source: "wikimedia",
-            link: `https://commons.wikimedia.org/wiki/${encodeURIComponent(page.title)}`,
-          });
-        }
-      }
-    }
-    return results;
+async function fetchPexels(query: string, page: number) {
+  try {
+    const res = await fetch(`https://api.pexels.com/v1/search?query=${encodeURIComponent(query)}&per_page=20&page=${page}`,
+      { headers: { Authorization: PEXELS_KEY! } });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return (data.photos || []).map((p: any) => ({
+      id: "p_" + p.id, src: p.src.large, thumb: p.src.medium,
+      title: p.alt || query, author: p.photographer,
+      authorAvatar: "", source: "pexels", link: p.url,
+    }));
+  } catch { return []; }
+}
+
+async function fetchPixabay(query: string, page: number) {
+  try {
+    const res = await fetch(`https://pixabay.com/api/?key=${PIXABAY_KEY}&q=${encodeURIComponent(query)}&per_page=20&page=${page}&image_type=all&safesearch=true`);
+    if (!res.ok) return [];
+    const data = await res.json();
+    return (data.hits || []).map((p: any) => ({
+      id: "px_" + p.id, src: p.largeImageURL, thumb: p.previewURL,
+      title: p.tags || query, author: p.user,
+      authorAvatar: p.userImageURL || "", source: "pixabay", link: p.pageURL,
+    }));
   } catch { return []; }
 }
 
@@ -170,31 +210,43 @@ export async function GET(req: NextRequest) {
   const query = customQuery || categoryMap[category] || "photography";
   const page = parseInt(searchParams.get("page") || "1");
   const isSearch = !!customQuery;
-  const googleStart = ((page - 1) * 10) + 1;
 
-  const sources: Promise<any[]>[] = [];
+  let results: any[][] = [];
 
   if (isSearch) {
-    // При поиске — Google главный + остальные дополняют
-    sources.push(fetchGoogle(query, googleStart));
-    sources.push(fetchGoogle(query + " photo", googleStart));
-    sources.push(fetchWikipediaExact(query));
-    sources.push(fetchLastFm(query));
-    sources.push(fetchUnsplash(query, page));
-    sources.push(fetchPexels(query, page));
-    sources.push(fetchPixabay(query, page));
-    sources.push(fetchMetMuseum(query));
+    // При поиске — сначала Google (точный), потом Wikipedia, потом остальные
+    const [google, wiki, lastfm, met, unsplash, pexels, pixabay] = await Promise.all([
+      fetchGoogle(query, page),
+      fetchWikipediaExact(query),
+      fetchLastFm(query),
+      fetchMetMuseum(query),
+      fetchUnsplash(query, page),
+      fetchPexels(query, page),
+      fetchPixabay(query, page),
+    ]);
+
+    // Google и Wikipedia идут первыми — они точнее
+    const precise = [...google, ...wiki, ...lastfm, ...met];
+    const general = shuffle([...unsplash, ...pexels, ...pixabay]);
+
+    // Если точных результатов мало — добавляем общие
+    const combined = precise.length >= 10
+      ? [...precise, ...general]
+      : [...precise, ...general];
+
+    results = [combined];
   } else {
-    // Категории — стандартные источники
-    sources.push(fetchUnsplash(query, page));
-    sources.push(fetchPexels(query, page));
-    sources.push(fetchPixabay(query, page));
-    if (category === "Art") sources.push(fetchMetMuseum(query));
-    if (category === "Music") sources.push(fetchLastFm(query));
+    const [unsplash, pexels, pixabay] = await Promise.all([
+      fetchUnsplash(query, page),
+      fetchPexels(query, page),
+      fetchPixabay(query, page),
+    ]);
+    const extra = category === "Art" ? await fetchMetMuseum(query) : [];
+    const music = category === "Music" ? await fetchLastFm(query) : [];
+    results = [shuffle([...unsplash, ...pexels, ...pixabay, ...extra, ...music])];
   }
 
-  const results = await Promise.all(sources);
-  const mixed = shuffle(results.flat().filter(p => p?.src && p.src.startsWith("http")));
+  const photos = results.flat().filter(p => p?.src && p.src.startsWith("http"));
 
-  return NextResponse.json({ photos: mixed });
+  return NextResponse.json({ photos });
 }

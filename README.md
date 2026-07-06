@@ -1,4 +1,47 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 🎨 Schiele — Pinterest-inspired Image Board
+
+**Schiele** — это веб-приложение для поиска, сохранения и организации визуального контента: фотографий, мемов, произведений искусства, музыкантов, 
+знаменитостей и исторических изображений. Проект вдохновлён Pinterest, но с упором на культуру, искусство и креативный контент.
+
+---
+
+## 🚀 Демо
+
+🔗 **Живой сайт:** [https://schiele.onrender.com](https://schiele.onrender.com)
+
+---
+
+## ✨ Возможности
+
+- 🔍 **Умный поиск** — по Wikipedia, Wikimedia Commons, Last.fm, The Met Museum и другим источникам
+- 🖼 **Masonry-лента** — как в Pinterest
+- 📌 **Сохранение в доски** — создавай свои коллекции
+- 🔐 **Авторизация** — через Supabase (email + Google OAuth)
+- 🎵 **Музыка** — поиск артистов через Last.fm API
+- 🎨 **Искусство** — интеграция с Met Museum и Rijksmuseum
+- 📱 **Адаптивный дизайн** — работает на всех устройствах
+- 🧪 **Автотесты** — 15+ тестов с Vitest
+
+---
+
+## 🛠 Технологии
+
+| Компонент | Технология |
+|-----------|------------|
+| **Фронтенд** | Next.js 16 (App Router), React, TypeScript |
+| **Стили** | CSS-in-JS, адаптивный masonry-grid |
+| **База данных** | Supabase (PostgreSQL) |
+| **Авторизация** | Supabase Auth (Email + Google) |
+| **API** | Next.js API Routes |
+| **Тесты** | Vitest + React Testing Library |
+| **Деплой** | Render |
+| **Источники контента** | Unsplash, Pexels, Pixabay, Last.fm, Wikipedia, Wikimedia Commons, Met Museum, Rijksmuseum, Imgflip |
+
+---
+
+## 📂 Структура проекта
+This is a 
+[Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
 ## Getting Started
 

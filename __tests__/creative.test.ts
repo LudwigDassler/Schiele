@@ -17,4 +17,11 @@ describe('Creative API', () => {
     const data = await res.json();
     expect(data).toHaveProperty('photos');
   });
+
+  it('GET /api/creative with invalid category returns error', async () => {
+    const res = await fetch(`${BASE_URL}/api/creative?category=invalid&page=1`);
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data).toHaveProperty('photos');
+  });
 });

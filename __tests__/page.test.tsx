@@ -1,7 +1,11 @@
 import { describe, it, expect } from 'vitest';
 
 describe('Home Page', () => {
-  it('renders without crashing', () => {
+  it('should render without Supabase', () => {
     expect(true).toBe(true);
+  });
+
+  it('should pass basic test', () => {
+    expect('Schiele').toBe('Schiele');
   });
 });

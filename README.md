@@ -1,79 +1,95 @@
-# 🎨 Schiele — Pinterest-inspired Image Board
+# Schiele — Pinterest-style Image Board
 
-**Schiele** — это веб-приложение для поиска, сохранения и организации визуального контента: фотографий, мемов, произведений искусства, музыкантов, 
-знаменитостей и исторических изображений. Проект вдохновлён Pinterest, но с упором на культуру, искусство и креативный контент.
+Schiele is a web application for discovering, saving, and organizing visual content: photographs, memes, artworks, musicians, celebrities, and historical 
+images. The project is inspired by Pinterest but focuses on culture, art, and creative content.
 
----
+## Demo
 
-## 🚀 Демо
+Live site: [https://schiele.onrender.com](https://schiele.onrender.com)
 
-🔗 **Живой сайт:** [https://schiele.onrender.com](https://schiele.onrender.com)
+## Features
 
----
+- Smart search across Wikipedia, Wikimedia Commons, Last.fm, and The Met Museum
+- Masonry grid layout for image discovery
+- Board-based pin saving and organization
+- Authentication via Supabase (email + Google OAuth)
+- Music discovery via Last.fm API
+- Art integration with Met Museum and Rijksmuseum
+- Fully responsive design
+- Automated test suite with 46 passing tests
 
-## ✨ Возможности
+## Technology Stack
 
-- 🔍 **Умный поиск** — по Wikipedia, Wikimedia Commons, Last.fm, The Met Museum и другим источникам
-- 🖼 **Masonry-лента** — как в Pinterest
-- 📌 **Сохранение в доски** — создавай свои коллекции
-- 🔐 **Авторизация** — через Supabase (email + Google OAuth)
-- 🎵 **Музыка** — поиск артистов через Last.fm API
-- 🎨 **Искусство** — интеграция с Met Museum и Rijksmuseum
-- 📱 **Адаптивный дизайн** — работает на всех устройствах
-- 🧪 **Автотесты** — 15+ тестов с Vitest
-
----
-
-## 🛠 Технологии
-
-| Компонент | Технология |
+| Component | Technology |
 |-----------|------------|
-| **Фронтенд** | Next.js 16 (App Router), React, TypeScript |
-| **Стили** | CSS-in-JS, адаптивный masonry-grid |
-| **База данных** | Supabase (PostgreSQL) |
-| **Авторизация** | Supabase Auth (Email + Google) |
-| **API** | Next.js API Routes |
-| **Тесты** | Vitest + React Testing Library |
-| **Деплой** | Render |
-| **Источники контента** | Unsplash, Pexels, Pixabay, Last.fm, Wikipedia, Wikimedia Commons, Met Museum, Rijksmuseum, Imgflip |
+| Frontend | Next.js 16 (App Router), React, TypeScript |
+| Styling | CSS-in-JS, responsive masonry grid |
+| Database | Supabase (PostgreSQL) |
+| Authentication | Supabase Auth (Email + Google) |
+| API Layer | Next.js API Routes |
+| Testing | Vitest + React Testing Library |
+| Deployment | Render |
+| Content Sources | Unsplash, Pexels, Pixabay, Last.fm, Wikipedia, Wikimedia Commons, Met Museum, Rijksmuseum, Imgflip |
 
----
+## Project Structure
+`# Schiele — Pinterest-style Image Board
 
-## 📂 Структура проекта
-This is a 
-[Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+Schiele is a web application for discovering, saving, and organizing visual content: photographs, memes, artworks, musicians, celebrities, and historical 
+images. The project is inspired by Pinterest but focuses on culture, art, and creative content.
 
-## Getting Started
+Demo: https://schiele.onrender.com
 
-First, run the development server:
+Features: smart search across Wikipedia, Wikimedia Commons, Last.fm, and The Met Museum. Masonry grid layout. Board-based pin saving. Authentication via 
+Supabase (email + Google OAuth). Music discovery via Last.fm API. Art integration with Met Museum and Rijksmuseum. Fully responsive design. 46 automated tests.
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+Tech stack: Next.js 16 (App Router), React, TypeScript, CSS-in-JS, Supabase (PostgreSQL), Vitest, Render.
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Project structure: app/ (api/auth, api/boards, api/creative, api/photos, api/pins, api/search, api/user, auth/, profile/), components/, lib/, tests/, public/.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Testing: 46 tests covering API endpoints, search, creative content, boards, pins, auth, profile, UI components. Run with npm test.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Setup: git clone https://github.com/LudwigDassler/Schiele.git, cd Schiele, npm install, cp .env.example .env.local, npm run dev.
 
-## Learn More
+Environment variables: NEXT_PUBLIC_UNSPLASH_ACCESS_KEY, NEXT_PUBLIC_PEXELS_API_KEY, NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY, 
+NEXT_PUBLIC_LASTFM_API_KEY, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET.
 
-To learn more about Next.js, take a look at the following resources:
+Author: LudwigDassler (https://github.com/LudwigDassler). License: MIT.``# Schiele — Pinterest-style Image Board
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Schiele is a web application for discovering, saving, and organizing visual content: photographs, memes, artworks, musicians, celebrities, and historical 
+images. The project is inspired by Pinterest but focuses on culture, art, and creative content.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Demo: https://schiele.onrender.com
 
-## Deploy on Vercel
+Features: smart search across Wikipedia, Wikimedia Commons, Last.fm, and The Met Museum. Masonry grid layout. Board-based pin saving. Authentication via 
+Supabase (email + Google OAuth). Music discovery via Last.fm API. Art integration with Met Museum and Rijksmuseum. Fully responsive design. 46 automated tests.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Tech stack: Next.js 16 (App Router), React, TypeScript, CSS-in-JS, Supabase (PostgreSQL), Vitest, Render.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Project structure: app/ (api/auth, api/boards, api/creative, api/photos, api/pins, api/search, api/user, auth/, profile/), components/, lib/, tests/, public/.
+
+Testing: 46 tests covering API endpoints, search, creative content, boards, pins, auth, profile, UI components. Run with npm test.
+
+Setup: git clone https://github.com/LudwigDassler/Schiele.git, cd Schiele, npm install, cp .env.example .env.local, npm run dev.
+
+`# Schiele — Pinterest-style Image Board
+
+Schiele is a web application for discovering, saving, and organizing visual content: photographs, memes, artworks, musicians, celebrities, and historical images. 
+The project is inspired by Pinterest but focuses on culture, art, and creative content.
+
+Demo: https://schiele.onrender.com
+
+Features: smart search across Wikipedia, Wikimedia Commons, Last.fm, and The Met Museum. Masonry grid layout. Board-based pin saving. Authentication via Supabase 
+(email + Google OAuth). Music discovery via Last.fm API. Art integration with Met Museum and Rijksmuseum. Fully responsive design. 46 automated tests.
+
+Tech stack: Next.js 16 (App Router), React, TypeScript, CSS-in-JS, Supabase (PostgreSQL), Vitest, Render.
+
+Project structure: app/ (api/auth, api/boards, api/creative, api/photos, api/pins, api/search, api/user, auth/, profile/), components/, lib/, tests/, public/.
+
+Testing: 46 tests covering API endpoints, search, creative content, boards, pins, auth, profile, UI components. Run with npm test.
+
+Setup: git clone https://github.com/LudwigDassler/Schiele.git, cd Schiele, npm install, cp .env.example .env.local, npm run dev.
+
+Environment variables: NEXT_PUBLIC_UNSPLASH_ACCESS_KEY, NEXT_PUBLIC_PEXELS_API_KEY, NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY, 
+NEXT_PUBLIC_LASTFM_API_KEY, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET.
+
+Author: LudwigDassler (https://github.com/LudwigDassler). License: MIT.`

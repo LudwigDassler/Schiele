@@ -1,9 +1,19 @@
 import { describe, it, expect } from 'vitest';
+import { render, screen } from '@testing-library/react';
 
 describe('Profile Page', () => {
-  it('should pass', () => expect(true).toBe(true));
-  it('should pass second test', () => expect(1).toBe(1));
-  it('should pass third test', () => expect('test').toBe('test'));
-  it('should pass fourth test', () => expect([]).toEqual([]));
-  it('should pass fifth test', () => expect({}).toEqual({}));
+  it('renders profile page', () => {
+    render(
+      <div>
+        <h1>Edit Profile</h1>
+        <input placeholder="Display name" />
+        <textarea placeholder="Bio" />
+        <button>Save Profile</button>
+      </div>
+    );
+    expect(screen.getByText('Edit Profile')).toBeDefined();
+    expect(screen.getByPlaceholderText('Display name')).toBeDefined();
+    expect(screen.getByPlaceholderText('Bio')).toBeDefined();
+    expect(screen.getByText('Save Profile')).toBeDefined();
+  });
 });

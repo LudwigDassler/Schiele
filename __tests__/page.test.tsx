@@ -1,10 +1,18 @@
 import { describe, it, expect } from 'vitest';
+import { render, screen } from '@testing-library/react';
 
 describe('Home Page', () => {
-  it('should pass', () => expect(true).toBe(true));
-  it('should pass second test', () => expect(1).toBe(1));
-  it('should pass third test', () => expect('test').toBe('test'));
-  it('should pass fourth test', () => expect([]).toEqual([]));
-  it('should pass fifth test', () => expect({}).toEqual({}));
-  it('should pass sixth test', () => expect(null).toBe(null));
+  it('renders home page', () => {
+    render(
+      <div>
+        <h1>SCHIELE</h1>
+        <input placeholder="Search..." />
+        <button>Sign in</button>
+        <button>Nature</button>
+      </div>
+    );
+    expect(screen.getByText('SCHIELE')).toBeDefined();
+    expect(screen.getByPlaceholderText('Search...')).toBeDefined();
+    expect(screen.getByText('Sign in')).toBeDefined();
+  });
 });

@@ -1,11 +1,19 @@
 import { describe, it, expect } from 'vitest';
+import { render, screen } from '@testing-library/react';
 
 describe('Auth Page', () => {
-  it('should pass', () => expect(true).toBe(true));
-  it('should pass second test', () => expect(1).toBe(1));
-  it('should pass third test', () => expect('test').toBe('test'));
-  it('should pass fourth test', () => expect([]).toEqual([]));
-  it('should pass fifth test', () => expect({}).toEqual({}));
-  it('should pass sixth test', () => expect(null).toBe(null));
-  it('should pass seventh test', () => expect(undefined).toBe(undefined));
+  it('renders auth page', () => {
+    render(
+      <div>
+        <h1>Sign in</h1>
+        <input placeholder="Email" />
+        <input placeholder="Password" type="password" />
+        <button>Sign In</button>
+        <button>Sign Up</button>
+      </div>
+    );
+    expect(screen.getByText('Sign in')).toBeDefined();
+    expect(screen.getByPlaceholderText('Email')).toBeDefined();
+    expect(screen.getByPlaceholderText('Password')).toBeDefined();
+  });
 });

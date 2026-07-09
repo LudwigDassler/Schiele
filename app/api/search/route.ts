@@ -1,65 +1,57 @@
-﻿import { NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 
-const token = process.env.PINTEREST_ACCESS_TOKEN;
+const SUPABASE_URL = "https://kefdjxsmyarwfqqkfgcx.supabase.co";
+const SUPABASE_KEY = "sb_publishable_DHa5G0bhPLWJWNrACLVEUw_2GZS4BMc";
 
+// === ПОИСК В SUPABASE ===
+async function searchSupabase(query: string) {
+  try {
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/images?title=ilike.%${query}%&select=*`,
+      {
+        headers: {
+          "apikey": SUPABASE_KEY,
+          "Authorization": `Bearer ${SUPABASE_KEY}`,
+        },
+      }
+    );
+    
+    if (!res.ok) return [];
+    const data = await res.json();
+    
+    return data.map((item: any) => ({
+      id: item.id,
+      src: item.src,
+      thumb: item.src,
+      title: item.title,
+      author: item.author || 'Schiele DB',
+      authorAvatar: '',
+      source: 'Schiele',
+      link: '',
+      description: `Category: ${item.category}`,
+    }));
+  } catch {
+    return [];
+  }
+}
+
+// === ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ДЛЯ WIKIPEDIA ===
 async function searchWikipedia(query: string) {
-  const url = 'https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=' + encodeURIComponent(query) + '&format=json&origin=*&srlimit=15';
+  const url = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&format=json&origin=*&srlimit=15`;
   const res = await fetch(url);
   const data = await res.json();
   return data.query?.search || [];
 }
 
 async function getWikipediaDetails(pageId: number) {
-  const url = 'https://en.wikipedia.org/w/api.php?action=query&prop=extracts|pageimages&exintro=true&explaintext=true&pithumbsize=400&pageids=' + pageId + '&format=json&origin=*';
+  const url = `https://en.wikipedia.org/w/api.php?action=query&prop=extracts|pageimages&exintro=true&explaintext=true&pithumbsize=400&pageids=${pageId}&format=json&origin=*`;
   const res = await fetch(url);
   const data = await res.json();
   const pages = data.query?.pages || {};
   return pages[pageId] || null;
 }
 
-async function searchWikimediaCommons(query: string) {
-  const url = 'https://commons.wikimedia.org/w/api.php?action=query&list=search&srsearch=' + encodeURIComponent(query) + '&srwhat=image&srlimit=10&format=json&origin=*';
-  const res = await fetch(url);
-  const data = await res.json();
-  const results = data.query?.search || [];
-  return results.map(function(item: any) {
-    return {
-      id: item.pageid,
-      title: item.title,
-      url: 'https://commons.wikimedia.org/wiki/Special:FilePath/' + item.title.replace(/ /g, '_'),
-      thumb: 'https://commons.wikimedia.org/wiki/Special:FilePath/' + item.title.replace(/ /g, '_') + '?width=200',
-      link: 'https://commons.wikimedia.org/wiki/' + item.title.replace(/ /g, '_'),
-    };
-  });
-}
-
-async function searchPinterest(query: string) {
-  if (!token) return [];
-  try {
-    const res = await fetch(
-      'https://api.pinterest.com/v5/search/pins?query=' + encodeURIComponent(query) + '&limit=10',
-      {
-        headers: { 'Authorization': 'Bearer ' + token },
-      }
-    );
-    if (!res.ok) return [];
-    const data = await res.json();
-    return (data.items || []).map(function(item: any) {
-      return {
-        id: 'pinterest_' + item.id,
-        title: item.title || query,
-        url: item.media?.images?.originals?.url || '',
-        thumb: item.media?.images?.originals?.url || '',
-        link: item.link || '',
-        source: 'Pinterest',
-        author: item.owner?.username || 'Pinterest',
-      };
-    });
-  } catch {
-    return [];
-  }
-}
-
+// === ГЛАВНАЯ ФУНКЦИЯ ===
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const query = searchParams.get('q') || '';
@@ -69,75 +61,44 @@ export async function GET(request: Request) {
   }
 
   try {
-    const [wikiResults, commonsResults, pinterestResults] = await Promise.all([
-      searchWikipedia(query),
-      searchWikimediaCommons(query),
-      searchPinterest(query),
-    ]);
-
+    // 1. Ищем в Supabase
+    const supabaseResults = await searchSupabase(query);
+    
+    // 2. Ищем в Wikipedia
+    const wikiResults = await searchWikipedia(query);
     const enriched = await Promise.all(
-      wikiResults.slice(0, 10).map(async function(item: any) {
+      wikiResults.slice(0, 10).map(async (item: any) => {
         const details = await getWikipediaDetails(item.pageid);
         return {
-          id: 'wiki_' + item.pageid,
+          id: `wiki_${item.pageid}`,
           title: item.title,
           description: details?.extract || '',
           image: details?.thumbnail?.source || '',
-          pageUrl: 'https://en.wikipedia.org/?curid=' + item.pageid,
+          pageUrl: `https://en.wikipedia.org/?curid=${item.pageid}`,
           source: 'Wikipedia',
         };
       })
     );
 
-    var commons = commonsResults.map(function(item: any) {
-      return {
-        id: 'commons_' + item.id,
-        src: item.url,
-        thumb: item.thumb,
-        title: item.title,
-        author: 'Wikimedia Commons',
-        authorAvatar: '',
-        source: 'Commons',
-        link: item.link,
-        description: '',
-      };
-    });
+    const wikiPhotos = enriched.map((item: any) => ({
+      id: item.id,
+      src: item.image || `https://ui-avatars.com/api/?name=${encodeURIComponent(item.title)}&background=c0521a&color=fff&size=400`,
+      thumb: item.image || '',
+      title: item.title,
+      author: 'Wikipedia',
+      authorAvatar: '',
+      source: 'Wiki',
+      link: item.pageUrl,
+      description: item.description,
+    }));
 
-    var pinterest = pinterestResults.map(function(item: any) {
-      return {
-        id: item.id,
-        src: item.url,
-        thumb: item.url,
-        title: item.title,
-        author: item.author,
-        authorAvatar: '',
-        source: 'Pinterest',
-        link: item.link,
-        description: '',
-      };
-    });
-
-    var photos = enriched.map(function(item: any) {
-      return {
-        id: item.id,
-        src: item.image || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(item.title) + '&background=c0521a&color=fff&size=400',
-        thumb: item.image || '',
-        title: item.title,
-        author: 'Wikipedia',
-        authorAvatar: '',
-        source: 'Wiki',
-        link: item.pageUrl,
-        description: item.description,
-      };
-    });
-
-    photos = photos.concat(commons);
-    photos = photos.concat(pinterest);
+    // 3. Объединяем результаты
+    const results = [...supabaseResults, ...wikiPhotos];
 
     return NextResponse.json({
-      results: photos,
+      results,
       source: 'smart_search',
-      count: photos.length,
+      count: results.length,
     });
   } catch (error) {
     console.error('Search error:', error);

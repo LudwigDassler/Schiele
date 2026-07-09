@@ -6,12 +6,12 @@ export async function GET() {
   try {
     const res = await fetch('https://api.pinterest.com/v5/user_account', {
       headers: {
-        Authorization: Bearer \,
+        'Authorization': 'Bearer ' + token,
       },
     });
 
     if (!res.ok) {
-      throw new Error(Pinterest API error: \);
+      throw new Error('Pinterest API error: ' + res.status);
     }
 
     const data = await res.json();

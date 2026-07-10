@@ -33,7 +33,7 @@ export async function GET(request: Request) {
       title: item.title || item.category,
       author: item.author || 'Schiele',
       authorAvatar: '',
-      source: item.source || 'Schiele',
+      
       link: '',
       category: item.category,
     }));

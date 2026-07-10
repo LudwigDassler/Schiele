@@ -63,7 +63,6 @@ export default function Home() {
     if (boardsData.boards) setBoards(boardsData.boards);
   }
 
-  // === ЗАГРУЗКА ТОЛЬКО ИЗ SUPABASE ===
   async function fetchPhotos(query: string, category: string, pageNum: number, reset: boolean) {
     if (loadingRef.current) return;
     loadingRef.current = true;
@@ -95,7 +94,6 @@ export default function Home() {
     loadingRef.current = false;
   }
 
-  // === ПОИСК ТОЛЬКО В SUPABASE ===
   async function handleSearch(e: React.FormEvent) {
     e.preventDefault();
     if (!search || search.length < 2) return;
@@ -189,9 +187,10 @@ export default function Home() {
   const userName = user?.user_metadata?.full_name || user?.email || "";
 
   useEffect(() => {
-    setPage(1); setHasMore(true);
+    setPage(1);
+    setHasMore(true);
     if (!searchQuery) {
-      fetchPhotos(searchQuery, active, 1, true);
+      fetchPhotos('', active, 1, true);
     }
   }, [active, searchQuery]);
 
@@ -202,7 +201,7 @@ export default function Home() {
       if (entries[0].isIntersecting && hasMore && !loadingRef.current && !searchQuery) {
         const next = page + 1;
         setPage(next);
-        fetchPhotos(searchQuery, active, next, false);
+        fetchPhotos('', active, next, false);
       }
     }, { threshold: 0.1 });
     observerRef.current.observe(bottomRef.current);

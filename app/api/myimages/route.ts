@@ -1,4 +1,4 @@
-﻿import { NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 
 const SUPABASE_URL = "https://kefdjxsmyarwfqqkfgcx.supabase.co";
 const SUPABASE_KEY = "sb_publishable_DHa5G0bhPLWJWNrACLVEUw_2GZS4BMc";
@@ -11,15 +11,15 @@ export async function GET(request: Request) {
   const offset = (page - 1) * limit;
 
   try {
-    let url = ${SUPABASE_URL}/rest/v1/images?select=*&limit=&offset=&order=created_at.desc;
+    let url = SUPABASE_URL + '/rest/v1/images?select=*&limit=' + limit + '&offset=' + offset + '&order=created_at.desc';
     if (category !== 'all') {
-      url += &category=eq.;
+      url = url + '&category=eq.' + category;
     }
 
     const res = await fetch(url, {
       headers: {
         "apikey": SUPABASE_KEY,
-        "Authorization": Bearer ,
+        "Authorization": "Bearer " + SUPABASE_KEY,
       },
     });
 

@@ -30,6 +30,7 @@ export default function Home() {
   const [showNewBoard, setShowNewBoard] = useState(false);
   const [showShare, setShowShare] = useState<Photo | null>(null);
   const [showSaveToBoard, setShowSaveToBoard] = useState<Photo | null>(null);
+  const [editBoard, setEditBoard] = useState<Board | null>(null);
   const [search, setSearch] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [newTitle, setNewTitle] = useState("");
@@ -44,7 +45,10 @@ export default function Home() {
   const loadingRef = useRef(false);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => setUser(data.session?.user ?? null));
+    supabase.auth.getSession().then(({ data }) => {
+      setUser(data.session?.user ?? null);
+      if (data.session?.user) fetchUserData(data.session.user.id);
+    });
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_, session) => {
       setUser(session?.user ?? null);
       if (session?.user) fetchUserData(session.user.id);
@@ -63,63 +67,48 @@ export default function Home() {
     if (boardsData.boards) setBoards(boardsData.boards);
   }
 
-  // ====== ТОЛЬКО ЭТА ФУНКЦИЯ ИЗМЕНЕНА ======
-  // Теперь ходит в /api/myimages вместо /api/photos
   async function fetchPhotos(query: string, category: string, pageNum: number, reset: boolean) {
     if (loadingRef.current) return;
     loadingRef.current = true;
     setLoading(true);
     try {
-      const params = new URLSearchParams({ 
-        category: category === 'All' ? 'all' : category, 
-        limit: '30',
-        page: String(pageNum)
-      });
-      if (query) params.set('query', query);
-      
-      const res = await fetch(`/api/myimages?${params}`);
+      const params = new URLSearchParams({ category, page: String(pageNum) });
+      if (query) params.set("query", query);
+      const res = await fetch(`/api/photos?${params}`);
       const data = await res.json();
-      
-      if (data.photos && data.photos.length > 0) {
-        setPhotos(prev => reset ? data.photos : [...prev, ...data.photos]);
-        setHasMore(data.hasMore);
-      } else {
-        setPhotos([]);
-        setHasMore(false);
-      }
+      const fetched = (data.photos || []).filter((p: Photo) => p.src && p.src.startsWith("http"));
+      setPhotos(prev => reset ? fetched : [...prev, ...fetched]);
+      setHasMore(fetched.length >= 15);
     } catch (e) { console.error(e); }
     setLoading(false);
     loadingRef.current = false;
   }
 
-  // ====== ПОИСК ТОЖЕ ЧЕРЕЗ БД ======
-  async function handleSearch(e: React.FormEvent) {
+  useEffect(() => {
+    setPage(1); setHasMore(true);
+    fetchPhotos(searchQuery, active, 1, true);
+  }, [active, searchQuery]);
+
+  useEffect(() => {
+    if (!bottomRef.current) return;
+    observerRef.current?.disconnect();
+    observerRef.current = new IntersectionObserver(entries => {
+      if (entries[0].isIntersecting && hasMore && !loadingRef.current) {
+        const next = page + 1;
+        setPage(next);
+        fetchPhotos(searchQuery, active, next, false);
+      }
+    }, { threshold: 0.1 });
+    observerRef.current.observe(bottomRef.current);
+    return () => observerRef.current?.disconnect();
+  }, [hasMore, page, active, searchQuery]);
+
+  function handleSearch(e: React.FormEvent) {
     e.preventDefault();
-    if (!search || search.length < 2) return;
-    
-    setLoading(true);
+    setSearchQuery(search);
     setShowMenu(false);
     setShowSaved(false);
     setShowBoards(false);
-    
-    try {
-      const res = await fetch(`/api/myimages?category=all&limit=50`);
-      const data = await res.json();
-      
-      let searchPhotos = data.photos.filter((p: any) => 
-        p.title?.toLowerCase().includes(search.toLowerCase()) ||
-        p.category?.toLowerCase().includes(search.toLowerCase()) ||
-        p.author?.toLowerCase().includes(search.toLowerCase())
-      );
-      
-      setPhotos(searchPhotos);
-      setSearchQuery(search);
-      setHasMore(false);
-      setActive("All");
-    } catch (error) {
-      console.error('Search error:', error);
-    }
-    setLoading(false);
   }
 
   function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
@@ -149,6 +138,11 @@ export default function Home() {
     setShowSaveToBoard(null); setSelected(null);
   }
 
+  async function deletePin(pinId: string) {
+    await fetch(`/api/pins?id=${pinId}`, { method: "DELETE" });
+    setPins(prev => prev.filter(p => p.id !== pinId));
+  }
+
   async function createBoard() {
     if (!newBoardName || !user) return;
     const res = await fetch("/api/boards", {
@@ -159,6 +153,24 @@ export default function Home() {
     const data = await res.json();
     if (data.board) setBoards(prev => [data.board, ...prev]);
     setNewBoardName(""); setNewBoardDesc(""); setShowNewBoard(false);
+  }
+
+  async function updateBoard() {
+    if (!editBoard) return;
+    const res = await fetch("/api/boards", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: editBoard.id, name: editBoard.name, description: editBoard.description })
+    });
+    const data = await res.json();
+    if (data.board) setBoards(prev => prev.map(b => b.id === editBoard.id ? data.board : b));
+    setEditBoard(null);
+  }
+
+  async function deleteBoard(boardId: string) {
+    if (!confirm("Delete this board?")) return;
+    await fetch(`/api/boards?id=${boardId}`, { method: "DELETE" });
+    setBoards(prev => prev.filter(b => b.id !== boardId));
   }
 
   function isPinned(photo: Photo) { return pins.some(p => p.image_url === photo.src); }
@@ -185,33 +197,11 @@ export default function Home() {
   const userAvatar = user?.user_metadata?.avatar_url || "";
   const userName = user?.user_metadata?.full_name || user?.email || "";
 
-  useEffect(() => {
-    setPage(1); setHasMore(true);
-    if (!searchQuery) {
-      fetchPhotos('', active, 1, true);
-    }
-  }, [active, searchQuery]);
-
-  useEffect(() => {
-    if (!bottomRef.current || searchQuery) return;
-    observerRef.current?.disconnect();
-    observerRef.current = new IntersectionObserver(entries => {
-      if (entries[0].isIntersecting && hasMore && !loadingRef.current && !searchQuery) {
-        const next = page + 1;
-        setPage(next);
-        fetchPhotos('', active, next, false);
-      }
-    }, { threshold: 0.1 });
-    observerRef.current.observe(bottomRef.current);
-    return () => observerRef.current?.disconnect();
-  }, [hasMore, page, active, searchQuery]);
-
   return (
     <>
       <style>{`
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
         body { overflow-x: hidden; background: #f8f8f8; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-
         .header { position: sticky; top: 0; z-index: 100; background: rgba(255,255,255,0.95); backdrop-filter: blur(12px); border-bottom: 1px solid #ebebeb; padding: 10px 16px; display: flex; align-items: center; gap: 10px; }
         .logo { font-size: 17px; font-weight: 800; color: #111; letter-spacing: 3px; text-transform: uppercase; font-family: Georgia, serif; flex-shrink: 0; cursor: pointer; user-select: none; }
         .logo span { color: #c0521a; }
@@ -227,7 +217,6 @@ export default function Home() {
         .avatar { width: 32px; height: 32px; border-radius: 50%; cursor: pointer; border: 2px solid #e0e0e0; flex-shrink: 0; object-fit: cover; background: #f0f0f0; }
         .avatar-placeholder { width: 32px; height: 32px; border-radius: 50%; cursor: pointer; border: 2px solid #e0e0e0; flex-shrink: 0; background: #c0521a; display: flex; align-items: center; justify-content: center; color: white; font-size: 13px; font-weight: 700; }
         .sign-btn { background: #111; color: white; border: none; border-radius: 24px; padding: 8px 16px; cursor: pointer; font-size: 12px; font-weight: 600; flex-shrink: 0; text-decoration: none; display: flex; align-items: center; }
-
         .burger-overlay { position: fixed; inset: 0; z-index: 150; background: rgba(0,0,0,0.4); animation: fadeIn 0.2s ease; }
         .burger-panel { position: fixed; top: 0; left: 0; bottom: 0; width: min(320px, 85vw); z-index: 151; background: white; box-shadow: 4px 0 24px rgba(0,0,0,0.15); display: flex; flex-direction: column; animation: slideRight 0.25s ease; overflow-y: auto; }
         @keyframes slideRight { from { transform: translateX(-100%); } to { transform: translateX(0); } }
@@ -248,15 +237,12 @@ export default function Home() {
         .burger-action { display: flex; align-items: center; gap: 12px; padding: 12px 20px; cursor: pointer; border: none; background: none; width: 100%; text-align: left; color: #333; font-size: 14px; font-family: -apple-system, sans-serif; transition: background 0.15s; }
         .burger-action:hover { background: #f5f5f5; }
         .burger-action-icon { width: 36px; height: 36px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 16px; flex-shrink: 0; }
-
-        /* MASONRY */
         .grid-wrap { padding: 12px; }
         .masonry { columns: 2; gap: 10px; }
         @media (min-width: 480px) { .masonry { columns: 3; } }
         @media (min-width: 768px) { .masonry { columns: 4; } }
         @media (min-width: 1024px) { .masonry { columns: 5; } }
         @media (min-width: 1280px) { .masonry { columns: 6; } }
-
         .card { break-inside: avoid; margin-bottom: 10px; border-radius: 14px; overflow: hidden; background: white; position: relative; cursor: pointer; transition: transform 0.2s ease, box-shadow 0.2s ease; box-shadow: 0 1px 4px rgba(0,0,0,0.06); }
         .card:hover { transform: scale(1.02); box-shadow: 0 8px 24px rgba(0,0,0,0.12); z-index: 10; }
         .card:hover .overlay { opacity: 1; }
@@ -265,21 +251,20 @@ export default function Home() {
         .save-btn { align-self: flex-end; background: #c0521a; color: white; border: none; border-radius: 20px; padding: 7px 16px; cursor: pointer; font-weight: 700; font-size: 12px; transition: all 0.15s; box-shadow: 0 2px 8px rgba(0,0,0,0.2); }
         .save-btn:hover { background: #a04015; }
         .save-btn.pinned { background: rgba(255,255,255,0.9); color: #333; box-shadow: none; }
+        .delete-pin-btn { align-self: flex-start; background: rgba(229,62,62,0.9); color: white; border: none; border-radius: 20px; padding: 5px 12px; cursor: pointer; font-weight: 700; font-size: 11px; transition: all 0.15s; }
+        .delete-pin-btn:hover { background: #e53e3e; }
         .card-actions { display: flex; gap: 6px; align-self: flex-start; }
         .card-action-btn { background: rgba(255,255,255,0.9); border: none; border-radius: 50%; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.15s; }
         .card-action-btn:hover { background: white; transform: scale(1.1); }
         .card-footer { padding: 8px 10px; display: flex; align-items: center; gap: 6px; background: white; }
         .card-footer img { width: 18px; height: 18px; border-radius: 50%; background: #e0e0e0; flex-shrink: 0; }
         .card-footer span { color: #888; font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        /* 👇 УБРАЛИ source-dot */
-
         .modal-backdrop { position: fixed; inset: 0; z-index: 200; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; padding: 16px; animation: fadeIn 0.2s ease; }
         .modal-box { background: white; border-radius: 20px; overflow: hidden; max-width: 900px; width: 100%; display: flex; flex-direction: column; max-height: 90vh; box-shadow: 0 32px 80px rgba(0,0,0,0.3); animation: slideUp 0.25s ease; }
         @media (min-width: 640px) { .modal-box { flex-direction: row; } }
         .modal-img { width: 100%; max-height: 45vh; object-fit: cover; display: block; background: #f0f0f0; }
         @media (min-width: 640px) { .modal-img { width: 55%; max-height: 90vh; } }
         .modal-info { flex: 1; padding: 24px; display: flex; flex-direction: column; gap: 16px; overflow-y: auto; }
-
         .primary-btn { background: #c0521a; color: white; border: none; border-radius: 24px; padding: 13px 24px; cursor: pointer; font-weight: 700; font-size: 14px; width: 100%; transition: background 0.2s; font-family: -apple-system, sans-serif; }
         .primary-btn:hover { background: #a04015; }
         .primary-btn.pinned-state { background: #f0f0f0; color: #333; }
@@ -289,12 +274,10 @@ export default function Home() {
         .outline-btn:hover { background: #fff3ee; }
         .danger-btn { background: transparent; color: #e53e3e; border: 1.5px solid #e53e3e; border-radius: 24px; padding: 11px 24px; cursor: pointer; font-weight: 600; font-size: 14px; width: 100%; transition: all 0.2s; font-family: -apple-system, sans-serif; }
         .danger-btn:hover { background: #fff5f5; }
-
         .upload-zone { border: 2px dashed #e0e0e0; border-radius: 14px; height: 170px; display: flex; align-items: center; justify-content: center; cursor: pointer; overflow: hidden; transition: all 0.2s; background: #fafafa; }
         .upload-zone:hover { border-color: #c0521a; background: #fff8f5; }
         .field { width: 100%; padding: 12px 16px; border-radius: 12px; border: 1.5px solid #e0e0e0; background: #fafafa; color: #111; font-size: 14px; outline: none; transition: all 0.2s; font-family: -apple-system, sans-serif; }
         .field:focus { border-color: #c0521a; background: white; box-shadow: 0 0 0 3px rgba(192,82,26,0.1); }
-
         .boards-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
         @media (min-width: 480px) { .boards-grid { grid-template-columns: repeat(3, 1fr); } }
         .board-card { border-radius: 12px; overflow: hidden; border: 1.5px solid #e0e0e0; background: #fafafa; }
@@ -307,7 +290,6 @@ export default function Home() {
         .board-edit-btn:hover { border-color: #c0521a; color: #c0521a; }
         .board-del-btn { flex: 1; padding: 6px; border-radius: 8px; border: 1px solid #fcc; background: transparent; cursor: pointer; font-size: 11px; color: #e53e3e; transition: all 0.2s; }
         .board-del-btn:hover { background: #fff5f5; }
-
         .spinner { width: 28px; height: 28px; border: 3px solid #e0e0e0; border-top-color: #c0521a; border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto; }
         @keyframes spin { to { transform: rotate(360deg); } }
         .status-bar { padding: 10px 16px; font-size: 12px; color: #888; border-bottom: 1px solid #f0f0f0; display: flex; align-items: center; gap: 10px; }
@@ -402,6 +384,9 @@ export default function Home() {
                         <button className="card-action-btn" onClick={e => { e.stopPropagation(); setShowShare(photo); }}>
                           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
                         </button>
+                        {showSaved && (
+                          <button className="delete-pin-btn" onClick={e => { e.stopPropagation(); deletePin(photo.id); }}>✕</button>
+                        )}
                       </div>
                       <button className={`save-btn ${isPinned(photo) ? "pinned" : ""}`} onClick={e => { e.stopPropagation(); isPinned(photo) ? null : setShowSaveToBoard(photo); }}>
                         {isPinned(photo) ? "Pinned" : "Save"}
@@ -410,7 +395,6 @@ export default function Home() {
                     <div className="card-footer">
                       {photo.authorAvatar && <img src={photo.authorAvatar} alt={photo.author} onError={e => (e.target as HTMLImageElement).style.display = "none"} />}
                       <span>{photo.author}</span>
-                      {/* 👇 УБРАЛИ source-dot */}
                     </div>
                   </div>
                 ))}
@@ -431,7 +415,7 @@ export default function Home() {
               </div>
               {user && (
                 <div style={{ padding: "16px 20px", borderBottom: "1px solid #f0f0f0", display: "flex", alignItems: "center", gap: 12 }}>
-                  {userAvatar ? <img src={userAvatar} style={{ width: 40, height: 40, borderRadius: "50%" }} alt="avatar" /> : <div style={{ width: 40, height: 40, borderRadius: "50%", background: "#c0521a", display: "flex", align-items: "center", justifyContent: "center", color: "white", fontWeight: 700 }}>{(userName[0] || "U").toUpperCase()}</div>}
+                  {userAvatar ? <img src={userAvatar} style={{ width: 40, height: 40, borderRadius: "50%" }} alt="avatar" /> : <div style={{ width: 40, height: 40, borderRadius: "50%", background: "#c0521a", display: "flex", alignItems: "center", justifyContent: "center", color: "white", fontWeight: 700 }}>{(userName[0] || "U").toUpperCase()}</div>}
                   <div>
                     <div style={{ fontWeight: 600, fontSize: 14 }}>{userName}</div>
                     <a href="/profile" style={{ color: "#999", fontSize: 11, textDecoration: "none" }}>Edit profile</a>
@@ -495,7 +479,7 @@ export default function Home() {
                   </button>
                   <button className="modal-close" onClick={() => setSelected(null)}>✕</button>
                 </div>
-                <div style={{ display: "flex", align-items: "center", gap: 12 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                   {selected.authorAvatar && <img src={selected.authorAvatar} style={{ width: 40, height: 40, borderRadius: "50%" }} alt="avatar" onError={e => (e.target as HTMLImageElement).style.display = "none"} />}
                   <div>
                     <p style={{ fontWeight: 600, fontSize: 14, color: "#111" }}>{selected.author}</p>
@@ -566,7 +550,7 @@ export default function Home() {
 
         {showShare && (
           <div className="modal-backdrop" onClick={() => setShowShare(null)}>
-            <div onClick={e => e.stopPropagation()} style={{ background: "white", borderRadius: 20, padding: 24, maxWidth: 360, width: "100%", display: "flex", flexDirection: "column", gap: 14, boxShadow: "0 32px 80px rgba(0,0,0,0.25)" }}>
+            <div onClick={e => e.stopPropagation()} style={{ background: "white", borderRadius: 20, padding: 24, maxWidth: 360, width: "100%", display: "flex", flexDirection: "column", gap: 14, boxShadow: "0 32x 80px rgba(0,0,0,0.25)" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <h2 style={{ fontSize: 16, fontWeight: 700 }}>Share</h2>
                 <button className="modal-close" onClick={() => setShowShare(null)}>✕</button>

@@ -182,11 +182,34 @@ def fetch_picsum(query, limit=5):
     return urls
 
 # ============================================================
+# ПРОВЕРКА ДУБЛИКАТОВ
+# ============================================================
+
+def check_duplicate(src):
+    """Проверяет, есть ли уже такая картинка в базе"""
+    try:
+        url = f"{SUPABASE_URL}/rest/v1/images?src=eq.{urllib.parse.quote(src)}&select=id"
+        req = urllib.request.Request(url, headers={
+            "apikey": SUPABASE_KEY,
+            "Authorization": f"Bearer {SUPABASE_KEY}"
+        })
+        with urllib.request.urlopen(req, timeout=5) as res:
+            data = json.loads(res.read().decode())
+            return len(data) > 0
+    except:
+        return False
+
+# ============================================================
 # СОХРАНЕНИЕ В SUPABASE
 # ============================================================
 
 def save_image(src, title, category, source):
+    """Сохраняет картинку в Supabase (без дубликатов)"""
     try:
+        # Проверяем дубликат
+        if check_duplicate(src):
+            return False
+        
         data = json.dumps({
             "src": src,
             "title": title,
@@ -219,7 +242,7 @@ def save_image(src, title, category, source):
 
 def main():
     print("=" * 60)
-    print("🚀 СУПЕР-ПАРСЕР — 6 ИСТОЧНИКОВ")
+    print("🚀 СУПЕР-ПАРСЕР — 6 ИСТОЧНИКОВ (БЕЗ ДУБЛИКАТОВ)")
     print("=" * 60)
     print(f"📅 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"📂 Категорий: {len(CATEGORIES)}")
@@ -227,6 +250,7 @@ def main():
     print("=" * 60)
     
     total = 0
+    skipped = 0
     sources = [
         ("unsplash", fetch_unsplash),
         ("pexels", fetch_pexels),
@@ -244,10 +268,13 @@ def main():
             try:
                 urls = fetcher(category, limit=3)
                 for url in urls:
-                    if save_image(url, category, category, source_name):
-                        total += 1
-                        print(f"  ✅ {source_name}: {url[:50]}...")
-                time.sleep(0.5)
+                    if url and url.startswith('http'):
+                        if save_image(url, category, category, source_name):
+                            total += 1
+                            print(f"  ✅ {source_name}: {url[:60]}...")
+                        else:
+                            skipped += 1
+                time.sleep(0.3)
             except Exception as e:
                 print(f"  ❌ {source_name}: ошибка")
         
@@ -255,7 +282,9 @@ def main():
         print(f"  ⏳ Пауза...")
     
     print("\n" + "=" * 60)
-    print(f"✅ ГОТОВО! Сохранено: {total} картинок")
+    print(f"✅ ГОТОВО!")
+    print(f"   📊 Сохранено: {total} новых картинок")
+    print(f"   ⏩ Пропущено (дубликаты): {skipped}")
     print("=" * 60)
 
 if __name__ == "__main__":

@@ -1,6 +1,7 @@
 ﻿"use client";
 import { SessionProvider } from "next-auth/react";
-import SplashScreenWrapper from "../components/SplashScreenWrapper";
+import MetalLoader from "../components/MetalLoader";
+import { useState, useEffect } from "react";
 import "./globals.css";
 
 export default function RootLayout({
@@ -8,13 +9,18 @@ export default function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setLoading(false), 3500);
+    return () => clearTimeout(timer);
+  }, []);
+
   return (
     <html lang="ru">
       <body>
         <SessionProvider>
-          <SplashScreenWrapper variant="schiele">
-            {children}
-          </SplashScreenWrapper>
+          {loading ? <MetalLoader /> : children}
         </SessionProvider>
       </body>
     </html>

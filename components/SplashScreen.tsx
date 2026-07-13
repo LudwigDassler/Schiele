@@ -1,3 +1,4 @@
+@"
 "use client";
 import { useState, useEffect, useRef } from "react";
 import { useSpring, animated } from "@react-spring/web";
@@ -11,7 +12,7 @@ export default function SplashScreen({ onComplete, variant }: SplashScreenProps)
   const [progress, setProgress] = useState(0);
   const [visible, setVisible] = useState(true);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const animationRef = useRef<number>();
+  const animationRef = useRef<number | null>(null);
 
   const fadeOut = useSpring({
     opacity: visible ? 1 : 0,
@@ -262,12 +263,10 @@ export default function SplashScreen({ onComplete, variant }: SplashScreenProps)
       ctx.shadowBlur = 15 * scale;
       ctx.strokeStyle = idx === 0 ? "#d4a854" : idx === 1 ? "#a8c8d4" : idx === 2 ? "#d4a854" : "#c8b8a8";
       
-      // Голова
       ctx.beginPath();
       ctx.arc(x, y - 60 * s, 28 * s * mp, 0, Math.PI * 2 * mp);
       ctx.stroke();
       
-      // Волосы (Плант)
       if (idx === 1 && mp > 0.5) {
         ctx.strokeStyle = "#c8b090";
         ctx.lineWidth = 1.5 * scale;
@@ -288,7 +287,6 @@ export default function SplashScreen({ onComplete, variant }: SplashScreenProps)
         ctx.lineWidth = 2 * scale;
       }
 
-      // Тело
       if (mp > 0.2) {
         const bodyP = Math.min((mp - 0.2) / 0.25, 1);
         ctx.beginPath();
@@ -317,7 +315,6 @@ export default function SplashScreen({ onComplete, variant }: SplashScreenProps)
         ctx.lineTo(x + 45 * s * bodyP, y + 10 * s * bodyP);
         ctx.stroke();
         
-        // Гитара (Пейдж)
         if (idx === 2 && mp > 0.6) {
           const gP = Math.min((mp - 0.6) / 0.25, 1);
           ctx.strokeStyle = "#d4a854";
@@ -334,7 +331,6 @@ export default function SplashScreen({ onComplete, variant }: SplashScreenProps)
           ctx.lineWidth = 2 * scale;
         }
         
-        // Барабан (Бонэм)
         if (idx === 3 && mp > 0.6) {
           const dP = Math.min((mp - 0.6) / 0.25, 1);
           ctx.strokeStyle = "#c8b8a8";
@@ -356,7 +352,6 @@ export default function SplashScreen({ onComplete, variant }: SplashScreenProps)
       }
     });
 
-    // Название
     if (pp > 0.85) {
       ctx.shadowBlur = 0;
       ctx.shadowColor = "rgba(212,168,84,0.3)";
@@ -400,3 +395,4 @@ export default function SplashScreen({ onComplete, variant }: SplashScreenProps)
     </animated.div>
   );
 }
+"@ | Out-File -FilePath components/SplashScreen.tsx -Encoding utf8

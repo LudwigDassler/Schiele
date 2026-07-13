@@ -1,13 +1,21 @@
-﻿import "./globals.css";
+﻿"use client";
+import { SessionProvider } from "next-auth/react";
+import SplashScreenWrapper from "../components/SplashScreenWrapper";
+import "./globals.css";
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   return (
-    <html lang="en">
-      <head>
-        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
-      </head>
-      <body style={{ margin: 0, padding: 0, overflowX: "hidden" }}>
-        {children}
+    <html lang="ru">
+      <body>
+        <SessionProvider>
+          <SplashScreenWrapper variant="schiele">
+            {children}
+          </SplashScreenWrapper>
+        </SessionProvider>
       </body>
     </html>
   );

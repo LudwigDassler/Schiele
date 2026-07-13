@@ -1,4 +1,3 @@
-@"
 "use client";
 import { useState, useEffect, useRef } from "react";
 import { useSpring, animated } from "@react-spring/web";
@@ -395,4 +394,3 @@ export default function SplashScreen({ onComplete, variant }: SplashScreenProps)
     </animated.div>
   );
 }
-"@ | Out-File -FilePath components/SplashScreen.tsx -Encoding utf8

@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
-import LoadingScreen from "@/components/LoadingScreen";  // ← это должно быть
+import LoadingScreen from "@/components/LoadingScreen";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -18,7 +18,7 @@ export default function RootLayout({
   return (
     <html lang="ru">
       <body className={inter.className}>
-        <LoadingScreen />  {/* ← это должно быть */}
+        <LoadingScreen onDone={() => {}} />
         {children}
       </body>
     </html>

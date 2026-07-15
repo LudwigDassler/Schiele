@@ -1,0 +1,119 @@
+﻿.celticAccentGold {
+  color: #d4af37;
+  text-shadow: 0 0 10px rgba(212, 175, 55, 0.45);
+  font-family: 'Cinzel', 'Georgia', serif;
+  letter-spacing: 2px;
+}
+
+.quoteCard {
+  background: rgba(24, 28, 26, 0.65);
+  border: 1px solid rgba(212, 175, 55, 0.15);
+  border-radius: 8px;
+  padding: 24px;
+  cursor: pointer;
+  transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  position: relative;
+  overflow: hidden;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+}
+
+.quoteCard::before {
+  content: '✦';
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  color: rgba(212, 175, 55, 0.3);
+  font-size: 10px;
+}
+
+.quoteCard:hover {
+  transform: translateY(-3px);
+  border-color: rgba(212, 175, 55, 0.7);
+  box-shadow: 0 8px 25px rgba(212, 175, 55, 0.2);
+}
+
+.quoteText {
+  font-family: 'Crimson Text', 'Georgia', serif;
+  font-style: italic;
+  color: #f4f1ea;
+  font-size: 1.05rem;
+  line-height: 1.6;
+  text-align: center;
+  margin: 12px 0;
+}
+
+.quoteAuthor {
+  display: block;
+  font-size: 11px;
+  color: #8a938e;
+  text-align: center;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+}
+
+.modalOverlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: rgba(10, 12, 11, 0.82);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s ease;
+}
+
+.modalOverlayActive {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.modalContent {
+  background: #131715;
+  border: 1px solid rgba(212, 175, 55, 0.5);
+  border-radius: 12px;
+  padding: 40px 30px;
+  max-width: 520px;
+  width: 90%;
+  position: relative;
+  transform: scale(0.92);
+  transition: transform 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+  box-shadow: 0 15px 40px rgba(0, 0, 0, 0.8);
+}
+
+.modalOverlayActive .modalContent {
+  transform: scale(1);
+}
+
+.closeBtn {
+  position: absolute;
+  top: 15px;
+  right: 15px;
+  background: none;
+  border: none;
+  color: #8a938e;
+  font-size: 24px;
+  cursor: pointer;
+  transition: color 0.2s ease;
+  line-height: 1;
+}
+
+.closeBtn:hover {
+  color: #d4af37;
+}
+
+.modalDecoLine {
+  width: 80px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, #d4af37, transparent);
+  margin: 20px auto 0 auto;
+}

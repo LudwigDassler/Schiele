@@ -89,6 +89,7 @@ export default function Home() {
   const observerRef = useRef<IntersectionObserver | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const loadingRef = useRef(false);
+  const activeRequestRef = useRef(0);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {

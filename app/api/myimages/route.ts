@@ -1,19 +1,23 @@
 import { NextResponse } from 'next/server';
 
-const SUPABASE_URL = "https://kefdjxsmyarwfqqkfgcx.supabase.co";
-const SUPABASE_KEY = "sb_publishable_DHa5G0bhPLWJWNrACLVEUw_2GZS4BMc";
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const SUPABASE_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const category = searchParams.get('category') || 'all';
-  const limit = parseInt(searchParams.get('limit') || '30');
-  const page = parseInt(searchParams.get('page') || '1');
+  const limit = Math.min(Math.max(parseInt(searchParams.get('limit') || '30'), 1), 100);
+  const page = Math.max(parseInt(searchParams.get('page') || '1'), 1);
   const offset = (page - 1) * limit;
+
+  if (!SUPABASE_URL || !SUPABASE_KEY) {
+    return NextResponse.json({ photos: [], error: 'Not configured' }, { status: 500 });
+  }
 
   try {
     let url = SUPABASE_URL + '/rest/v1/images?select=*&limit=' + limit + '&offset=' + offset + '&order=created_at.desc';
     if (category !== 'all') {
-      url = url + '&category=eq.' + category;
+      url = url + '&category=eq.' + encodeURIComponent(category);
     }
 
     const res = await fetch(url, {

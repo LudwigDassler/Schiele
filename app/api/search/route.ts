@@ -1,13 +1,14 @@
 import { NextResponse } from 'next/server';
 
-const SUPABASE_URL = "https://kefdjxsmyarwfqqkfgcx.supabase.co";
-const SUPABASE_KEY = "sb_publishable_DHa5G0bhPLWJWNrACLVEUw_2GZS4BMc";
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const SUPABASE_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
 // === ПОИСК В SUPABASE ===
 async function searchSupabase(query: string) {
+  if (!SUPABASE_URL || !SUPABASE_KEY) return [];
   try {
     const res = await fetch(
-      `${SUPABASE_URL}/rest/v1/images?title=ilike.%${query}%&select=*`,
+      `${SUPABASE_URL}/rest/v1/images?title=ilike.%${encodeURIComponent(query)}%&select=*`,
       {
         headers: {
           "apikey": SUPABASE_KEY,

@@ -3,9 +3,14 @@ const path = require('path');
 const csv = require('csv-parser');
 const { createClient } = require('@supabase/supabase-js');
 
-// 1. НАСТРОЙКИ ПОДКЛЮЧЕНИЯ
-const SUPABASE_URL = 'https://kefdjxsmyarwfqqkfgcx.supabase.co'; 
-const SUPABASE_KEY = 'sb_secret_2UZY3PLCKoIznRnZoCoPDg_wsv6lYp7'; 
+// 1. НАСТРОЙКИ ПОДКЛЮЧЕНИЯ (читаются из переменных окружения)
+const SUPABASE_URL = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+const SUPABASE_KEY = process.env.SUPABASE_SECRET_KEY;
+
+if (!SUPABASE_URL || !SUPABASE_KEY) {
+  console.error('❌ SUPABASE_URL и SUPABASE_SECRET_KEY должны быть заданы в переменных окружения.');
+  process.exit(1);
+}
 
 // 2. БЛОК ПРОВЕРКИ НА КИРИЛЛИЦУ
 function checkForCyrillic(str, name) {

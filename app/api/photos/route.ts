@@ -33,8 +33,11 @@ async function searchDB(query: string, category: string, page: number) {
       .range(offset, offset + limit - 1);
 
     if (query) {
-      // Точный поиск по query полю
-      q = q.or(`query.ilike.%${query}%,title.ilike.%${query}%,tags.ilike.%${query}%`);
+      // Sanitize: strip PostgREST-significant characters to prevent filter injection.
+      const safe = query.replace(/[,()%*\\:]/g, " ").trim();
+      if (safe) {
+        q = q.or(`query.ilike.%${safe}%,title.ilike.%${safe}%,tags.ilike.%${safe}%`);
+      }
     } else if (category && category !== "All") {
       const dbCat = categoryDB[category];
       if (dbCat) q = q.eq("category", dbCat);

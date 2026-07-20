@@ -1,10 +1,7 @@
-﻿import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SECRET_KEY!
-);
+import { NextRequest, NextResponse } from "next/server";
+import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { shuffle, dedupeBySrc } from "@/lib/api";
+import type { Photo } from "@/lib/types";
 
 const UNSPLASH_KEY = process.env.NEXT_PUBLIC_UNSPLASH_ACCESS_KEY;
 const PEXELS_KEY = process.env.PEXELS_API_KEY;
@@ -22,12 +19,12 @@ const categoryDB: Record<string, string> = {
   "Art": "art", "Music": "music", "Cinema": "cinema", "All": ""
 };
 
-async function searchDB(query: string, category: string, page: number) {
+async function searchDB(query: string, category: string, page: number): Promise<Photo[]> {
   try {
     const limit = 30;
     const offset = (page - 1) * limit;
     
-    let q = supabase
+    let q = supabaseAdmin
       .from("images")
       .select("external_id,src,thumb,title,author,author_avatar,source,link,query,category")
       .range(offset, offset + limit - 1);
@@ -59,7 +56,7 @@ async function searchDB(query: string, category: string, page: number) {
   }
 }
 
-async function fetchUnsplash(query: string, page: number) {
+async function fetchUnsplash(query: string, page: number): Promise<Photo[]> {
   try {
     const res = await fetch(`https://api.unsplash.com/search/photos?query=${encodeURIComponent(query)}&per_page=15&page=${page}&client_id=${UNSPLASH_KEY}`);
     if (!res.ok) return [];
@@ -72,7 +69,7 @@ async function fetchUnsplash(query: string, page: number) {
   } catch { return []; }
 }
 
-async function fetchPexels(query: string, page: number) {
+async function fetchPexels(query: string, page: number): Promise<Photo[]> {
   try {
     const res = await fetch(`https://api.pexels.com/v1/search?query=${encodeURIComponent(query)}&per_page=15&page=${page}`,
       { headers: { Authorization: PEXELS_KEY! } });
@@ -86,7 +83,7 @@ async function fetchPexels(query: string, page: number) {
   } catch { return []; }
 }
 
-async function fetchPixabay(query: string, page: number) {
+async function fetchPixabay(query: string, page: number): Promise<Photo[]> {
   try {
     const res = await fetch(`https://pixabay.com/api/?key=${PIXABAY_KEY}&q=${encodeURIComponent(query)}&per_page=15&page=${page}&image_type=all&safesearch=true`);
     if (!res.ok) return [];
@@ -99,14 +96,6 @@ async function fetchPixabay(query: string, page: number) {
   } catch { return []; }
 }
 
-function shuffle(arr: any[]) {
-  for (let i = arr.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [arr[i], arr[j]] = [arr[j], arr[i]];
-  }
-  return arr;
-}
-
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const category = searchParams.get("category") || "All";
@@ -114,7 +103,7 @@ export async function GET(req: NextRequest) {
   const page = parseInt(searchParams.get("page") || "1");
   const isSearch = !!customQuery;
 
-  let photos: any[] = [];
+  let photos: Photo[] = [];
 
   if (isSearch) {
     // Поиск: сначала БД, потом внешние API параллельно
@@ -141,13 +130,7 @@ export async function GET(req: NextRequest) {
   }
 
   // Фильтруем битые ссылки и дубликаты
-  const seen = new Set<string>();
-  const clean = photos.filter(p => {
-    if (!p?.src || !p.src.startsWith("http")) return false;
-    if (seen.has(p.src)) return false;
-    seen.add(p.src);
-    return true;
-  });
+  const clean = dedupeBySrc(photos);
 
   return NextResponse.json({ photos: clean });
 }

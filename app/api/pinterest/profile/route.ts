@@ -1,20 +1,10 @@
-﻿import { NextResponse } from 'next/server';
-
-const token = process.env.PINTEREST_ACCESS_TOKEN;
+import { NextResponse } from 'next/server';
+import { errorResponse } from '@/lib/api';
+import { pinterestFetch } from '@/lib/pinterest';
 
 export async function GET() {
   try {
-    const res = await fetch('https://api.pinterest.com/v5/user_account', {
-      headers: {
-        'Authorization': 'Bearer ' + token,
-      },
-    });
-
-    if (!res.ok) {
-      throw new Error('Pinterest API error: ' + res.status);
-    }
-
-    const data = await res.json();
+    const data = await pinterestFetch('user_account');
     return NextResponse.json({
       profile: {
         id: data.id,
@@ -27,6 +17,6 @@ export async function GET() {
     });
   } catch (error) {
     console.error('Pinterest profile error:', error);
-    return NextResponse.json({ error: 'Failed to fetch profile' }, { status: 500 });
+    return errorResponse('Failed to fetch profile', 500);
   }
 }

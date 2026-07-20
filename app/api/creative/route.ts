@@ -1,4 +1,6 @@
 import { NextResponse } from 'next/server';
+import { avatarUrl, errorResponse } from '@/lib/api';
+import type { Photo } from '@/lib/types';
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -7,7 +9,7 @@ export async function GET(request: Request) {
   const page = parseInt(searchParams.get('page') || '1');
   const limit = 20;
 
-  let results: any[] = [];
+  let results: Photo[] = [];
 
   try {
     switch (category) {
@@ -29,15 +31,12 @@ export async function GET(request: Request) {
 
   } catch (error) {
     console.error('Creative API Error:', error);
-    return NextResponse.json({ 
-      photos: [], 
-      error: 'Failed to fetch creative content' 
-    }, { status: 500 });
+    return errorResponse('Failed to fetch creative content', 500, { photos: [] });
   }
 }
 
 // === Imgflip API (мемы) ===
-async function fetchMemes(query: string, page: number) {
+async function fetchMemes(query: string, page: number): Promise<Photo[]> {
   try {
     const res = await fetch('https://api.imgflip.com/get_memes');
     const data = await res.json();
@@ -71,7 +70,7 @@ async function fetchMemes(query: string, page: number) {
 }
 
 // === Last.fm API ===
-async function fetchLastFM(query: string, page: number) {
+async function fetchLastFM(query: string, page: number): Promise<Photo[]> {
   const key = process.env.NEXT_PUBLIC_LASTFM_API_KEY;
   
   if (!key) {
@@ -91,7 +90,7 @@ async function fetchLastFM(query: string, page: number) {
     
     return artists.map((p: any) => ({
       id: `lastfm_${p.mbid || p.name}`,
-      src: p.image?.[3]?.['#text'] || `https://ui-avatars.com/api/?name=${encodeURIComponent(p.name)}&background=c0521a&color=fff`,
+      src: p.image?.[3]?.['#text'] || avatarUrl(p.name),
       thumb: p.image?.[1]?.['#text'] || '',
       title: p.name,
       author: 'Last.fm',

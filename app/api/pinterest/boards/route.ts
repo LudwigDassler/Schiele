@@ -1,20 +1,10 @@
-﻿import { NextResponse } from 'next/server';
-
-const token = process.env.PINTEREST_ACCESS_TOKEN;
+import { NextResponse } from 'next/server';
+import { errorResponse } from '@/lib/api';
+import { pinterestFetch } from '@/lib/pinterest';
 
 export async function GET() {
   try {
-    const res = await fetch('https://api.pinterest.com/v5/boards', {
-      headers: {
-        'Authorization': 'Bearer ' + token,
-      },
-    });
-
-    if (!res.ok) {
-      throw new Error('Pinterest API error: ' + res.status);
-    }
-
-    const data = await res.json();
+    const data = await pinterestFetch('boards');
     const boards = (data.items || []).map(function(item: any) {
       return {
         id: item.id,
@@ -28,6 +18,6 @@ export async function GET() {
     return NextResponse.json({ boards: boards, source: 'pinterest' });
   } catch (error) {
     console.error('Pinterest boards error:', error);
-    return NextResponse.json({ boards: [], error: 'Failed to fetch boards' }, { status: 500 });
+    return errorResponse('Failed to fetch boards', 500, { boards: [] });
   }
 }

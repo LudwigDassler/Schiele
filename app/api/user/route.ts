@@ -1,22 +1,19 @@
-﻿import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
-const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-const supabase = createClient(supabaseUrl, supabaseKey)
+import { supabase } from '@/lib/supabase'
+import { errorResponse } from '@/lib/api'
 
 export async function PUT(request: Request) {
   const authHeader = request.headers.get('Authorization')
   const token = authHeader?.replace('Bearer ', '')
 
   if (!token) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    return errorResponse('Unauthorized', 401)
   }
 
   const { data: { user }, error: userError } = await supabase.auth.getUser(token)
 
   if (userError || !user) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    return errorResponse('Unauthorized', 401)
   }
 
   const { display_name, bio, avatar_url } = await request.json()
@@ -32,7 +29,7 @@ export async function PUT(request: Request) {
     })
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
+    return errorResponse(error.message, 500)
   }
 
   return NextResponse.json({ success: true })

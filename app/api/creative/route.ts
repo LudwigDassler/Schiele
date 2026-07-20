@@ -1,106 +1,28 @@
-import { NextResponse } from 'next/server';
+﻿import { NextResponse } from 'next/server';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 
-export async function GET(request: Request) {
-  const { searchParams } = new URL(request.url);
-  const query = searchParams.get('query') || 'funny';
-  const category = searchParams.get('category') || 'memes';
-  const page = parseInt(searchParams.get('page') || '1');
-  const limit = 20;
+// Инициализируем SDK с ключом из переменных окружения
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
 
-  let results: any[] = [];
-
+export async function POST(req: Request) {
   try {
-    switch (category) {
-      case 'memes':
-        results = await fetchMemes(query, page);
-        break;
-      case 'music':
-        results = await fetchLastFM(query, page);
-        break;
-      default:
-        results = await fetchLastFM(query, page);
-    }
+    const { category } = await req.json();
+    
+    // Формируем промпт для нейросети
+    const prompt = Напиши короткую, красивую и глубокомысленную цитату (максимум 2 предложения), которая идеально подходит для фотографии в категории "". Выведи только текст цитаты, без кавычек и лишних слов.;
 
-    return NextResponse.json({ 
-      photos: results, 
-      source: 'creative',
-      hasMore: results.length === limit 
-    });
+    // Вызываем быструю модель flash
+    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+    const result = await model.generateContent(prompt);
+    const response = await result.response;
+    const quote = response.text().trim();
 
+    return NextResponse.json({ quote });
   } catch (error) {
-    console.error('Creative API Error:', error);
-    return NextResponse.json({ 
-      photos: [], 
-      error: 'Failed to fetch creative content' 
-    }, { status: 500 });
-  }
-}
-
-// === Imgflip API (мемы) ===
-async function fetchMemes(query: string, page: number) {
-  try {
-    const res = await fetch('https://api.imgflip.com/get_memes');
-    const data = await res.json();
-    
-    if (!data.success) return [];
-    
-    let memes = data.data.memes;
-    if (query && query !== 'funny') {
-      memes = memes.filter((m: any) => 
-        m.name.toLowerCase().includes(query.toLowerCase())
-      );
-    }
-    
-    const start = (page - 1) * 20;
-    const paginated = memes.slice(start, start + 20);
-    
-    return paginated.map((m: any) => ({
-      id: `meme_${m.id}`,
-      src: m.url,
-      thumb: m.url,
-      title: m.name,
-      author: 'Imgflip',
-      authorAvatar: '',
-      source: 'Meme',
-      link: `https://imgflip.com/meme/${m.id}`,
-    }));
-  } catch (e) {
-    console.error('Imgflip error:', e);
-    return [];
-  }
-}
-
-// === Last.fm API ===
-async function fetchLastFM(query: string, page: number) {
-  const key = process.env.NEXT_PUBLIC_LASTFM_API_KEY;
-  
-  if (!key) {
-    console.error('❌ Last.fm API key not found!');
-    return [];
-  }
-
-  try {
-    const url = query && query !== 'music'
-      ? `https://ws.audioscrobbler.com/2.0/?method=artist.search&artist=${encodeURIComponent(query)}&api_key=${key}&format=json&limit=20&page=${page}`
-      : `https://ws.audioscrobbler.com/2.0/?method=chart.gettopartists&api_key=${key}&format=json&limit=20&page=${page}`;
-    
-    const res = await fetch(url);
-    const data = await res.json();
-    
-    const artists = data.results?.artistmatches?.artist || data.artists?.artist || [];
-    
-    return artists.map((p: any) => ({
-      id: `lastfm_${p.mbid || p.name}`,
-      src: p.image?.[3]?.['#text'] || `https://ui-avatars.com/api/?name=${encodeURIComponent(p.name)}&background=c0521a&color=fff`,
-      thumb: p.image?.[1]?.['#text'] || '',
-      title: p.name,
-      author: 'Last.fm',
-      authorAvatar: '',
-      source: 'Music',
-      link: p.url || '',
-    }));
-  } catch (e) {
-    console.error('Last.fm error:', e);
-    return [];
+    console.error('Ошибка генерации магии:', error);
+    return NextResponse.json(
+      { error: 'Не удалось сгенерировать цитату' }, 
+      { status: 500 }
+    );
   }
 }

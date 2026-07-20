@@ -2,13 +2,9 @@
 
 export const dynamic = 'force-dynamic';
 
-export async function POST(req: Request) {
-  try {
-    const { query } = await req.json();
-    if (!process.env.SERPER_API_KEY) {
-      return NextResponse.json({ error: 'API key missing' }, { status: 500 });
-    }
-
+async function getImages(query: string) {
+    if (!process.env.SERPER_API_KEY) return [];
+    
     const response = await fetch('https://google.serper.dev/images', {
       method: 'POST',
       headers: {
@@ -19,15 +15,28 @@ export async function POST(req: Request) {
     });
 
     const data = await response.json();
-    const formattedImages = (data.images || []).map((img: any) => ({
+    return (data.images || []).map((img: any) => ({
       id: img.imageUrl,
       title: img.title || query,
       image_url: img.imageUrl,
       source: 'google'
     }));
+}
 
-    return NextResponse.json({ data: formattedImages, pins: formattedImages, items: formattedImages });
-  } catch (error) {
-    return NextResponse.json({ data: [] }, { status: 500 });
+export async function GET(req: Request) {
+  const { searchParams } = new URL(req.url);
+  const query = searchParams.get('q') || searchParams.get('query') || 'aesthetic';
+  const images = await getImages(query);
+  return NextResponse.json({ data: images, pins: images, items: images });
+}
+
+export async function POST(req: Request) {
+  try {
+    const body = await req.json();
+    const query = body.query || body.q || 'aesthetic';
+    const images = await getImages(query);
+    return NextResponse.json({ data: images, pins: images, items: images });
+  } catch {
+    return NextResponse.json({ data: [], pins: [], items: [] });
   }
 }

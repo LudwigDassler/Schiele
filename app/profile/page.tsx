@@ -1,6 +1,7 @@
 ﻿"use client";
 import { useState, useEffect, useRef } from "react";
 import { supabase } from "../../lib/supabase";
+import { authHeaders } from "../../lib/authHeaders";
 import { useRouter } from "next/navigation";
 import type { User } from "@supabase/supabase-js";
 
@@ -31,9 +32,10 @@ export default function ProfilePage() {
       setBio(u.user_metadata?.bio || "");
       setWebsite(u.user_metadata?.website || "");
       setAvatarUrl(u.user_metadata?.avatar_url || "");
+      const headers = await authHeaders();
       const [pinsRes, boardsRes] = await Promise.all([
-        fetch(`/api/pins?user_id=${u.id}`),
-        fetch(`/api/boards?user_id=${u.id}`)
+        fetch(`/api/pins`, { headers }),
+        fetch(`/api/boards`, { headers })
       ]);
       const pinsData = await pinsRes.json();
       const boardsData = await boardsRes.json();

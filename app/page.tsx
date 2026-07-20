@@ -1,6 +1,7 @@
 ﻿"use client";
 import { useState, useEffect, useRef } from "react";
 import { supabase } from "../lib/supabase";
+import { authHeaders } from "../lib/authHeaders";
 import type { User } from "@supabase/supabase-js";
 
 const categories = [
@@ -94,19 +95,20 @@ export default function Home() {
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
       setUser(data.session?.user ?? null);
-      if (data.session?.user) fetchUserData(data.session.user.id);
+      if (data.session?.user) fetchUserData();
     });
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_, session) => {
       setUser(session?.user ?? null);
-      if (session?.user) fetchUserData(session.user.id);
+      if (session?.user) fetchUserData();
     });
     return () => subscription.unsubscribe();
   }, []);
 
-  async function fetchUserData(userId: string) {
+  async function fetchUserData() {
+    const headers = await authHeaders();
     const [pinsRes, boardsRes] = await Promise.all([
-      fetch(`/api/pins?user_id=${userId}`),
-      fetch(`/api/boards?user_id=${userId}`)
+      fetch(`/api/pins`, { headers }),
+      fetch(`/api/boards`, { headers })
     ]);
     const pinsData = await pinsRes.json();
     const boardsData = await boardsRes.json();
@@ -183,8 +185,8 @@ export default function Home() {
     if (!user) { window.location.href = "/auth"; return; }
     const res = await fetch("/api/pins", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ user_id: user.id, image_url: photo.src, title: photo.title, board_id: boardId || null, source_url: photo.link, source: photo.source, author: photo.author })
+      headers: await authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ image_url: photo.src, title: photo.title, board_id: boardId || null, source_url: photo.link, source: photo.source, author: photo.author })
     });
     const data = await res.json();
     if (data.pin) setPins(prev => [data.pin, ...prev]);
@@ -192,13 +194,13 @@ export default function Home() {
   }
 
   async function deletePin(pinId: string) {
-    await fetch(`/api/pins?id=${pinId}`, { method: "DELETE" });
+    await fetch(`/api/pins?id=${pinId}`, { method: "DELETE", headers: await authHeaders() });
     setPins(prev => prev.filter(p => p.id !== pinId));
   }
 
   async function createBoard() {
     if (!newBoardName || !user) return;
-    const res = await fetch("/api/boards", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ user_id: user.id, name: newBoardName, description: newBoardDesc }) });
+    const res = await fetch("/api/boards", { method: "POST", headers: await authHeaders({ "Content-Type": "application/json" }), body: JSON.stringify({ name: newBoardName, description: newBoardDesc }) });
     const data = await res.json();
     if (data.board) setBoards(prev => [data.board, ...prev]);
     setNewBoardName(""); setNewBoardDesc(""); setShowNewBoard(false);
@@ -206,7 +208,7 @@ export default function Home() {
 
   async function updateBoard() {
     if (!editBoard) return;
-    const res = await fetch("/api/boards", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: editBoard.id, name: editBoard.name, description: editBoard.description }) });
+    const res = await fetch("/api/boards", { method: "PUT", headers: await authHeaders({ "Content-Type": "application/json" }), body: JSON.stringify({ id: editBoard.id, name: editBoard.name, description: editBoard.description }) });
     const data = await res.json();
     if (data.board) setBoards(prev => prev.map(b => b.id === editBoard.id ? data.board : b));
     setEditBoard(null);
@@ -214,7 +216,7 @@ export default function Home() {
 
   async function deleteBoard(boardId: string) {
     if (!confirm("Delete this board?")) return;
-    await fetch(`/api/boards?id=${boardId}`, { method: "DELETE" });
+    await fetch(`/api/boards?id=${boardId}`, { method: "DELETE", headers: await authHeaders() });
     setBoards(prev => prev.filter(b => b.id !== boardId));
   }
 

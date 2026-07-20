@@ -14,8 +14,9 @@ export default function SplashScreenWrapper({
   const [showSplash, setShowSplash] = useState(true);
 
   useEffect(() => {
-    const hasVisited = sessionStorage.getItem("schiele_visited");
-    if (hasVisited) {
+    // Splash is skipped for returning visitors; sessionStorage is only available on the client.
+    if (sessionStorage.getItem("schiele_visited")) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setShowSplash(false);
     }
   }, []);

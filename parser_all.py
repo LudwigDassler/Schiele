@@ -1,3 +1,4 @@
+import os
 import subprocess
 import json
 import time
@@ -8,16 +9,27 @@ import re
 from datetime import datetime
 
 # ============================================================
-# НАСТРОЙКИ
+# НАСТРОЙКИ (все ключи читаются из переменных окружения)
 # ============================================================
 
-SUPABASE_URL = "https://kefdjxsmyarwfqqkfgcx.supabase.co"
-SUPABASE_KEY = "sb_publishable_DHa5G0bhPLWJWNrACLVEUw_2GZS4BMc"
+
+def _require_env(name: str) -> str:
+    value = os.environ.get(name)
+    if not value:
+        raise SystemExit(
+            f"❌ Переменная окружения {name} не задана. "
+            "Задайте её перед запуском (см. .env.example / GitHub Secrets)."
+        )
+    return value
+
+
+SUPABASE_URL = _require_env("SUPABASE_URL")
+SUPABASE_KEY = _require_env("SUPABASE_KEY")
 
 # Ключи для API
-UNSPLASH_KEY = "_69IV3HDkFCXBXL7CQapxjfygVVtsNr-QUUTMUVR-0Y"
-PEXELS_KEY = "cUWG1Ljcq5MZKPZCdgIDk0JRvhS7ept2Kg0AlbOmosp9dDzaklJfJCCE"
-PIXABAY_KEY = "56418849-ca0e6712154d147d1a5c18e9a"
+UNSPLASH_KEY = os.environ.get("UNSPLASH_KEY", "")
+PEXELS_KEY = os.environ.get("PEXELS_KEY", "")
+PIXABAY_KEY = os.environ.get("PIXABAY_KEY", "")
 
 # ============================================================
 # КАТЕГОРИИ (300+)

@@ -103,15 +103,28 @@ export default function Home() {
     return () => subscription.unsubscribe();
   }, []);
 
+  function showToast(msg: string) {
+    setShareMsg(msg);
+    setTimeout(() => setShareMsg(""), 2500);
+  }
+
   async function fetchUserData(userId: string) {
-    const [pinsRes, boardsRes] = await Promise.all([
-      fetch(`/api/pins?user_id=${userId}`),
-      fetch(`/api/boards?user_id=${userId}`)
-    ]);
-    const pinsData = await pinsRes.json();
-    const boardsData = await boardsRes.json();
-    if (pinsData.pins) setPins(pinsData.pins);
-    if (boardsData.boards) setBoards(boardsData.boards);
+    try {
+      const [pinsRes, boardsRes] = await Promise.all([
+        fetch(`/api/pins?user_id=${userId}`),
+        fetch(`/api/boards?user_id=${userId}`)
+      ]);
+      if (!pinsRes.ok || !boardsRes.ok) {
+        throw new Error(`Failed to load user data (pins: ${pinsRes.status}, boards: ${boardsRes.status})`);
+      }
+      const pinsData = await pinsRes.json();
+      const boardsData = await boardsRes.json();
+      if (pinsData.pins) setPins(pinsData.pins);
+      if (boardsData.boards) setBoards(boardsData.boards);
+    } catch (e) {
+      console.error("Failed to fetch user data:", e);
+      showToast("Couldn't load your pins and boards");
+    }
   }
 
   async function fetchPhotos(query: string, category: string, pageNum: number, reset: boolean) {
@@ -181,41 +194,77 @@ export default function Home() {
 
   async function savePin(photo: Photo, boardId?: string) {
     if (!user) { window.location.href = "/auth"; return; }
-    const res = await fetch("/api/pins", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ user_id: user.id, image_url: photo.src, title: photo.title, board_id: boardId || null, source_url: photo.link, source: photo.source, author: photo.author })
-    });
-    const data = await res.json();
-    if (data.pin) setPins(prev => [data.pin, ...prev]);
-    setShowSaveToBoard(null); setSelected(null);
+    try {
+      const res = await fetch("/api/pins", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: user.id, image_url: photo.src, title: photo.title, board_id: boardId || null, source_url: photo.link, source: photo.source, author: photo.author })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.pin) {
+        throw new Error(data.error || `Failed to save pin (${res.status})`);
+      }
+      setPins(prev => [data.pin, ...prev]);
+      setShowSaveToBoard(null); setSelected(null);
+    } catch (e) {
+      console.error("Failed to save pin:", e);
+      showToast("Couldn't save pin");
+    }
   }
 
   async function deletePin(pinId: string) {
-    await fetch(`/api/pins?id=${pinId}`, { method: "DELETE" });
-    setPins(prev => prev.filter(p => p.id !== pinId));
+    try {
+      const res = await fetch(`/api/pins?id=${pinId}`, { method: "DELETE" });
+      if (!res.ok) throw new Error(`Failed to delete pin (${res.status})`);
+      setPins(prev => prev.filter(p => p.id !== pinId));
+    } catch (e) {
+      console.error("Failed to delete pin:", e);
+      showToast("Couldn't delete pin");
+    }
   }
 
   async function createBoard() {
     if (!newBoardName || !user) return;
-    const res = await fetch("/api/boards", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ user_id: user.id, name: newBoardName, description: newBoardDesc }) });
-    const data = await res.json();
-    if (data.board) setBoards(prev => [data.board, ...prev]);
-    setNewBoardName(""); setNewBoardDesc(""); setShowNewBoard(false);
+    try {
+      const res = await fetch("/api/boards", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ user_id: user.id, name: newBoardName, description: newBoardDesc }) });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.board) {
+        throw new Error(data.error || `Failed to create board (${res.status})`);
+      }
+      setBoards(prev => [data.board, ...prev]);
+      setNewBoardName(""); setNewBoardDesc(""); setShowNewBoard(false);
+    } catch (e) {
+      console.error("Failed to create board:", e);
+      showToast("Couldn't create board");
+    }
   }
 
   async function updateBoard() {
     if (!editBoard) return;
-    const res = await fetch("/api/boards", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: editBoard.id, name: editBoard.name, description: editBoard.description }) });
-    const data = await res.json();
-    if (data.board) setBoards(prev => prev.map(b => b.id === editBoard.id ? data.board : b));
-    setEditBoard(null);
+    try {
+      const res = await fetch("/api/boards", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: editBoard.id, name: editBoard.name, description: editBoard.description }) });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.board) {
+        throw new Error(data.error || `Failed to update board (${res.status})`);
+      }
+      setBoards(prev => prev.map(b => b.id === editBoard.id ? data.board : b));
+      setEditBoard(null);
+    } catch (e) {
+      console.error("Failed to update board:", e);
+      showToast("Couldn't update board");
+    }
   }
 
   async function deleteBoard(boardId: string) {
     if (!confirm("Delete this board?")) return;
-    await fetch(`/api/boards?id=${boardId}`, { method: "DELETE" });
-    setBoards(prev => prev.filter(b => b.id !== boardId));
+    try {
+      const res = await fetch(`/api/boards?id=${boardId}`, { method: "DELETE" });
+      if (!res.ok) throw new Error(`Failed to delete board (${res.status})`);
+      setBoards(prev => prev.filter(b => b.id !== boardId));
+    } catch (e) {
+      console.error("Failed to delete board:", e);
+      showToast("Couldn't delete board");
+    }
   }
 
   function isPinned(photo: Photo) { return pins.some(p => p.image_url === photo.src); }

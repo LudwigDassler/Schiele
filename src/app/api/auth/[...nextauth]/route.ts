@@ -22,6 +22,7 @@ export async function GET(request: Request) {
     const data = await res.json();
     return NextResponse.json(data);
   } catch (error) {
+    console.error('Unsplash fetch error:', error);
     return NextResponse.json({ error: 'Failed to fetch images' }, { status: 500 });
   }
 }

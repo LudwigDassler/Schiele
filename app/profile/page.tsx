@@ -31,15 +31,24 @@ export default function ProfilePage() {
       setBio(u.user_metadata?.bio || "");
       setWebsite(u.user_metadata?.website || "");
       setAvatarUrl(u.user_metadata?.avatar_url || "");
-      const [pinsRes, boardsRes] = await Promise.all([
-        fetch(`/api/pins?user_id=${u.id}`),
-        fetch(`/api/boards?user_id=${u.id}`)
-      ]);
-      const pinsData = await pinsRes.json();
-      const boardsData = await boardsRes.json();
-      if (pinsData.pins) setPins(pinsData.pins);
-      if (boardsData.boards) setBoards(boardsData.boards);
-      setLoading(false);
+      try {
+        const [pinsRes, boardsRes] = await Promise.all([
+          fetch(`/api/pins?user_id=${u.id}`),
+          fetch(`/api/boards?user_id=${u.id}`)
+        ]);
+        if (!pinsRes.ok || !boardsRes.ok) {
+          throw new Error(`Failed to load profile data (pins: ${pinsRes.status}, boards: ${boardsRes.status})`);
+        }
+        const pinsData = await pinsRes.json();
+        const boardsData = await boardsRes.json();
+        if (pinsData.pins) setPins(pinsData.pins);
+        if (boardsData.boards) setBoards(boardsData.boards);
+      } catch (e) {
+        console.error("Failed to load profile data:", e);
+        setError("Couldn't load your pins and boards");
+      } finally {
+        setLoading(false);
+      }
     });
   }, []);
 

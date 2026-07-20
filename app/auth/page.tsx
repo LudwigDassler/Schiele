@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { supabase } from "../../lib/supabase";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 
 export default function AuthPage() {
   const router = useRouter();
@@ -62,7 +63,7 @@ export default function AuthPage() {
         {/* Tabs */}
         <div style={{ display: "flex", gap: 4, background: "#f0f0f0", borderRadius: 12, padding: 4, marginBottom: 24 }}>
           {[["login", "Sign In"], ["register", "Register"], ["phone", "Phone"]].map(([m, label]) => (
-            <button key={m} onClick={() => { setMode(m as any); setError(""); setMessage(""); setOtpSent(false); }} style={{ flex: 1, padding: "8px 4px", borderRadius: 8, border: "none", cursor: "pointer", fontSize: 13, fontWeight: 600, fontFamily: "-apple-system, sans-serif", background: mode === m ? "white" : "transparent", color: mode === m ? "#111" : "#888", boxShadow: mode === m ? "0 1px 4px rgba(0,0,0,0.1)" : "none", transition: "all 0.2s" }}>
+            <button key={m} onClick={() => { setMode(m as "login" | "register" | "phone"); setError(""); setMessage(""); setOtpSent(false); }} style={{ flex: 1, padding: "8px 4px", borderRadius: 8, border: "none", cursor: "pointer", fontSize: 13, fontWeight: 600, fontFamily: "-apple-system, sans-serif", background: mode === m ? "white" : "transparent", color: mode === m ? "#111" : "#888", boxShadow: mode === m ? "0 1px 4px rgba(0,0,0,0.1)" : "none", transition: "all 0.2s" }}>
               {label}
             </button>
           ))}
@@ -112,7 +113,7 @@ export default function AuthPage() {
         )}
 
         <div style={{ marginTop: 20, textAlign: "center" }}>
-          <a href="/" style={{ color: "#999", fontSize: 12, textDecoration: "none" }}>← Back to Schiele</a>
+          <Link href="/" style={{ color: "#999", fontSize: 12, textDecoration: "none" }}>← Back to Schiele</Link>
         </div>
       </div>
     </div>

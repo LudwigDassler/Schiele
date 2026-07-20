@@ -8,6 +8,22 @@ export default function MetalLoader() {
   const containerRef = useRef<HTMLDivElement>(null);
   const particlesRef = useRef<HTMLDivElement>(null);
 
+  function createParticle() {
+    if (!particlesRef.current) return;
+    const particle = document.createElement("div");
+    particle.className = "particle";
+    const left = Math.random() * 100;
+    particle.style.left = left + "%";
+    particle.style.bottom = "-10px";
+    const size = Math.random() * 5 + 3;
+    particle.style.width = size + "px";
+    particle.style.height = size + "px";
+    particlesRef.current.appendChild(particle);
+    setTimeout(() => {
+      if (particle.parentNode) particle.remove();
+    }, 3800);
+  }
+
   useEffect(() => {
     // Прогресс
     const timer1 = setTimeout(() => setProgress(100), 100);
@@ -36,22 +52,6 @@ export default function MetalLoader() {
       clearInterval(particleInterval);
     };
   }, []);
-
-  const createParticle = () => {
-    if (!particlesRef.current) return;
-    const particle = document.createElement("div");
-    particle.className = "particle";
-    const left = Math.random() * 100;
-    particle.style.left = left + "%";
-    particle.style.bottom = "-10px";
-    const size = Math.random() * 5 + 3;
-    particle.style.width = size + "px";
-    particle.style.height = size + "px";
-    particlesRef.current.appendChild(particle);
-    setTimeout(() => {
-      if (particle.parentNode) particle.remove();
-    }, 3800);
-  };
 
   return (
     <>

@@ -2,6 +2,8 @@
 import { useState, useEffect, useRef } from "react";
 import { supabase } from "../lib/supabase";
 import type { User } from "@supabase/supabase-js";
+import type { Photo, Board, Pin } from "../lib/types";
+import AIChat from "../components/AIChat";
 
 const categories = [
   "All", "Nature", "City", "Food", "Travel", "Architecture",
@@ -32,12 +34,10 @@ const quotes = [
   { text: "Everything flows.", author: "Heraclitus" },
 ];
 
-type Photo = { id: string; src: string; thumb: string; title: string; author: string; authorAvatar: string; source: string; link: string };
-type Board = { id: string; name: string; description?: string };
-type Pin = { id: string; image_url: string; title: string; board_id?: string; source_url?: string };
+// Domain types (Photo, Board, Pin) are imported from ../lib/types
 
 function QuoteCard() {
-  const q = quotes[Math.floor(Math.random() * quotes.length)];
+  const [q] = useState(() => quotes[Math.floor(Math.random() * quotes.length)]);
   return (
     <div style={{
       breakInside: "avoid", marginBottom: 10,
@@ -47,7 +47,7 @@ function QuoteCard() {
       display: "flex", flexDirection: "column", gap: 12,
       minHeight: 160,
     }}>
-      <span style={{ fontSize: 28, color: "#c0521a", lineHeight: 1, fontFamily: "Georgia, serif" }}>"</span>
+      <span style={{ fontSize: 28, color: "#c0521a", lineHeight: 1, fontFamily: "Georgia, serif" }}>&ldquo;</span>
       <p style={{ color: "#d4b896", fontSize: 13, lineHeight: 1.7, fontFamily: "Georgia, serif", fontStyle: "italic", flex: 1 }}>{q.text}</p>
       <p style={{ color: "#8a6a4a", fontSize: 11, fontFamily: "Georgia, serif" }}>— {q.author}</p>
     </div>
@@ -80,6 +80,11 @@ export default function Home() {
   const [newBoardName, setNewBoardName] = useState("");
   const [newBoardDesc, setNewBoardDesc] = useState("");
   const [shareMsg, setShareMsg] = useState("");
+  const [aiSearch, setAiSearch] = useState(false);
+  const [enhancedQuery, setEnhancedQuery] = useState<string | null>(null);
+  const [aiResults, setAiResults] = useState<Photo[] | null>(null);
+  const [aiQuery, setAiQuery] = useState("");
+  const [brokenImages, setBrokenImages] = useState<Set<string>>(new Set());
   const [quotePositions] = useState<number[]>(() => {
     const pos: number[] = [];
     for (let i = 5; i < 200; i += Math.floor(Math.random() * 8) + 5) pos.push(i);
@@ -90,6 +95,17 @@ export default function Home() {
   const bottomRef = useRef<HTMLDivElement>(null);
   const loadingRef = useRef(false);
   const activeRequestRef = useRef(0);
+
+  async function fetchUserData(userId: string) {
+    const [pinsRes, boardsRes] = await Promise.all([
+      fetch(`/api/pins?user_id=${userId}`),
+      fetch(`/api/boards?user_id=${userId}`)
+    ]);
+    const pinsData = await pinsRes.json();
+    const boardsData = await boardsRes.json();
+    if (pinsData.pins) setPins(pinsData.pins);
+    if (boardsData.boards) setBoards(boardsData.boards);
+  }
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -103,58 +119,62 @@ export default function Home() {
     return () => subscription.unsubscribe();
   }, []);
 
-  async function fetchUserData(userId: string) {
-    const [pinsRes, boardsRes] = await Promise.all([
-      fetch(`/api/pins?user_id=${userId}`),
-      fetch(`/api/boards?user_id=${userId}`)
-    ]);
-    const pinsData = await pinsRes.json();
-    const boardsData = await boardsRes.json();
-    if (pinsData.pins) setPins(pinsData.pins);
-    if (boardsData.boards) setBoards(boardsData.boards);
-  }
-
-  async function fetchPhotos(query: string, category: string, pageNum: number, reset: boolean) {
-    if (loadingRef.current) return;
+  async function fetchPhotos(query: string, category: string, pageNum: number, reset: boolean, ai: boolean) {
+    const requestId = ++activeRequestRef.current;
     loadingRef.current = true;
     setLoading(true);
+    if (reset) {
+      setPage(1);
+      setHasMore(true);
+      setAiResults(null);
+      setPhotos([]);
+    }
     try {
       const params = new URLSearchParams({ category, page: String(pageNum) });
       if (query) params.set("query", query);
+      if (ai && query) params.set("ai", "1");
       const res = await fetch(`/api/photos?${params}`);
       const data = await res.json();
-      const fetched = (data.photos || []).filter((p: Photo) => p.src && p.src.startsWith("http"));
+      // Ignore stale responses so switching category/search never freezes the feed.
+      if (requestId !== activeRequestRef.current) return;
+      const fetched: Photo[] = (data.photos || []).filter((p: Photo) => p.src && p.src.startsWith("http"));
       setPhotos(prev => reset ? fetched : [...prev, ...fetched]);
-      setHasMore(fetched.length >= 15);
-    } catch (e) { console.error(e); }
-    setLoading(false);
-    loadingRef.current = false;
+      setHasMore(Boolean(data.hasMore));
+      if (reset) setEnhancedQuery(data.enhancedQuery || null);
+    } catch (e) {
+      if (requestId === activeRequestRef.current) console.error(e);
+    } finally {
+      if (requestId === activeRequestRef.current) {
+        setLoading(false);
+        loadingRef.current = false;
+      }
+    }
   }
 
   useEffect(() => {
-    setPage(1);
-    setHasMore(true);
-    setPhotos([]);
-    fetchPhotos(searchQuery, active, 1, true);
-  }, [active, searchQuery]);
+    // Fetch-on-change effect: setState here is intentional (loading + reset).
+    // eslint-disable-next-line react-hooks/set-state-in-effect, react-hooks/exhaustive-deps
+    fetchPhotos(searchQuery, active, 1, true, aiSearch);
+  }, [active, searchQuery, aiSearch]);
 
   useEffect(() => {
     if (!bottomRef.current) return;
     observerRef.current?.disconnect();
     observerRef.current = new IntersectionObserver(entries => {
-      if (entries[0].isIntersecting && hasMore && !loadingRef.current) {
+      if (entries[0].isIntersecting && hasMore && !loadingRef.current && !aiResults) {
         const next = page + 1;
         setPage(next);
-        fetchPhotos(searchQuery, active, next, false);
+        fetchPhotos(searchQuery, active, next, false, false);
       }
     }, { threshold: 0.1 });
     observerRef.current.observe(bottomRef.current);
     return () => observerRef.current?.disconnect();
-  }, [hasMore, page, active, searchQuery]);
+  }, [hasMore, page, active, searchQuery, aiResults]);
 
   function handleSearch(e: React.FormEvent) {
     e.preventDefault();
     setSearchQuery(search);
+    setAiResults(null);
     setShowMenu(false);
     setShowSaved(false);
     setShowBoards(false);
@@ -163,6 +183,27 @@ export default function Home() {
   function clearSearch() {
     setSearch("");
     setSearchQuery("");
+    setAiResults(null);
+    setEnhancedQuery(null);
+  }
+
+  function markBroken(src: string) {
+    setBrokenImages(prev => {
+      if (prev.has(src)) return prev;
+      const next = new Set(prev);
+      next.add(src);
+      return next;
+    });
+  }
+
+  function showAIResults(list: Photo[], q: string) {
+    const clean = list.filter(p => p.src && p.src.startsWith("http"));
+    setAiResults(clean);
+    setAiQuery(q);
+    setShowSaved(false);
+    setShowBoards(false);
+    setShowMenu(false);
+    if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
@@ -229,9 +270,12 @@ export default function Home() {
 
   async function signOut() { await supabase.auth.signOut(); setPins([]); setBoards([]); }
 
-  const displayPhotos = showSaved
+  const basePhotos: Photo[] = showSaved
     ? pins.map(p => ({ id: p.id, src: p.image_url, thumb: p.image_url, title: p.title || "", author: "", authorAvatar: "", source: "", link: p.source_url || "" }))
-    : photos;
+    : aiResults
+      ? aiResults
+      : photos;
+  const displayPhotos = basePhotos.filter(p => !brokenImages.has(p.src));
 
   const userAvatar = user?.user_metadata?.avatar_url || "";
   const userName = user?.user_metadata?.full_name || user?.email || "";
@@ -280,6 +324,8 @@ export default function Home() {
         .search-input::placeholder { color: #4a3520; }
         .search-btn { padding: 9px 14px; background: transparent; border: none; color: #6a4a2a; cursor: pointer; transition: color 0.2s; }
         .search-btn:hover { color: #c0521a; }
+        .ai-toggle { font-size: 15px; }
+        .ai-toggle.on { color: #c0521a; text-shadow: 0 0 10px rgba(192,82,26,0.6); }
 
         .hbtn {
           background: transparent; border: none;
@@ -408,6 +454,7 @@ export default function Home() {
             <div className="search-wrap">
               <input className="search-input" placeholder="Search artists, musicians, writers..." value={search} onChange={e => setSearch(e.target.value)} />
               {search && <button type="button" onClick={clearSearch} className="search-btn" style={{ fontSize: 16 }}>✕</button>}
+              <button type="button" onClick={() => setAiSearch(v => !v)} className={`search-btn ai-toggle ${aiSearch ? "on" : ""}`} title="AI-powered search" aria-pressed={aiSearch}>✦</button>
               <button type="submit" className="search-btn">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
               </button>
@@ -437,9 +484,11 @@ export default function Home() {
         </header>
 
         {/* Status bar */}
-        {(searchQuery || showSaved || showBoards) && (
+        {(searchQuery || showSaved || showBoards || aiResults) && (
           <div className="status-bar">
-            {searchQuery && <><span style={{ color: "#8a6a4a" }}>Results for <span style={{ color: "#c0521a", fontStyle: "italic" }}>"{searchQuery}"</span></span><button onClick={clearSearch}>✕</button></>}
+            {aiResults && <><span style={{ color: "#8a6a4a" }}>✦ Muse results for <span style={{ color: "#c0521a", fontStyle: "italic" }}>&ldquo;{aiQuery}&rdquo;</span></span><button onClick={() => setAiResults(null)}>✕</button></>}
+            {!aiResults && searchQuery && <><span style={{ color: "#8a6a4a" }}>Results for <span style={{ color: "#c0521a", fontStyle: "italic" }}>&ldquo;{searchQuery}&rdquo;</span></span><button onClick={clearSearch}>✕</button></>}
+            {!aiResults && searchQuery && enhancedQuery && <span style={{ color: "#6a4a2a", marginLeft: 4, fontSize: 11 }}>✦ AI: <span style={{ color: "#c0521a", fontStyle: "italic" }}>{enhancedQuery}</span></span>}
             {showSaved && <span style={{ color: "#8a6a4a" }}>Saved: <span style={{ color: "#c0521a" }}>{pins.length}</span></span>}
             {showBoards && <span style={{ color: "#8a6a4a" }}>Boards: <span style={{ color: "#c0521a" }}>{boards.length}</span></span>}
           </div>
@@ -488,9 +537,9 @@ export default function Home() {
                     <div key={item.data.id} className="card" onClick={() => setSelected(item.data)}>
                       <img
                         src={item.data.src}
-                        alt=""
+                        alt={item.data.title || ""}
                         loading="lazy"
-                        onError={e => { (e.target as HTMLImageElement).closest(".card")?.remove(); }}
+                        onError={() => markBroken(item.data.src)}
                       />
                       <div className="overlay">
                         <div className="card-actions">
@@ -515,7 +564,7 @@ export default function Home() {
               </div>
             </div>
             {displayPhotos.length === 0 && !loading && <div className="empty">{showSaved ? "No saved pins yet." : "Nothing found."}</div>}
-            {!showSaved && <div ref={bottomRef} style={{ padding: "28px", textAlign: "center" }}>{loading && <div className="spinner" />}</div>}
+            {!showSaved && !aiResults && <div ref={bottomRef} style={{ padding: "28px", textAlign: "center" }}>{loading && <div className="spinner" />}</div>}
           </>
         )}
 
@@ -709,6 +758,7 @@ export default function Home() {
         )}
 
         {shareMsg && <div className="share-toast">{shareMsg}</div>}
+        <AIChat onShowResults={showAIResults} onSelectPhoto={setSelected} />
       </main>
     </>
   );

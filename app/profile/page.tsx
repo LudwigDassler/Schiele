@@ -3,6 +3,8 @@ import { useState, useEffect, useRef } from "react";
 import { supabase } from "../../lib/supabase";
 import { useRouter } from "next/navigation";
 import type { User } from "@supabase/supabase-js";
+import type { Pin, Board } from "../../lib/types";
+import Link from "next/link";
 
 export default function ProfilePage() {
   const router = useRouter();
@@ -17,8 +19,8 @@ export default function ProfilePage() {
   const [avatarPreview, setAvatarPreview] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
-  const [pins, setPins] = useState<any[]>([]);
-  const [boards, setBoards] = useState<any[]>([]);
+  const [pins, setPins] = useState<Pin[]>([]);
+  const [boards, setBoards] = useState<Board[]>([]);
   const [tab, setTab] = useState<"pins" | "boards">("pins");
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -113,9 +115,9 @@ export default function ProfilePage() {
       `}</style>
 
       <header style={{ background: "white", borderBottom: "1px solid #ebebeb", padding: "12px 20px", display: "flex", alignItems: "center", gap: 12, position: "sticky", top: 0, zIndex: 10 }}>
-        <a href="/" style={{ display: "flex", alignItems: "center", gap: 8, textDecoration: "none" }}>
+        <Link href="/" style={{ display: "flex", alignItems: "center", gap: 8, textDecoration: "none" }}>
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#888" strokeWidth="2.5" strokeLinecap="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
-        </a>
+        </Link>
         <span style={{ fontSize: 17, fontWeight: 800, letterSpacing: 3, fontFamily: "Georgia, serif", color: "#111" }}>
           SCH<span style={{ color: "#c0521a" }}>IE</span>LE
         </span>

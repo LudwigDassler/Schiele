@@ -21,48 +21,6 @@ export default function SplashScreen({ onComplete, variant }: SplashScreenProps)
     },
   });
 
-  useEffect(() => {
-    const startTime = Date.now();
-    const duration = 3000;
-
-    function animate() {
-      const elapsed = Date.now() - startTime;
-      const p = Math.min(elapsed / duration, 1);
-      setProgress(p);
-      
-      const canvas = canvasRef.current;
-      const ctx = canvas?.getContext("2d");
-      if (ctx && canvas) {
-        const rect = canvas.parentElement?.getBoundingClientRect();
-        const dpr = window.devicePixelRatio || 1;
-        const w = rect?.width || 600;
-        const h = rect?.height || 500;
-        canvas.width = w * dpr;
-        canvas.height = h * dpr;
-        canvas.style.width = w + "px";
-        canvas.style.height = h + "px";
-        ctx.scale(dpr, dpr);
-        
-        if (variant === "schiele") {
-          drawSchiele(ctx, w, h, p);
-        } else {
-          drawLedZeppelin(ctx, w, h, p);
-        }
-      }
-      
-      if (p < 1) {
-        animationRef.current = requestAnimationFrame(animate);
-      } else {
-        setTimeout(() => setVisible(false), 600);
-      }
-    }
-    
-    animate();
-    return () => {
-      if (animationRef.current) cancelAnimationFrame(animationRef.current);
-    };
-  }, [variant]);
-
   function drawSchiele(ctx: CanvasRenderingContext2D, w: number, h: number, p: number) {
     const cx = w / 2;
     const cy = h / 2;
@@ -365,6 +323,48 @@ export default function SplashScreen({ onComplete, variant }: SplashScreenProps)
       ctx.fillText("1968", cx, h - 18 * scale);
     }
   }
+
+  useEffect(() => {
+    const startTime = Date.now();
+    const duration = 3000;
+
+    function animate() {
+      const elapsed = Date.now() - startTime;
+      const p = Math.min(elapsed / duration, 1);
+      setProgress(p);
+
+      const canvas = canvasRef.current;
+      const ctx = canvas?.getContext("2d");
+      if (ctx && canvas) {
+        const rect = canvas.parentElement?.getBoundingClientRect();
+        const dpr = window.devicePixelRatio || 1;
+        const w = rect?.width || 600;
+        const h = rect?.height || 500;
+        canvas.width = w * dpr;
+        canvas.height = h * dpr;
+        canvas.style.width = w + "px";
+        canvas.style.height = h + "px";
+        ctx.scale(dpr, dpr);
+
+        if (variant === "schiele") {
+          drawSchiele(ctx, w, h, p);
+        } else {
+          drawLedZeppelin(ctx, w, h, p);
+        }
+      }
+
+      if (p < 1) {
+        animationRef.current = requestAnimationFrame(animate);
+      } else {
+        setTimeout(() => setVisible(false), 600);
+      }
+    }
+
+    animate();
+    return () => {
+      if (animationRef.current) cancelAnimationFrame(animationRef.current);
+    };
+  }, [variant]);
 
   return (
     <animated.div

@@ -5,7 +5,6 @@ export const dynamic = 'force-dynamic';
 async function getImages(query: string) {
     if (!process.env.SERPER_API_KEY) return [];
     
-    // Очищаем запрос: если 'All', ищем что-то общее
     const safeQuery = (query === 'All' || !query) ? 'aesthetic' : query;
 
     try {
@@ -25,18 +24,17 @@ async function getImages(query: string) {
           image_url: img.imageUrl,
           source: 'google'
         }));
-    } catch (e) {
-        console.error('Ошибка поиска:', e);
+    } catch {
         return [];
     }
 }
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
-  // Теперь ищем 'category' первым делом!
   const query = searchParams.get('category') || searchParams.get('q') || searchParams.get('query') || 'aesthetic';
   const images = await getImages(query);
-  return NextResponse.json({ data: images, pins: images, items: images });
+  // ВОТ ГЛАВНОЕ ИЗМЕНЕНИЕ: возвращаем массив напрямую
+  return NextResponse.json(images);
 }
 
 export async function POST(req: Request) {
@@ -44,8 +42,9 @@ export async function POST(req: Request) {
     const body = await req.json();
     const query = body.category || body.query || body.q || 'aesthetic';
     const images = await getImages(query);
-    return NextResponse.json({ data: images, pins: images, items: images });
+    // И здесь тоже возвращаем массив напрямую
+    return NextResponse.json(images);
   } catch {
-    return NextResponse.json({ data: [], pins: [], items: [] });
+    return NextResponse.json([]);
   }
 }

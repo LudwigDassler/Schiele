@@ -37,18 +37,36 @@ async function searchSupabase(query: string) {
 
 // === ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ДЛЯ WIKIPEDIA ===
 async function searchWikipedia(query: string) {
-  const url = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&format=json&origin=*&srlimit=15`;
-  const res = await fetch(url);
-  const data = await res.json();
-  return data.query?.search || [];
+  try {
+    const url = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&format=json&origin=*&srlimit=15`;
+    const res = await fetch(url);
+    if (!res.ok) {
+      console.error(`Wikipedia search failed: ${res.status}`);
+      return [];
+    }
+    const data = await res.json();
+    return data.query?.search || [];
+  } catch (e) {
+    console.error('Wikipedia search error:', e);
+    return [];
+  }
 }
 
 async function getWikipediaDetails(pageId: number) {
-  const url = `https://en.wikipedia.org/w/api.php?action=query&prop=extracts|pageimages&exintro=true&explaintext=true&pithumbsize=400&pageids=${pageId}&format=json&origin=*`;
-  const res = await fetch(url);
-  const data = await res.json();
-  const pages = data.query?.pages || {};
-  return pages[pageId] || null;
+  try {
+    const url = `https://en.wikipedia.org/w/api.php?action=query&prop=extracts|pageimages&exintro=true&explaintext=true&pithumbsize=400&pageids=${pageId}&format=json&origin=*`;
+    const res = await fetch(url);
+    if (!res.ok) {
+      console.error(`Wikipedia details failed for page ${pageId}: ${res.status}`);
+      return null;
+    }
+    const data = await res.json();
+    const pages = data.query?.pages || {};
+    return pages[pageId] || null;
+  } catch (e) {
+    console.error(`Wikipedia details error for page ${pageId}:`, e);
+    return null;
+  }
 }
 
 // === ГЛАВНАЯ ФУНКЦИЯ ===

@@ -1,6 +1,7 @@
-﻿import { NextResponse } from 'next/server';
-
-const token = process.env.PINTEREST_ACCESS_TOKEN;
+import { NextResponse } from 'next/server';
+import { errorResponse } from '@/lib/api';
+import { pinterestFetch } from '@/lib/pinterest';
+import type { Photo } from '@/lib/types';
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -11,21 +12,8 @@ export async function GET(request: Request) {
   }
 
   try {
-    const res = await fetch(
-      'https://api.pinterest.com/v5/search/pins?query=' + encodeURIComponent(query) + '&limit=20',
-      {
-        headers: {
-          'Authorization': 'Bearer ' + token,
-        },
-      }
-    );
-
-    if (!res.ok) {
-      throw new Error('Pinterest API error: ' + res.status);
-    }
-
-    const data = await res.json();
-    const pins = (data.items || []).map(function(item: any) {
+    const data = await pinterestFetch('search/pins?query=' + encodeURIComponent(query) + '&limit=20');
+    const pins: Photo[] = (data.items || []).map(function(item: any) {
       return {
         id: 'pinterest_' + item.id,
         src: item.media?.images?.originals?.url || '',
@@ -41,6 +29,6 @@ export async function GET(request: Request) {
     return NextResponse.json({ results: pins, source: 'pinterest' });
   } catch (error) {
     console.error('Pinterest search error:', error);
-    return NextResponse.json({ results: [], error: 'Pinterest search failed' }, { status: 500 });
+    return errorResponse('Pinterest search failed', 500, { results: [] });
   }
 }

@@ -1,20 +1,12 @@
 import { NextResponse } from 'next/server';
-
-const SUPABASE_URL = "https://kefdjxsmyarwfqqkfgcx.supabase.co";
-const SUPABASE_KEY = "sb_publishable_DHa5G0bhPLWJWNrACLVEUw_2GZS4BMc";
+import { avatarUrl, errorResponse } from '@/lib/api';
+import { supabaseRestFetch } from '@/lib/supabaseRest';
+import type { Photo } from '@/lib/types';
 
 // === ПОИСК В SUPABASE ===
-async function searchSupabase(query: string) {
+async function searchSupabase(query: string): Promise<Photo[]> {
   try {
-    const res = await fetch(
-      `${SUPABASE_URL}/rest/v1/images?title=ilike.%${query}%&select=*`,
-      {
-        headers: {
-          "apikey": SUPABASE_KEY,
-          "Authorization": `Bearer ${SUPABASE_KEY}`,
-        },
-      }
-    );
+    const res = await supabaseRestFetch(`images?title=ilike.%${query}%&select=*`);
     
     if (!res.ok) return [];
     const data = await res.json();
@@ -80,9 +72,9 @@ export async function GET(request: Request) {
       })
     );
 
-    const wikiPhotos = enriched.map((item: any) => ({
+    const wikiPhotos: Photo[] = enriched.map((item: any) => ({
       id: item.id,
-      src: item.image || `https://ui-avatars.com/api/?name=${encodeURIComponent(item.title)}&background=c0521a&color=fff&size=400`,
+      src: item.image || avatarUrl(item.title, 400),
       thumb: item.image || '',
       title: item.title,
       author: 'Wikipedia',
@@ -102,6 +94,6 @@ export async function GET(request: Request) {
     });
   } catch (error) {
     console.error('Search error:', error);
-    return NextResponse.json({ results: [], error: 'Search failed' }, { status: 500 });
+    return errorResponse('Search failed', 500, { results: [] });
   }
 }

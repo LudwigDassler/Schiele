@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
-
-const SUPABASE_URL = "https://kefdjxsmyarwfqqkfgcx.supabase.co";
-const SUPABASE_KEY = "sb_publishable_DHa5G0bhPLWJWNrACLVEUw_2GZS4BMc";
+import { errorResponse } from '@/lib/api';
+import { supabaseRestFetch } from '@/lib/supabaseRest';
+import type { Photo } from '@/lib/types';
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -11,29 +11,23 @@ export async function GET(request: Request) {
   const offset = (page - 1) * limit;
 
   try {
-    let url = SUPABASE_URL + '/rest/v1/images?select=*&limit=' + limit + '&offset=' + offset + '&order=created_at.desc';
+    let path = 'images?select=*&limit=' + limit + '&offset=' + offset + '&order=created_at.desc';
     if (category !== 'all') {
-      url = url + '&category=eq.' + category;
+      path = path + '&category=eq.' + category;
     }
 
-    const res = await fetch(url, {
-      headers: {
-        "apikey": SUPABASE_KEY,
-        "Authorization": "Bearer " + SUPABASE_KEY,
-      },
-    });
+    const res = await supabaseRestFetch(path);
 
     if (!res.ok) throw new Error('Supabase error');
     const data = await res.json();
 
-    const photos = data.map((item: any) => ({
+    const photos: Photo[] = data.map((item: any) => ({
       id: item.id,
       src: item.src,
       thumb: item.src,
       title: item.title || item.category,
       author: item.author || 'Schiele',
       authorAvatar: '',
-      
       link: '',
       category: item.category,
     }));
@@ -46,6 +40,6 @@ export async function GET(request: Request) {
     });
   } catch (error) {
     console.error('Error fetching images:', error);
-    return NextResponse.json({ photos: [], error: 'Failed to fetch' }, { status: 500 });
+    return errorResponse('Failed to fetch', 500, { photos: [] });
   }
 }

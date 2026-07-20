@@ -11,8 +11,8 @@ export async function POST(req: Request) {
     // Формируем промпт для нейросети
     const prompt = `Напиши короткую, красивую и глубокомысленную цитату (максимум 2 предложения), которая идеально подходит для фотографии в категории "${category}". Выведи только текст цитаты, без кавычек и лишних слов.`;
 
-    // Вызываем быструю модель flash
-    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+    // Используем самую свежую версию модели, чтобы избежать ошибки 404
+    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash-latest' });
     const result = await model.generateContent(prompt);
     const response = await result.response;
     const quote = response.text().trim();

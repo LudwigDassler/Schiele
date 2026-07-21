@@ -3,99 +3,109 @@ import { createClient } from '@supabase/supabase-js';
 
 export const dynamic = 'force-dynamic';
 
-// Подключаемся к твоей БД Supabase
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+// Важно: используем SECRET_KEY для обхода правил безопасности БД (RLS)
 const supabaseKey = process.env.SUPABASE_SECRET_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 const supabase = createClient(supabaseUrl, supabaseKey);
 
-// Функция 1: Берем картинки из БД для главной страницы
-async function getFromDatabase() {
-    const { data, error } = await supabase
-        .from('images')
-        .select('src, title, source')
-        .limit(50); // Берем 50 картинок из твоей БД
-
-    if (error || !data) {
-        console.error('Ошибка БД:', error);
-        return [];
-    }
-
-    return data.map((img: any) => ({
-        id: img.src,
-        title: img.title || 'Image',
-        image_url: img.src,
-        source: img.source || 'database'
-    }));
-}
-
-// Функция 2: Нейронка/парсер ищет в Google и сохраняет в БД
-async function searchGoogle(query: string) {
-    if (!process.env.SERPER_API_KEY) return [];
+async function getImages(query: string) {
+    let images: any[] = [];
+    const safeQuery = (!query || query === 'All') ? 'aesthetic' : query;
 
     try {
-        const response = await fetch('https://google.serper.dev/images', {
-          method: 'POST',
-          headers: {
-            'X-API-KEY': process.env.SERPER_API_KEY,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ q: query, num: 30 }),
-        });
+        // 1. Сначала ищем в нашей базе Supabase
+        const { data, error } = await supabase
+            .from('images')
+            .select('*')
+            .or(`category.ilike.%${safeQuery}%,title.ilike.%${safeQuery}%,tags.ilike.%${safeQuery}%`)
+            .limit(50);
 
-        const data = await response.json();
-        const images = (data.images || []).map((img: any) => ({
-          id: img.imageUrl,
-          title: img.title || query,
-          image_url: img.imageUrl,
-          source: 'google'
-        }));
-
-        // Асинхронно сохраняем спарсенные результаты в твою БД
-        if (images.length > 0) {
-           const insertData = images.map((img: any) => ({
-               src: img.image_url,
-               title: img.title ? img.title.substring(0, 150) : query,
-               category: query,
-               source: 'google'
-           }));
-           // Сохраняем в таблицу images без await, чтобы не тормозить выдачу
-           supabase.from('images').insert(insertData).then();
+        if (!error && data && data.length > 0) {
+            images = data.map((img: any) => ({
+                ...img,
+                id: img.id?.toString() || Math.random().toString(),
+                title: img.title || safeQuery,
+                image_url: img.src || img.image_url,
+                url: img.src || img.image_url,
+                src: img.src || img.image_url,
+                source: img.source || 'database',
+                author: img.author || 'Schiele'
+            }));
         }
-
-        return images;
-    } catch {
-        return [];
+    } catch (e) {
+        console.error('Ошибка БД:', e);
     }
+
+    // 2. Если БД вернула пустоту (например, из-за прав RLS) или ничего не найдено - идем в Google
+    if (images.length === 0 && process.env.SERPER_API_KEY) {
+        try {
+            const response = await fetch('https://google.serper.dev/images', {
+                method: 'POST',
+                headers: {
+                    'X-API-KEY': process.env.SERPER_API_KEY,
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ q: safeQuery, num: 30 }),
+            });
+
+            const googleData = await response.json();
+            images = (googleData.images || []).map((img: any) => ({
+                id: img.imageUrl,
+                title: img.title || safeQuery,
+                image_url: img.imageUrl,
+                url: img.imageUrl,
+                src: img.imageUrl,
+                source: 'google',
+                author: img.source || 'Google'
+            }));
+
+            // 3. Фоновое сохранение спарсенных картинок в БД
+            if (images.length > 0) {
+                const insertData = images.map((img: any) => ({
+                    src: img.image_url,
+                    title: (img.title || '').substring(0, 150),
+                    category: safeQuery,
+                    source: 'google'
+                }));
+                supabase.from('images').insert(insertData).then();
+            }
+        } catch (e) {
+            console.error('Ошибка Serper:', e);
+        }
+    }
+
+    return images;
 }
 
 export async function GET(req: Request) {
-  const { searchParams } = new URL(req.url);
-  const query = searchParams.get('category') || searchParams.get('q') || searchParams.get('query') || '';
-
-  // Если открыли главную или категорию All - берем из твоей БД
-  if (!query || query === 'All' || query === 'aesthetic') {
-      const dbImages = await getFromDatabase();
-      return NextResponse.json(dbImages);
-  }
-
-  // Если конкретный запрос - парсим Google
-  const googleImages = await searchGoogle(query);
-  return NextResponse.json(googleImages);
+    const { searchParams } = new URL(req.url);
+    const query = searchParams.get('category') || searchParams.get('q') || searchParams.get('query') || '';
+    const images = await getImages(query);
+    
+    // Отдаем во всех ключах сразу, чтобы фронтенд гарантированно нашел данные
+    return NextResponse.json({
+        data: images,
+        photos: images,
+        pins: images,
+        items: images,
+        images: images
+    });
 }
 
 export async function POST(req: Request) {
-  try {
-    const body = await req.json();
-    const query = body.category || body.query || body.q || '';
-    
-    if (!query || query === 'All' || query === 'aesthetic') {
-        const dbImages = await getFromDatabase();
-        return NextResponse.json(dbImages);
+    try {
+        const body = await req.json();
+        const query = body.category || body.query || body.q || '';
+        const images = await getImages(query);
+        
+        return NextResponse.json({
+            data: images,
+            photos: images,
+            pins: images,
+            items: images,
+            images: images
+        });
+    } catch {
+        return NextResponse.json({ data: [], photos: [], pins: [] });
     }
-
-    const googleImages = await searchGoogle(query);
-    return NextResponse.json(googleImages);
-  } catch {
-    return NextResponse.json([]);
-  }
 }

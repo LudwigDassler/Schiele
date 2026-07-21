@@ -10,21 +10,29 @@ function isValidImage(url: string) {
         const p = new URL(url);
         if (p.protocol !== "http:" && p.protocol !== "https:") return false;
         if (BAD_DOMAINS.some(domain => p.hostname.includes(domain))) return false;
+        
+        // БРОНЯ: Разрешаем только реальные файлы картинок. 
+        // Это спасет компонент <Image> в Next.js от фатальных крашей.
+        const validExt = /\.(jpeg|jpg|gif|png|webp|avif|bmp)$/i.test(p.pathname);
+        if (!validExt && !p.hostname.includes("unsplash.com") && !p.hostname.includes("pinimg.com")) {
+            return false;
+        }
         return true;
     } catch {
         return false;
     }
 }
 
-const generateHashId = (str: string) => {
+// ИСПРАВЛЕНИЕ: Генерируем ID исключительно как ЧИСЛО (Number). 
+// Это предотвратит краши фронтенда, который ожидает числовые ID.
+const generateSafeId = (url: string) => {
     let hash = 0;
-    for (let i = 0; i < str.length; i++) {
-        hash = Math.imul(31 * hash + str.charCodeAt(i) | 0, 1);
+    for (let i = 0; i < url.length; i++) {
+        hash = Math.imul(31 * hash + url.charCodeAt(i) | 0, 1);
     }
-    return Math.abs(hash).toString(36) + str.length.toString(36);
+    return Math.abs(hash) + Math.floor(Math.random() * 100000);
 };
 
-// ЮВЕЛИРНАЯ ПРАВКА: Добавлен параметр page для бесконечной ленты
 async function fetchFromGoogle(rawQuery: string, page: number = 1) {
     if (!process.env.SERPER_API_KEY) return [];
 
@@ -40,17 +48,18 @@ async function fetchFromGoogle(rawQuery: string, page: number = 1) {
                 "X-API-KEY": process.env.SERPER_API_KEY,
                 "Content-Type": "application/json"
             },
-            // Запрашиваем 100 HD-картинок С УЧЕТОМ НОМЕРА СТРАНИЦЫ
             body: JSON.stringify({ q: query, num: 100, page: page, imgSize: "large" }),
             cache: "no-store"
         });
+
+        if (!response.ok) return [];
 
         const data = await response.json();
         
         const cleanImages = (data.images || [])
             .filter((img: any) => isValidImage(img.imageUrl))
             .map((img: any) => ({
-                id: generateHashId(img.imageUrl),
+                id: generateSafeId(img.imageUrl),
                 title: img.title || query,
                 image_url: img.imageUrl,
                 url: img.imageUrl,
@@ -67,12 +76,10 @@ async function fetchFromGoogle(rawQuery: string, page: number = 1) {
         return [];
     }
 }
-// ОБРАБОТЧИКИ ДЛЯ ПОИСКА (ВОЗВРАЩАЮТ МАССИВ)
 export async function GET(req: Request) {
     const { searchParams } = new URL(req.url);
     const query = searchParams.get("query") || searchParams.get("q") || searchParams.get("search") || searchParams.get("category") || "";
     const page = parseInt(searchParams.get("page") || "1", 10) || 1;
-    
     const images = await fetchFromGoogle(query, page);
     return NextResponse.json(images);
 }
@@ -82,7 +89,6 @@ export async function POST(req: Request) {
         const body = await req.json();
         const query = body.query || body.q || body.search || body.category || "";
         const page = parseInt(body.page || "1", 10) || 1;
-        
         const images = await fetchFromGoogle(query, page);
         return NextResponse.json(images);
     } catch {

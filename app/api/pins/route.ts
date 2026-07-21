@@ -42,7 +42,7 @@ async function fetchFromGoogle(rawQuery: string) {
                 "X-API-KEY": process.env.SERPER_API_KEY,
                 "Content-Type": "application/json"
             },
-            // Запрашиваем 100 HD-картинок, чтобы было из чего фильтровать
+            // Запрашиваем 100 HD-картинок, чтобы было из чего выбирать
             body: JSON.stringify({ q: query, num: 100, imgSize: "large" }),
             cache: "no-store"
         });
@@ -74,9 +74,7 @@ async function fetchFromGoogle(rawQuery: string) {
 
 export async function GET(req: Request) {
     const { searchParams } = new URL(req.url);
-    // Точный приоритет: Ищем запрос пользователя, если нет - берем категорию
-    const query = searchParams.get("query") || searchParams.get("q") || searchParams.get("category") || "";
-    
+    const query = searchParams.get("query") || searchParams.get("q") || searchParams.get("search") || searchParams.get("category") || "";
     const images = await fetchFromGoogle(query);
     return NextResponse.json({ data: images, pins: images, photos: images, items: images });
 }
@@ -84,8 +82,7 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
     try {
         const body = await req.json();
-        const query = body.query || body.q || body.category || "";
-        
+        const query = body.query || body.q || body.search || body.category || "";
         const images = await fetchFromGoogle(query);
         return NextResponse.json({ data: images, pins: images, photos: images, items: images });
     } catch {

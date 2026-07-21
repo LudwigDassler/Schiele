@@ -2,7 +2,10 @@
 
 export const dynamic = "force-dynamic";
 
-const BAD_DOMAINS = ["pixabay.com", "picsum.photos", "fbsbx.com", "shutterstock.com", "istockphoto.com"];
+const BAD_DOMAINS = [
+    "pixabay.com", "picsum.photos", "fbsbx.com", "shutterstock.com", 
+    "istockphoto.com", "adobestock.com", "adobe.com", "gettyimages.com", "alamy.com"
+];
 
 function isValidImage(url: string) {
     if (!url) return false;
@@ -11,8 +14,6 @@ function isValidImage(url: string) {
         if (p.protocol !== "http:" && p.protocol !== "https:") return false;
         if (BAD_DOMAINS.some(domain => p.hostname.includes(domain))) return false;
         
-        // БРОНЯ: Разрешаем только реальные файлы картинок. 
-        // Это спасет компонент <Image> в Next.js от фатальных крашей.
         const validExt = /\.(jpeg|jpg|gif|png|webp|avif|bmp)$/i.test(p.pathname);
         if (!validExt && !p.hostname.includes("unsplash.com") && !p.hostname.includes("pinimg.com")) {
             return false;
@@ -23,14 +24,12 @@ function isValidImage(url: string) {
     }
 }
 
-// ИСПРАВЛЕНИЕ: Генерируем ID исключительно как ЧИСЛО (Number). 
-// Это предотвратит краши фронтенда, который ожидает числовые ID.
 const generateSafeId = (url: string) => {
     let hash = 0;
     for (let i = 0; i < url.length; i++) {
         hash = Math.imul(31 * hash + url.charCodeAt(i) | 0, 1);
     }
-    return Math.abs(hash) + Math.floor(Math.random() * 100000);
+    return Math.abs(hash);
 };
 
 async function fetchFromGoogle(rawQuery: string, page: number = 1) {
@@ -48,7 +47,8 @@ async function fetchFromGoogle(rawQuery: string, page: number = 1) {
                 "X-API-KEY": process.env.SERPER_API_KEY,
                 "Content-Type": "application/json"
             },
-            body: JSON.stringify({ q: query, num: 100, page: page, imgSize: "large" }),
+            // ВОЗВРАЩАЕМ HD-КАЧЕСТВО. 50 штук за раз — идеальный баланс (стандарт Pinterest)
+            body: JSON.stringify({ q: query, num: 50, page: page, imgSize: "large" }),
             cache: "no-store"
         });
 
@@ -61,9 +61,15 @@ async function fetchFromGoogle(rawQuery: string, page: number = 1) {
             .map((img: any) => ({
                 id: generateSafeId(img.imageUrl),
                 title: img.title || query,
-                image_url: img.imageUrl,
+                
+                // ГЛАВНАЯ ФИШКА АРХИТЕКТУРЫ:
+                image_url: img.imageUrl,      // Это ОРИГИНАЛ (HD/4K). Используем для детального просмотра.
+                thumb: img.thumbnailUrl || img.imageUrl, // Это МИНИАТЮРА. Используем для быстрой загрузки сетки.
+                
                 url: img.imageUrl,
                 src: img.imageUrl,
+                width: img.imageWidth || 800,   // Размеры нужны фронтенду, чтобы сетка не прыгала
+                height: img.imageHeight || 1200,
                 source: "google",
                 author: img.source || "Web"
             }));

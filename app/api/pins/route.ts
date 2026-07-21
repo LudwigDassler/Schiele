@@ -7,45 +7,79 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 const supabaseKey = process.env.SUPABASE_SECRET_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 const supabase = createClient(supabaseUrl, supabaseKey);
 
-// Броня: Проверяем, что ссылка настоящая, иначе Next.js упадет
+// Броня 1: Валидатор URL
 function isValidUrl(string: string) {
     try {
         const url = new URL(string);
         return url.protocol === "http:" || url.protocol === "https:";
-    } catch (_) {
-        return false;  
+    } catch {
+        return false;
     }
 }
 
-async function getImages(rawQuery: string) {
+// Броня 2: Генератор стабильных ID (вместо Math.random), чтобы React не дублировал элементы
+function generateStableId(str: string) {
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+        hash = (hash << 5) - hash + str.charCodeAt(i);
+        hash |= 0;
+    }
+    return Math.abs(hash).toString(36);
+}
+
+async function getImages(reqUrl: string, body?: any) {
+    const urlObj = new URL(reqUrl);
+    const searchParams = urlObj.searchParams;
+
+    // ИСПРАВЛЕН БАГ: Фильтруем "undefined" и отдаем высший приоритет поиску
+    let queryParam = searchParams.get("query") || searchParams.get("q") || body?.query || body?.q || "";
+    let categoryParam = searchParams.get("category") || body?.category || "";
+    let pageParam = parseInt(searchParams.get("page") || body?.page || "1");
+
+    if (queryParam === "undefined" || queryParam === "null") queryParam = "";
+    if (categoryParam === "undefined" || categoryParam === "null") categoryParam = "";
+
+    let finalQuery = queryParam || categoryParam || "aesthetic";
+    if (finalQuery === "All") finalQuery = "aesthetic";
+
     let images: any[] = [];
-    const safeQuery = (!rawQuery || rawQuery === "All") ? "aesthetic" : rawQuery;
+    const limit = 30;
+    const start = (pageParam - 1) * limit;
+    const end = start + limit - 1;
 
     try {
-        // 1. Ищем в нашей базе (быстрый старт)
+        // 1. Ищем в твоей БД с ПАГИНАЦИЕЙ (исправляет дубликаты при скролле)
         const { data, error } = await supabase
             .from("images")
             .select("*")
-            .or(`category.ilike.%${safeQuery}%,title.ilike.%${safeQuery}%,tags.ilike.%${safeQuery}%`)
-            .limit(40);
+            .or(`category.ilike.%${finalQuery}%,title.ilike.%${finalQuery}%,tags.ilike.%${finalQuery}%`)
+            .order("created_at", { ascending: false }) // Строгая сортировка от новых к старым
+            .range(start, end);
 
         if (!error && data) {
-            images = data.filter(img => isValidUrl(img.src || img.image_url)).map((img: any) => ({
-                id: (img.id || Math.random()).toString(),
-                title: img.title || safeQuery,
-                image_url: img.src || img.image_url,
-                url: img.src || img.image_url,
-                src: img.src || img.image_url,
-                source: img.source || "database",
-                author: "Schiele Brain"
-            }));
+            images = data
+                .filter(img => isValidUrl(img.src || img.image_url))
+                // ИСПРАВЛЕН БАГ 429: Вырезаем Pixabay, так как он запрещает встраивание картинок
+                .filter(img => !(img.src || img.image_url).includes("pixabay.com"))
+                .map((img: any) => {
+                    const imgUrl = img.src || img.image_url;
+                    return {
+                        id: img.id?.toString() || generateStableId(imgUrl),
+                        title: img.title || finalQuery,
+                        image_url: imgUrl,
+                        url: imgUrl,
+                        src: imgUrl,
+                        source: img.source || "database",
+                        author: img.author || "Schiele"
+                    };
+                });
         }
     } catch (e) {
         console.error("DB Error:", e);
     }
 
-    // 2. УМНЫЙ ПАРСИНГ: если в базе мало картинок (< 15), докачиваем в высоком качестве из Google
-    if (images.length < 15 && process.env.SERPER_API_KEY) {
+    // 2. САМООБУЧЕНИЕ: Если в БД пусто или мы на первой странице и картинок мало — парсим Google
+    if (images.length < 15 && pageParam === 1 && process.env.SERPER_API_KEY) {
         try {
             const response = await fetch("https://google.serper.dev/images", {
                 method: "POST",
@@ -53,16 +87,15 @@ async function getImages(rawQuery: string) {
                     "X-API-KEY": process.env.SERPER_API_KEY,
                     "Content-Type": "application/json",
                 },
-                // Запрашиваем только крупные и качественные изображения!
-                body: JSON.stringify({ q: safeQuery, num: 40, imgSize: "large" }),
+                body: JSON.stringify({ q: finalQuery, num: 40, imgSize: "large" }), // Только HD картинки
             });
 
             const googleData = await response.json();
             const parsedImages = (googleData.images || [])
-                .filter((img: any) => isValidUrl(img.imageUrl)) // Защита от крашей
+                .filter((img: any) => isValidUrl(img.imageUrl))
                 .map((img: any) => ({
-                    id: Math.random().toString(36).substring(2, 15), 
-                    title: img.title || safeQuery,
+                    id: generateStableId(img.imageUrl),
+                    title: img.title || finalQuery,
                     image_url: img.imageUrl,
                     url: img.imageUrl,
                     src: img.imageUrl,
@@ -72,12 +105,12 @@ async function getImages(rawQuery: string) {
 
             images = [...images, ...parsedImages];
 
-            // Асинхронно сохраняем спарсенное в БД для будущих быстрых загрузок
+            // Фоновое сохранение спарсенного в твою БД
             if (parsedImages.length > 0) {
                 const insertData = parsedImages.map((img: any) => ({
                     src: img.image_url,
                     title: (img.title || "").substring(0, 150),
-                    category: safeQuery,
+                    category: finalQuery,
                     source: "google"
                 }));
                 supabase.from("images").insert(insertData).then();
@@ -87,36 +120,21 @@ async function getImages(rawQuery: string) {
         }
     }
 
-    // 3. АНТИ-ДУБЛИКАТ: удаляем любые повторяющиеся картинки
+    // 3. ФИНАЛЬНАЯ ЗАЧИСТКА: Жестко убиваем любые повторяющиеся URL
     const uniqueImages = Array.from(new Map(images.map(item => [item.image_url, item])).values());
     
-    // Рандомизируем ленту, чтобы она всегда выглядела свежей
-    return uniqueImages.sort(() => Math.random() - 0.5);
+    return uniqueImages;
 }
 
 export async function GET(req: Request) {
-    const { searchParams } = new URL(req.url);
-    
-    // ИСПРАВЛЕН БАГ ПОИСКА: Сначала проверяем точный запрос (q/query), и только потом категорию
-    let query = searchParams.get("query") || searchParams.get("q");
-    if (!query || query === "All") {
-        query = searchParams.get("category");
-    }
-    
-    const images = await getImages(query || "");
+    const images = await getImages(req.url);
     return NextResponse.json({ data: images, photos: images, pins: images, items: images, images: images });
 }
 
 export async function POST(req: Request) {
     try {
         const body = await req.json();
-        // ИСПРАВЛЕН БАГ ПОИСКА ДЛЯ POST
-        let query = body.query || body.q;
-        if (!query || query === "All") {
-            query = body.category;
-        }
-        
-        const images = await getImages(query || "");
+        const images = await getImages(req.url, body);
         return NextResponse.json({ data: images, photos: images, pins: images, items: images, images: images });
     } catch {
         return NextResponse.json({ data: [], photos: [], pins: [] });

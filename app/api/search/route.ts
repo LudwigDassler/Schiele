@@ -24,13 +24,17 @@ function isValidImage(url: string) {
     }
 }
 
+// Надежный строковой ID
 const generateSafeId = (url: string) => {
     let hash = 0;
     for (let i = 0; i < url.length; i++) {
         hash = Math.imul(31 * hash + url.charCodeAt(i) | 0, 1);
     }
-    return Math.abs(hash);
+    return Math.abs(hash).toString(36) + url.length.toString(36);
 };
+
+// БРОНЯ: Встроенный кэш для моментальной навигации
+const memoryCache = new Map();
 
 async function fetchFromGoogle(rawQuery: string, page: number = 1) {
     if (!process.env.SERPER_API_KEY) return [];
@@ -40,6 +44,13 @@ async function fetchFromGoogle(rawQuery: string, page: number = 1) {
         query = "aesthetic pinterest photography wallpaper";
     }
 
+    const cacheKey = `${query}-page-${page}`;
+    
+    // Если мы уже искали это недавно — отдаем моментально!
+    if (memoryCache.has(cacheKey)) {
+        return memoryCache.get(cacheKey); 
+    }
+
     try {
         const response = await fetch("https://google.serper.dev/images", {
             method: "POST",
@@ -47,8 +58,7 @@ async function fetchFromGoogle(rawQuery: string, page: number = 1) {
                 "X-API-KEY": process.env.SERPER_API_KEY,
                 "Content-Type": "application/json"
             },
-            // ВОЗВРАЩАЕМ HD-КАЧЕСТВО. 50 штук за раз — идеальный баланс (стандарт Pinterest)
-            body: JSON.stringify({ q: query, num: 50, page: page, imgSize: "large" }),
+            body: JSON.stringify({ q: query, num: 40, page: page }),
             cache: "no-store"
         });
 
@@ -61,20 +71,23 @@ async function fetchFromGoogle(rawQuery: string, page: number = 1) {
             .map((img: any) => ({
                 id: generateSafeId(img.imageUrl),
                 title: img.title || query,
-                
-                // ГЛАВНАЯ ФИШКА АРХИТЕКТУРЫ:
-                image_url: img.imageUrl,      // Это ОРИГИНАЛ (HD/4K). Используем для детального просмотра.
-                thumb: img.thumbnailUrl || img.imageUrl, // Это МИНИАТЮРА. Используем для быстрой загрузки сетки.
-                
+                image_url: img.imageUrl,
                 url: img.imageUrl,
                 src: img.imageUrl,
-                width: img.imageWidth || 800,   // Размеры нужны фронтенду, чтобы сетка не прыгала
-                height: img.imageHeight || 1200,
+                thumb: img.thumbnailUrl || img.imageUrl,
+                width: img.imageWidth || 600,
+                height: img.imageHeight || 800,
                 source: "google",
                 author: img.source || "Web"
             }));
 
         const uniqueImages = Array.from(new Map(cleanImages.map((item: any) => [item.image_url, item])).values());
+        
+        // Запоминаем результат на 10 минут
+        if (uniqueImages.length > 0) {
+            memoryCache.set(cacheKey, uniqueImages);
+            setTimeout(() => memoryCache.delete(cacheKey), 10 * 60 * 1000);
+        }
         
         return uniqueImages;
     } catch (e) {
@@ -82,22 +95,43 @@ async function fetchFromGoogle(rawQuery: string, page: number = 1) {
         return [];
     }
 }
+
 export async function GET(req: Request) {
     const { searchParams } = new URL(req.url);
-    const query = searchParams.get("query") || searchParams.get("q") || searchParams.get("search") || searchParams.get("category") || "";
+    // Приоритет запросов: сначала поиск, потом категория
+    let query = searchParams.get("query") || searchParams.get("q") || searchParams.get("search");
+    if (!query || query === "All") query = searchParams.get("category");
+    
     const page = parseInt(searchParams.get("page") || "1", 10) || 1;
-    const images = await fetchFromGoogle(query, page);
-    return NextResponse.json(images);
+    const images = await fetchFromGoogle(query || "", page);
+    
+    // УНИВЕРСАЛЬНЫЙ ФОРМАТ (Предотвращает краши при переходах)
+    return NextResponse.json({
+        data: images,
+        pins: images,
+        photos: images,
+        items: images,
+        images: images
+    });
 }
 
 export async function POST(req: Request) {
     try {
         const body = await req.json();
-        const query = body.query || body.q || body.search || body.category || "";
+        let query = body.query || body.q || body.search;
+        if (!query || query === "All") query = body.category;
+        
         const page = parseInt(body.page || "1", 10) || 1;
-        const images = await fetchFromGoogle(query, page);
-        return NextResponse.json(images);
+        const images = await fetchFromGoogle(query || "", page);
+        
+        return NextResponse.json({
+            data: images,
+            pins: images,
+            photos: images,
+            items: images,
+            images: images
+        });
     } catch {
-        return NextResponse.json([]);
+        return NextResponse.json({ data: [], pins: [], photos: [], items: [], images: [] });
     }
 }

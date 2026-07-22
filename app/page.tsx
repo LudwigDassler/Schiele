@@ -3,7 +3,6 @@ import { useState, useEffect, useRef } from "react";
 import { supabase } from "../lib/supabase";
 import type { User } from "@supabase/supabase-js";
 
-// Базовые теги (fallback)
 const defaultTags = [
   "Aesthetic", "Dark Academia", "Cyberpunk", "Minimalism",
   "Architecture", "Street Photography", "Vintage", "Interior"
@@ -47,8 +46,6 @@ export default function Home() {
   
   const [search, setSearch] = useState("");
   const [searchQuery, setSearchQuery] = useState("Aesthetic");
-  
-  // АДАПТИВНЫЕ ТЕГИ: Состояние для хранения истории поисков пользователя
   const [userTags, setUserTags] = useState<string[]>([]);
   
   const [selected, setSelected] = useState<Photo | null>(null);
@@ -73,6 +70,7 @@ export default function Home() {
   const [newBoardName, setNewBoardName] = useState("");
   const [newBoardDesc, setNewBoardDesc] = useState("");
   const [shareMsg, setShareMsg] = useState("");
+  
   const [quotePositions] = useState<number[]>(() => {
     const pos: number[] = [];
     for (let i = 5; i < 200; i += Math.floor(Math.random() * 8) + 5) pos.push(i);
@@ -82,9 +80,11 @@ export default function Home() {
   const fileRef = useRef<HTMLInputElement>(null);
   const observerRef = useRef<IntersectionObserver | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  
+  // АБСОЛЮТНАЯ ЗАЩИТА ОТ КРАШЕЙ (Убиваем "гонку" запросов)
   const loadingRef = useRef(false);
+  const requestCounter = useRef(0);
 
-  // Инициализация Supabase и загрузка личных тегов из localStorage
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
       setUser(data.session?.user ?? null);
@@ -95,7 +95,6 @@ export default function Home() {
       if (session?.user) fetchUserData(session.user.id);
     });
     
-    // Загружаем теги пользователя из памяти браузера
     try {
       const savedTags = localStorage.getItem("schiele_user_tags");
       if (savedTags) setUserTags(JSON.parse(savedTags));
@@ -116,9 +115,15 @@ export default function Home() {
   }
 
   async function fetchPhotos(query: string, pageNum: number, reset: boolean) {
-    if (loadingRef.current) return;
+    // Если это подгрузка страницы, и мы уже грузим - игнорим. Но новый поиск пропускаем всегда!
+    if (!reset && loadingRef.current) return;
+    
+    // Генерируем уникальный билет для этого запроса
+    const currentRequestId = ++requestCounter.current;
+    
     loadingRef.current = true;
     setLoading(true);
+    
     try {
       const params = new URLSearchParams({ page: String(pageNum) });
       if (query) params.set("query", query);
@@ -126,20 +131,37 @@ export default function Home() {
       const res = await fetch(`/api/search?${params}`);
       const data = await res.json();
       
+      // KILL SWITCH: Если юзер уже успел кликнуть на другой тег, пока мы ждали ответ - УБИВАЕМ этот результат!
+      if (requestCounter.current !== currentRequestId) return;
+      
       const rawArray = Array.isArray(data) ? data : (data.data || data.photos || data.items || []);
       const fetched = rawArray.filter((p: any) => p.src && p.src.startsWith("http"));
       
-      setPhotos(prev => reset ? fetched : [...prev, ...fetched]);
+      setPhotos(prev => {
+        const combined = reset ? fetched : [...prev, ...fetched];
+        // Жесткая очистка от дубликатов, чтобы React никогда больше не крашился
+        const map = new Map();
+        combined.forEach(p => map.set(p.id, p));
+        return Array.from(map.values());
+      });
+      
       setHasMore(fetched.length > 0);
-    } catch (e) { console.error(e); }
-    setLoading(false);
-    loadingRef.current = false;
+    } catch (e) { 
+      console.error(e); 
+    } finally {
+      // Снимаем загрузку только если это наш актуальный запрос
+      if (requestCounter.current === currentRequestId) {
+        setLoading(false);
+        loadingRef.current = false;
+      }
+    }
   }
 
+  // Реакция ТОЛЬКО на изменение поискового запроса/тега
   useEffect(() => {
     setPage(1);
     setHasMore(true);
-    setPhotos([]);
+    setPhotos([]); // Мгновенно очищаем ленту перед загрузкой
     fetchPhotos(searchQuery, 1, true);
   }, [searchQuery]);
 
@@ -157,11 +179,9 @@ export default function Home() {
     return () => observerRef.current?.disconnect();
   }, [hasMore, page, searchQuery]);
 
-  // МЕХАНИКА СОХРАНЕНИЯ ТЕГОВ
   function saveUserTag(tag: string) {
     const formattedTag = tag.trim().charAt(0).toUpperCase() + tag.trim().slice(1);
     setUserTags(prev => {
-      // Удаляем дубликат, ставим новый тег в начало и оставляем максимум 6 штук
       const updated = [formattedTag, ...prev.filter(t => t.toLowerCase() !== formattedTag.toLowerCase())].slice(0, 6);
       localStorage.setItem("schiele_user_tags", JSON.stringify(updated));
       return updated;
@@ -172,13 +192,14 @@ export default function Home() {
     e.preventDefault();
     if (!search.trim()) return;
     setSearchQuery(search.trim());
-    saveUserTag(search.trim()); // Запоминаем поиск как тег
+    saveUserTag(search.trim());
     closeAllPanels();
   }
 
   function handleTagClick(tag: string) {
     setSearch(tag);
     setSearchQuery(tag);
+    saveUserTag(tag); // Сохраняем клик по базовому тегу в историю пользователя тоже
     closeAllPanels();
   }
 
@@ -271,7 +292,6 @@ export default function Home() {
     if (quotePositions.includes(i)) feedItems.push({ type: "quote" });
   });
 
-  // Объединяем персональные теги юзера с базовыми (исключая дубликаты)
   const combinedTags = Array.from(new Set([...userTags, ...defaultTags]));
 
   return (
@@ -445,7 +465,6 @@ export default function Home() {
           )}
         </header>
 
-        {/* ДИНАМИЧЕСКИЕ ТЕГИ */}
         {!showBoards && !showSaved && (
           <div className="tags-bar">
             {combinedTags.map(tag => (
@@ -505,7 +524,8 @@ export default function Home() {
                   item.type === "quote" ? (
                     <QuoteCard key={`quote-${i}`} />
                   ) : (
-                    <div key={item.data.id} className="card" onClick={() => setSelected(item.data)}>
+                    /* ДВОЙНОЙ КЛЮЧ - Спасает React от краша даже при дубликатах с бэкенда */
+                    <div key={`${item.data.id}-${i}`} className="card" onClick={() => setSelected(item.data)}>
                       <img src={item.data.src} alt="" loading="lazy" onError={e => { (e.target as HTMLImageElement).closest(".card")?.remove(); }} />
                       <div className="overlay">
                         <button className={`save-btn ${isPinned(item.data) ? "pinned" : ""}`} onClick={e => { e.stopPropagation(); isPinned(item.data) ? null : setShowSaveToBoard(item.data); }}>

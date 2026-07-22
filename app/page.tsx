@@ -1,5 +1,5 @@
 ﻿"use client";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { supabase } from "../lib/supabase";
 import type { User } from "@supabase/supabase-js";
 
@@ -81,9 +81,9 @@ export default function Home() {
   const observerRef = useRef<IntersectionObserver | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   
-  // АБСОЛЮТНАЯ ЗАЩИТА ОТ КРАШЕЙ (Убиваем "гонку" запросов)
+  // АБСОЛЮТНАЯ СИНХРОНИЗАЦИЯ: AbortController для жесткого прерывания старых запросов
+  const abortControllerRef = useRef<AbortController | null>(null);
   const loadingRef = useRef(false);
-  const requestCounter = useRef(0);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -103,67 +103,85 @@ export default function Home() {
     return () => subscription.unsubscribe();
   }, []);
 
+  // БРОНЯ ДЛЯ БД: Безопасная загрузка данных пользователя
   async function fetchUserData(userId: string) {
-    const [pinsRes, boardsRes] = await Promise.all([
-      fetch(`/api/pins?user_id=${userId}`),
-      fetch(`/api/boards?user_id=${userId}`)
-    ]);
-    const pinsData = await pinsRes.json();
-    const boardsData = await boardsRes.json();
-    if (pinsData.pins) setPins(pinsData.pins);
-    if (boardsData.boards) setBoards(boardsData.boards);
+    try {
+      const [pinsRes, boardsRes] = await Promise.all([
+        fetch(`/api/pins?user_id=${userId}`).catch(() => null),
+        fetch(`/api/boards?user_id=${userId}`).catch(() => null)
+      ]);
+      
+      if (pinsRes && pinsRes.ok) {
+        const pinsData = await pinsRes.json();
+        setPins(pinsData.pins || pinsData.data || []);
+      }
+      
+      if (boardsRes && boardsRes.ok) {
+        const boardsData = await boardsRes.json();
+        setBoards(boardsData.boards || boardsData.data || []);
+      }
+    } catch (e) {
+      console.error("Supabase Sync Error:", e);
+    }
   }
 
-  async function fetchPhotos(query: string, pageNum: number, reset: boolean) {
-    // Если это подгрузка страницы, и мы уже грузим - игнорим. Но новый поиск пропускаем всегда!
+  // УЛЬТИМАТИВНЫЙ ПОИСК: Защита от гонки состояний и переполнения канала
+  const fetchPhotos = useCallback(async (query: string, pageNum: number, reset: boolean) => {
     if (!reset && loadingRef.current) return;
-    
-    // Генерируем уникальный билет для этого запроса
-    const currentRequestId = ++requestCounter.current;
     
     loadingRef.current = true;
     setLoading(true);
     
+    if (reset) {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort(); // Жестко обрываем старое сетевое соединение
+      }
+      abortControllerRef.current = new AbortController();
+    }
+
     try {
       const params = new URLSearchParams({ page: String(pageNum) });
       if (query) params.set("query", query);
       
-      const res = await fetch(`/api/search?${params}`);
+      const res = await fetch(`/api/search?${params}`, {
+        signal: abortControllerRef.current?.signal
+      });
+      
+      if (!res.ok) throw new Error("Server response failed");
+      
       const data = await res.json();
-      
-      // KILL SWITCH: Если юзер уже успел кликнуть на другой тег, пока мы ждали ответ - УБИВАЕМ этот результат!
-      if (requestCounter.current !== currentRequestId) return;
-      
       const rawArray = Array.isArray(data) ? data : (data.data || data.photos || data.items || []);
       const fetched = rawArray.filter((p: any) => p.src && p.src.startsWith("http"));
       
       setPhotos(prev => {
         const combined = reset ? fetched : [...prev, ...fetched];
-        // Жесткая очистка от дубликатов, чтобы React никогда больше не крашился
         const map = new Map();
         combined.forEach(p => map.set(p.id, p));
         return Array.from(map.values());
       });
       
       setHasMore(fetched.length > 0);
-    } catch (e) { 
-      console.error(e); 
+    } catch (e: any) { 
+      if (e.name === 'AbortError') {
+        return; // Игнорируем прерванные запросы, не снимая статус лоадинга
+      }
+      console.error("Fetch Error:", e); 
     } finally {
-      // Снимаем загрузку только если это наш актуальный запрос
-      if (requestCounter.current === currentRequestId) {
+      if (reset && abortControllerRef.current?.signal.aborted) {
+        // Если это был сброс и запрос отменили — не трогаем статус лоадинга
+      } else {
         setLoading(false);
         loadingRef.current = false;
       }
     }
-  }
+  }, []);
 
-  // Реакция ТОЛЬКО на изменение поискового запроса/тега
   useEffect(() => {
     setPage(1);
     setHasMore(true);
-    setPhotos([]); // Мгновенно очищаем ленту перед загрузкой
+    setPhotos([]); 
     fetchPhotos(searchQuery, 1, true);
-  }, [searchQuery]);
+  }, [searchQuery, fetchPhotos]);
 
   useEffect(() => {
     if (!bottomRef.current) return;
@@ -177,12 +195,12 @@ export default function Home() {
     }, { threshold: 0.1 });
     observerRef.current.observe(bottomRef.current);
     return () => observerRef.current?.disconnect();
-  }, [hasMore, page, searchQuery]);
+  }, [hasMore, page, searchQuery, fetchPhotos]);
 
   function saveUserTag(tag: string) {
     const formattedTag = tag.trim().charAt(0).toUpperCase() + tag.trim().slice(1);
     setUserTags(prev => {
-      const updated = [formattedTag, ...prev.filter(t => t.toLowerCase() !== formattedTag.toLowerCase())].slice(0, 6);
+      const updated = [formattedTag, ...prev.filter(t => t.toLowerCase() !== formattedTag.toLowerCase())].slice(0, 8);
       localStorage.setItem("schiele_user_tags", JSON.stringify(updated));
       return updated;
     });
@@ -199,7 +217,7 @@ export default function Home() {
   function handleTagClick(tag: string) {
     setSearch(tag);
     setSearchQuery(tag);
-    saveUserTag(tag); // Сохраняем клик по базовому тегу в историю пользователя тоже
+    saveUserTag(tag);
     closeAllPanels();
   }
 
@@ -229,43 +247,69 @@ export default function Home() {
     setShowUpload(false); setNewTitle(""); setNewSrc(null);
   }
 
+  // БЕЗОПАСНЫЕ ЗАПРОСЫ В БАЗУ ДАННЫХ
   async function savePin(photo: Photo, boardId?: string) {
     if (!user) { window.location.href = "/auth"; return; }
-    const res = await fetch("/api/pins", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ user_id: user.id, image_url: photo.src, title: photo.title, board_id: boardId || null, source_url: photo.link })
-    });
-    const data = await res.json();
-    if (data.pin) setPins(prev => [data.pin, ...prev]);
+    try {
+      const res = await fetch("/api/pins", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: user.id, image_url: photo.src, title: photo.title, board_id: boardId || null, source_url: photo.link })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.pin || data.data) setPins(prev => [data.pin || data.data, ...prev]);
+      }
+    } catch (e) { console.error("Error saving pin:", e); }
     setShowSaveToBoard(null); setSelected(null);
   }
 
   async function deletePin(pinId: string) {
-    await fetch(`/api/pins?id=${pinId}`, { method: "DELETE" });
-    setPins(prev => prev.filter(p => p.id !== pinId));
+    try {
+      const res = await fetch(`/api/pins?id=${pinId}`, { method: "DELETE" });
+      if (res.ok) setPins(prev => prev.filter(p => p.id !== pinId));
+    } catch (e) { console.error("Error deleting pin:", e); }
   }
 
   async function createBoard() {
     if (!newBoardName || !user) return;
-    const res = await fetch("/api/boards", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ user_id: user.id, name: newBoardName, description: newBoardDesc }) });
-    const data = await res.json();
-    if (data.board) setBoards(prev => [data.board, ...prev]);
+    try {
+      const res = await fetch("/api/boards", { 
+        method: "POST", 
+        headers: { "Content-Type": "application/json" }, 
+        body: JSON.stringify({ user_id: user.id, name: newBoardName, description: newBoardDesc }) 
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.board || data.data) setBoards(prev => [data.board || data.data, ...prev]);
+      }
+    } catch (e) { console.error("Error creating board:", e); }
     setNewBoardName(""); setNewBoardDesc(""); setShowNewBoard(false);
   }
 
   async function updateBoard() {
     if (!editBoard) return;
-    const res = await fetch("/api/boards", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: editBoard.id, name: editBoard.name, description: editBoard.description }) });
-    const data = await res.json();
-    if (data.board) setBoards(prev => prev.map(b => b.id === editBoard.id ? data.board : b));
+    try {
+      const res = await fetch("/api/boards", { 
+        method: "PUT", 
+        headers: { "Content-Type": "application/json" }, 
+        body: JSON.stringify({ id: editBoard.id, name: editBoard.name, description: editBoard.description }) 
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const updatedBoard = data.board || data.data;
+        if (updatedBoard) setBoards(prev => prev.map(b => b.id === editBoard.id ? updatedBoard : b));
+      }
+    } catch (e) { console.error("Error updating board:", e); }
     setEditBoard(null);
   }
 
   async function deleteBoard(boardId: string) {
     if (!confirm("Delete this board?")) return;
-    await fetch(`/api/boards?id=${boardId}`, { method: "DELETE" });
-    setBoards(prev => prev.filter(b => b.id !== boardId));
+    try {
+      const res = await fetch(`/api/boards?id=${boardId}`, { method: "DELETE" });
+      if (res.ok) setBoards(prev => prev.filter(b => b.id !== boardId));
+    } catch (e) { console.error("Error deleting board:", e); }
   }
 
   function isPinned(photo: Photo) { return pins.some(p => p.image_url === photo.src); }
@@ -524,9 +568,17 @@ export default function Home() {
                   item.type === "quote" ? (
                     <QuoteCard key={`quote-${i}`} />
                   ) : (
-                    /* ДВОЙНОЙ КЛЮЧ - Спасает React от краша даже при дубликатах с бэкенда */
+                    /* ИДЕАЛЬНАЯ ЗАЩИТА ОТ КРАША REACT ПРИ ОШИБКАХ ЗАГРУЗКИ КАРТИНОК */
                     <div key={`${item.data.id}-${i}`} className="card" onClick={() => setSelected(item.data)}>
-                      <img src={item.data.src} alt="" loading="lazy" onError={e => { (e.target as HTMLImageElement).closest(".card")?.remove(); }} />
+                      <img 
+                        src={item.data.src} 
+                        alt="" 
+                        loading="lazy" 
+                        onError={e => { 
+                          const parent = (e.currentTarget as HTMLImageElement).parentElement;
+                          if (parent) parent.style.display = "none"; 
+                        }} 
+                      />
                       <div className="overlay">
                         <button className={`save-btn ${isPinned(item.data) ? "pinned" : ""}`} onClick={e => { e.stopPropagation(); isPinned(item.data) ? null : setShowSaveToBoard(item.data); }}>
                           {isPinned(item.data) ? "Saved" : "Save"}

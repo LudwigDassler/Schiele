@@ -24,8 +24,7 @@ function isValidImage(url: string) {
     }
 }
 
-// ФУНДАМЕНТАЛЬНОЕ ИСПРАВЛЕНИЕ: Строго числовой ID. 
-// Убраны все toString(), чтобы React не крашился при маршрутизации.
+// Строго числовой ID
 const generateSafeId = (url: string) => {
     let hash = 0;
     for (let i = 0; i < url.length; i++) {
@@ -67,7 +66,7 @@ async function fetchFromGoogle(rawQuery: string, page: number = 1) {
         const cleanImages = (data.images || [])
             .filter((img: any) => isValidImage(img.imageUrl))
             .map((img: any) => ({
-                id: generateSafeId(img.imageUrl), // Теперь это Number
+                id: generateSafeId(img.imageUrl),
                 title: img.title || query,
                 image_url: img.imageUrl,
                 url: img.imageUrl,
@@ -83,7 +82,7 @@ async function fetchFromGoogle(rawQuery: string, page: number = 1) {
         
         if (uniqueImages.length > 0) {
             memoryCache.set(cacheKey, uniqueImages);
-            setTimeout(() => memoryCache.delete(cacheKey), 10 * 60 * 1000);
+            setTimeout(() => memoryCache.delete(cacheKey), 5 * 60 * 1000);
         }
         
         return uniqueImages;
@@ -92,21 +91,31 @@ async function fetchFromGoogle(rawQuery: string, page: number = 1) {
         return [];
     }
 }
-// РОУТЫ ДЛЯ ГЛАВНОЙ И КАТЕГОРИЙ (ВОЗВРАЩАЮТ ОБЪЕКТ)
+// ОБРАБОТЧИКИ ДЛЯ КАТЕГОРИЙ И ГЛАВНОЙ (Возвращают ОБЪЕКТ)
 export async function GET(req: Request) {
     const { searchParams } = new URL(req.url);
-    const query = searchParams.get("category") || searchParams.get("query") || searchParams.get("q") || searchParams.get("search") || "";
+    
+    // ЖЕЛЕЗОБЕТОННЫЙ ПРИОРИТЕТ: Поиск всегда убивает категорию
+    const q = searchParams.get("query") || searchParams.get("q") || searchParams.get("search");
+    const c = searchParams.get("category");
+    const finalQuery = q ? q : (c || "");
+    
     const page = parseInt(searchParams.get("page") || "1", 10) || 1;
-    const images = await fetchFromGoogle(query, page);
+    const images = await fetchFromGoogle(finalQuery, page);
+    
     return NextResponse.json({ data: images, pins: images, photos: images, items: images });
 }
 
 export async function POST(req: Request) {
     try {
         const body = await req.json();
-        const query = body.category || body.query || body.q || body.search || "";
+        const q = body.query || body.q || body.search;
+        const c = body.category;
+        const finalQuery = q ? q : (c || "");
+        
         const page = parseInt(body.page || "1", 10) || 1;
-        const images = await fetchFromGoogle(query, page);
+        const images = await fetchFromGoogle(finalQuery, page);
+        
         return NextResponse.json({ data: images, pins: images, photos: images, items: images });
     } catch {
         return NextResponse.json({ data: [], pins: [], photos: [], items: [] });

@@ -3,43 +3,15 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { supabase } from "../lib/supabase";
 import type { User } from "@supabase/supabase-js";
 
+// Базовые теги переехали в бургер-меню
 const defaultTags = [
   "Aesthetic", "Dark Academia", "Cyberpunk", "Minimalism",
   "Architecture", "Street Photography", "Vintage", "Interior"
 ];
 
-const quotes = [
-  { text: "Beauty is truth, truth beauty — that is all ye know on earth, and all ye need to know.", author: "John Keats" },
-  { text: "I have measured out my life with coffee spoons.", author: "T.S. Eliot" },
-  { text: "Do I dare disturb the universe?", author: "T.S. Eliot" },
-  { text: "I am large, I contain multitudes.", author: "Walt Whitman" },
-  { text: "Tell me, what is it you plan to do with your one wild and precious life?", author: "Mary Oliver" },
-  { text: "Not all those who wander are lost.", author: "J.R.R. Tolkien" },
-  { text: "One must imagine Sisyphus happy.", author: "Albert Camus" },
-  { text: "Everything flows.", author: "Heraclitus" },
-];
-
 type Photo = { id: string; src: string; thumb: string; title: string; link: string };
 type Board = { id: string; name: string; description?: string };
 type Pin = { id: string; image_url: string; title: string; board_id?: string; source_url?: string };
-
-function QuoteCard() {
-  const q = quotes[Math.floor(Math.random() * quotes.length)];
-  return (
-    <div style={{
-      breakInside: "avoid", marginBottom: 10,
-      borderRadius: 14, padding: "24px 20px",
-      background: "linear-gradient(135deg, #2a1f0e 0%, #1a1208 100%)",
-      border: "1px solid #4a3520",
-      display: "flex", flexDirection: "column", gap: 12,
-      minHeight: 160,
-    }}>
-      <span style={{ fontSize: 28, color: "#c0521a", lineHeight: 1, fontFamily: "Georgia, serif" }}>"</span>
-      <p style={{ color: "#d4b896", fontSize: 13, lineHeight: 1.7, fontFamily: "Georgia, serif", fontStyle: "italic", flex: 1 }}>{q.text}</p>
-      <p style={{ color: "#8a6a4a", fontSize: 11, fontFamily: "Georgia, serif" }}>— {q.author}</p>
-    </div>
-  );
-}
 
 export default function Home() {
   const [user, setUser] = useState<User | null>(null);
@@ -65,23 +37,15 @@ export default function Home() {
   const [showSaveToBoard, setShowSaveToBoard] = useState<Photo | null>(null);
   const [editBoard, setEditBoard] = useState<Board | null>(null);
   
-  const [newTitle, setNewTitle] = useState("");
   const [newSrc, setNewSrc] = useState<string | null>(null);
   const [newBoardName, setNewBoardName] = useState("");
   const [newBoardDesc, setNewBoardDesc] = useState("");
   const [shareMsg, setShareMsg] = useState("");
   
-  const [quotePositions] = useState<number[]>(() => {
-    const pos: number[] = [];
-    for (let i = 5; i < 200; i += Math.floor(Math.random() * 8) + 5) pos.push(i);
-    return pos;
-  });
-  
   const fileRef = useRef<HTMLInputElement>(null);
   const observerRef = useRef<IntersectionObserver | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   
-  // АБСОЛЮТНАЯ СИНХРОНИЗАЦИЯ: AbortController для жесткого прерывания старых запросов
   const abortControllerRef = useRef<AbortController | null>(null);
   const loadingRef = useRef(false);
 
@@ -96,14 +60,13 @@ export default function Home() {
     });
     
     try {
-      const savedTags = localStorage.getItem("schiele_user_tags");
+      const savedTags = localStorage.getItem("gelbet_user_tags");
       if (savedTags) setUserTags(JSON.parse(savedTags));
     } catch (e) { console.error("Could not load tags"); }
     
     return () => subscription.unsubscribe();
   }, []);
 
-  // БРОНЯ ДЛЯ БД: Безопасная загрузка данных пользователя
   async function fetchUserData(userId: string) {
     try {
       const [pinsRes, boardsRes] = await Promise.all([
@@ -125,7 +88,6 @@ export default function Home() {
     }
   }
 
-  // УЛЬТИМАТИВНЫЙ ПОИСК: Защита от гонки состояний и переполнения канала
   const fetchPhotos = useCallback(async (query: string, pageNum: number, reset: boolean) => {
     if (!reset && loadingRef.current) return;
     
@@ -133,9 +95,7 @@ export default function Home() {
     setLoading(true);
     
     if (reset) {
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort(); // Жестко обрываем старое сетевое соединение
-      }
+      if (abortControllerRef.current) abortControllerRef.current.abort();
       abortControllerRef.current = new AbortController();
     }
 
@@ -162,14 +122,9 @@ export default function Home() {
       
       setHasMore(fetched.length > 0);
     } catch (e: any) { 
-      if (e.name === 'AbortError') {
-        return; // Игнорируем прерванные запросы, не снимая статус лоадинга
-      }
-      console.error("Fetch Error:", e); 
+      if (e.name !== 'AbortError') console.error("Fetch Error:", e); 
     } finally {
-      if (reset && abortControllerRef.current?.signal.aborted) {
-        // Если это был сброс и запрос отменили — не трогаем статус лоадинга
-      } else {
+      if (!(reset && abortControllerRef.current?.signal.aborted)) {
         setLoading(false);
         loadingRef.current = false;
       }
@@ -201,7 +156,7 @@ export default function Home() {
     const formattedTag = tag.trim().charAt(0).toUpperCase() + tag.trim().slice(1);
     setUserTags(prev => {
       const updated = [formattedTag, ...prev.filter(t => t.toLowerCase() !== formattedTag.toLowerCase())].slice(0, 8);
-      localStorage.setItem("schiele_user_tags", JSON.stringify(updated));
+      localStorage.setItem("gelbet_user_tags", JSON.stringify(updated));
       return updated;
     });
   }
@@ -242,12 +197,11 @@ export default function Home() {
   }
 
   function handleAdd() {
-    if (!newSrc || !newTitle) return;
-    setPhotos(prev => [{ id: String(Date.now()), src: newSrc!, thumb: newSrc!, title: newTitle, link: "" }, ...prev]);
-    setShowUpload(false); setNewTitle(""); setNewSrc(null);
+    if (!newSrc) return;
+    setPhotos(prev => [{ id: String(Date.now()), src: newSrc!, thumb: newSrc!, title: "User Upload", link: "" }, ...prev]);
+    setShowUpload(false); setNewSrc(null);
   }
 
-  // БЕЗОПАСНЫЕ ЗАПРОСЫ В БАЗУ ДАННЫХ
   async function savePin(photo: Photo, boardId?: string) {
     if (!user) { window.location.href = "/auth"; return; }
     try {
@@ -330,14 +284,6 @@ export default function Home() {
   const userAvatar = user?.user_metadata?.avatar_url || "";
   const userName = user?.user_metadata?.full_name || user?.email || "";
 
-  const feedItems: Array<{ type: "photo"; data: Photo } | { type: "quote" }> = [];
-  displayPhotos.forEach((photo, i) => {
-    feedItems.push({ type: "photo", data: photo });
-    if (quotePositions.includes(i)) feedItems.push({ type: "quote" });
-  });
-
-  const combinedTags = Array.from(new Set([...userTags, ...defaultTags]));
-
   return (
     <>
       <style>{`
@@ -383,7 +329,7 @@ export default function Home() {
         .sign-btn { background: #c0521a; color: #0d0a06; border: none; border-radius: 20px; padding: 8px 16px; cursor: pointer; font-size: 12px; font-weight: 700; flex-shrink: 0; text-decoration: none; display: flex; align-items: center; }
 
         .tags-bar {
-          display: flex; gap: 8px; padding: 12px 16px;
+          display: flex; gap: 8px; padding: 12px 16px; align-items: center;
           overflow-x: auto; scrollbar-width: none;
           background: #0d0a06; border-bottom: 1px solid #1a1208;
         }
@@ -475,7 +421,7 @@ export default function Home() {
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
           </button>
 
-          <span className="logo" onClick={clearSearch}>SCHIELE</span>
+          <span className="logo" onClick={clearSearch}>GELBET</span>
 
           <form style={{ flex: 1, display: "flex", minWidth: 0 }} onSubmit={handleSearch}>
             <div className="search-wrap">
@@ -487,6 +433,11 @@ export default function Home() {
             </div>
           </form>
 
+          {/* ИИ-Ассистент (пока с уведомлением) */}
+          <button className="hbtn" title="AI Vibe Assistant" onClick={() => alert("AI Vibe Assistant is coming soon!")}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3l1.912 5.813a2 2 0 001.275 1.275L21 12l-5.813 1.912a2 2 0 00-1.275 1.275L12 21l-1.912-5.813a2 2 0 00-1.275-1.275L3 12l5.813-1.912a2 2 0 001.275-1.275L12 3z"/></svg>
+          </button>
+
           <button className={`hbtn ${showBoards ? "active" : ""}`} onClick={() => { setShowBoards(!showBoards); setShowSaved(false); }}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
           </button>
@@ -494,10 +445,6 @@ export default function Home() {
           <button className={`hbtn ${showSaved ? "active" : ""}`} onClick={() => { setShowSaved(!showSaved); setShowBoards(false); }}>
             <svg width="17" height="17" viewBox="0 0 24 24" fill={showSaved ? "#0d0a06" : "none"} stroke={showSaved ? "#0d0a06" : "currentColor"} strokeWidth="2" strokeLinecap="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
             {pins.length > 0 && <span className="badge">{pins.length}</span>}
-          </button>
-
-          <button className="hbtn" onClick={() => setShowUpload(true)}>
-            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
           </button>
 
           {user ? (
@@ -509,9 +456,11 @@ export default function Home() {
           )}
         </header>
 
-        {!showBoards && !showSaved && (
+        {/* ЧИСТАЯ ИСТОРИЯ ПОИСКА: Только персональные теги */}
+        {!showBoards && !showSaved && userTags.length > 0 && (
           <div className="tags-bar">
-            {combinedTags.map(tag => (
+            <span style={{color: "#4a3520", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, paddingRight: 8}}>History</span>
+            {userTags.map(tag => (
               <button 
                 key={tag} 
                 className={`tag-pill ${searchQuery === tag ? "active" : ""}`}
@@ -564,35 +513,31 @@ export default function Home() {
           <>
             <div className="grid-wrap">
               <div className="masonry">
-                {feedItems.map((item, i) =>
-                  item.type === "quote" ? (
-                    <QuoteCard key={`quote-${i}`} />
-                  ) : (
-                    /* ИДЕАЛЬНАЯ ЗАЩИТА ОТ КРАША REACT ПРИ ОШИБКАХ ЗАГРУЗКИ КАРТИНОК */
-                    <div key={`${item.data.id}-${i}`} className="card" onClick={() => setSelected(item.data)}>
-                      <img 
-                        src={item.data.src} 
-                        alt="" 
-                        loading="lazy" 
-                        onError={e => { 
-                          const parent = (e.currentTarget as HTMLImageElement).parentElement;
-                          if (parent) parent.style.display = "none"; 
-                        }} 
-                      />
-                      <div className="overlay">
-                        <button className={`save-btn ${isPinned(item.data) ? "pinned" : ""}`} onClick={e => { e.stopPropagation(); isPinned(item.data) ? null : setShowSaveToBoard(item.data); }}>
-                          {isPinned(item.data) ? "Saved" : "Save"}
+                {/* ЛЕНТА ТОЛЬКО С ФОТОГРАФИЯМИ, НИКАКИХ ЦИТАТ */}
+                {displayPhotos.map((photo, i) => (
+                  <div key={`${photo.id}-${i}`} className="card" onClick={() => setSelected(photo)}>
+                    <img 
+                      src={photo.src} 
+                      alt="" 
+                      loading="lazy" 
+                      onError={e => { 
+                        const parent = (e.currentTarget as HTMLImageElement).parentElement;
+                        if (parent) parent.style.display = "none"; 
+                      }} 
+                    />
+                    <div className="overlay">
+                      <button className={`save-btn ${isPinned(photo) ? "pinned" : ""}`} onClick={e => { e.stopPropagation(); isPinned(photo) ? null : setShowSaveToBoard(photo); }}>
+                        {isPinned(photo) ? "Saved" : "Save"}
+                      </button>
+                      <div className="card-actions">
+                        <button className="card-action-btn" onClick={e => { e.stopPropagation(); setShowShare(photo); }}>
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
                         </button>
-                        <div className="card-actions">
-                          <button className="card-action-btn" onClick={e => { e.stopPropagation(); setShowShare(item.data); }}>
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
-                          </button>
-                          {showSaved && <button className="card-action-btn" style={{ background: "rgba(229,62,62,0.8)" }} onClick={e => { e.stopPropagation(); deletePin(item.data.id); }}>✕</button>}
-                        </div>
+                        {showSaved && <button className="card-action-btn" style={{ background: "rgba(229,62,62,0.8)" }} onClick={e => { e.stopPropagation(); deletePin(photo.id); }}>✕</button>}
                       </div>
                     </div>
-                  )
-                )}
+                  </div>
+                ))}
               </div>
             </div>
             {displayPhotos.length === 0 && !loading && <div className="empty">{showSaved ? "No saved pins yet." : "Nothing found."}</div>}
@@ -605,7 +550,7 @@ export default function Home() {
             <div className="burger-overlay" onClick={closeAllPanels} />
             <div className="burger-panel">
               <div className="burger-header">
-                <span className="burger-logo">SCHIELE</span>
+                <span className="burger-logo">GELBET</span>
                 <button className="burger-close" onClick={closeAllPanels}>✕</button>
               </div>
               {user && (
@@ -617,6 +562,15 @@ export default function Home() {
                   </div>
                 </div>
               )}
+              
+              <div className="burger-section-title" style={{ padding: "0 16px", fontSize: 10, color: "#4a3520", textTransform: "uppercase", letterSpacing: 2, marginTop: 24, marginBottom: 12 }}>Explore Vibes</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, padding: "0 16px 16px" }}>
+                {defaultTags.map(tag => (
+                  <button key={tag} className="tag-pill" onClick={() => handleTagClick(tag)}>{tag}</button>
+                ))}
+              </div>
+              <div style={{ height: 1, background: "#1a1208", margin: "10px 0" }} />
+
               <div style={{ padding: "10px 0" }}>
                 <button className="burger-action" onClick={() => { setShowBoards(true); setShowMenu(false); }}>
                   <span className="burger-action-icon" style={{ color: "#c0521a" }}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg></span>
@@ -625,10 +579,6 @@ export default function Home() {
                 <button className="burger-action" onClick={() => { setShowSaved(true); setShowMenu(false); }}>
                   <span className="burger-action-icon" style={{ color: "#c0521a" }}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg></span>
                   <span>Saved Pins</span>
-                </button>
-                <button className="burger-action" onClick={() => { setShowUpload(true); setShowMenu(false); }}>
-                  <span className="burger-action-icon" style={{ color: "#8a6a4a" }}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></span>
-                  <span>Add Photo</span>
                 </button>
               </div>
               <div style={{ height: 1, background: "#1a1208", margin: "10px 0" }} />
@@ -647,6 +597,7 @@ export default function Home() {
           </>
         )}
 
+        {/* ЧИСТОЕ МОДАЛЬНОЕ ОКНО (Без сторонних описаний и заголовков) */}
         {selected && (
           <div className="modal-backdrop" onClick={() => setSelected(null)}>
             <div className="modal-box" onClick={e => e.stopPropagation()}>
@@ -659,8 +610,8 @@ export default function Home() {
                   <button className="modal-close" onClick={() => setSelected(null)}>✕</button>
                 </div>
                 
-                <div style={{ flex: 1 }}>
-                  {selected.title && <h1 style={{ color: "#d4b896", fontSize: 24, lineHeight: 1.4, fontFamily: "Cinzel, serif", marginBottom: 20 }}>{selected.title}</h1>}
+                <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                   <div style={{ color: "#4a3520", fontStyle: "italic", fontSize: 13, letterSpacing: 1 }}>Selected Aesthetic</div>
                 </div>
 
                 <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
@@ -729,26 +680,6 @@ export default function Home() {
                 <button className="primary-btn" style={{ flex: 1 }} onClick={updateBoard}>Save</button>
               </div>
               <button className="danger-btn" style={{ marginTop: 10 }} onClick={() => { deleteBoard(editBoard.id); setEditBoard(null); }}>Delete board</button>
-            </div>
-          </div>
-        )}
-
-        {showUpload && (
-          <div className="modal-backdrop" onClick={() => setShowUpload(false)}>
-            <div onClick={e => e.stopPropagation()} style={{ background: "#0d0a06", border: "1px solid #2a1f0e", borderRadius: 16, padding: 32, maxWidth: 440, width: "100%", display: "flex", flexDirection: "column", gap: 16 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <h2 style={{ fontSize: 16, fontWeight: 700, color: "#d4b896", fontFamily: "Cinzel, serif", letterSpacing: 2 }}>ADD PHOTO</h2>
-                <button className="modal-close" onClick={() => setShowUpload(false)}>✕</button>
-              </div>
-              <div className="upload-zone" onClick={() => fileRef.current?.click()}>
-                {newSrc ? <img src={newSrc} style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: 10 }} alt="preview" /> : <span style={{ color: "#4a3520", fontSize: 14 }}>Click to select photo</span>}
-              </div>
-              <input ref={fileRef} type="file" accept="image/*" onChange={handleFile} style={{ display: "none" }} />
-              <input className="field" placeholder="Title" value={newTitle} onChange={e => setNewTitle(e.target.value)} />
-              <div style={{ display: "flex", gap: 12, marginTop: 10 }}>
-                <button className="ghost-btn" onClick={() => setShowUpload(false)}>Cancel</button>
-                <button className="primary-btn" style={{ flex: 1, opacity: (!newSrc || !newTitle) ? 0.4 : 1 }} onClick={handleAdd}>Publish</button>
-              </div>
             </div>
           </div>
         )}

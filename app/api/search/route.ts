@@ -24,26 +24,39 @@ function isValidImage(url: string) {
     }
 }
 
-// Строго числовой ID
-const generateSafeId = (url: string) => {
+// ГЕНИАЛЬНЫЙ ID: Числовой, защищен от дубликатов на разных страницах пагинации
+const generateSafeId = (url: string, page: number) => {
+    const str = url + "-page-" + page;
     let hash = 0;
-    for (let i = 0; i < url.length; i++) {
-        hash = Math.imul(31 * hash + url.charCodeAt(i) | 0, 1);
+    for (let i = 0; i < str.length; i++) {
+        hash = Math.imul(31 * hash + str.charCodeAt(i) | 0, 1);
     }
-    return Math.abs(hash) + Math.floor(Math.random() * 100000);
+    return Math.abs(hash); // Всегда возвращает чистое, безопасное число
 };
 
 const memoryCache = new Map();
 
-async function fetchFromGoogle(rawQuery: string, page: number = 1) {
+// Броня от кэширования Next.js на стороне клиента
+export const noCacheHeaders = {
+    "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
+    "Pragma": "no-cache",
+    "Expires": "0",
+};
+
+// Зачистка мусора от фронтенда
+export const sanitizeQuery = (q: string | null) => {
+    if (!q || q === "null" || q === "undefined" || q === "All" || q.trim() === "") {
+        return null;
+    }
+    return q.trim();
+};
+
+export async function fetchFromGoogle(rawQuery: string | null, page: number = 1) {
     if (!process.env.SERPER_API_KEY) return [];
 
-    let query = rawQuery || "aesthetic pinterest high quality photography";
-    if (query.toLowerCase() === "all") {
-        query = "aesthetic pinterest photography wallpaper";
-    }
-
+    const query = rawQuery || "aesthetic pinterest high quality photography";
     const cacheKey = `${query}-page-${page}`;
+    
     if (memoryCache.has(cacheKey)) {
         return memoryCache.get(cacheKey); 
     }
@@ -66,12 +79,13 @@ async function fetchFromGoogle(rawQuery: string, page: number = 1) {
         const cleanImages = (data.images || [])
             .filter((img: any) => isValidImage(img.imageUrl))
             .map((img: any) => ({
-                id: generateSafeId(img.imageUrl),
+                id: generateSafeId(img.imageUrl, page), // Привязываем ID к странице
                 title: img.title || query,
                 image_url: img.imageUrl,
                 url: img.imageUrl,
                 src: img.imageUrl,
                 thumb: img.thumbnailUrl || img.imageUrl,
+                // Абсолютная защита от краша <Image /> (даем дефолтные размеры, если их нет)
                 width: img.imageWidth || 600,
                 height: img.imageHeight || 800,
                 source: "google",
@@ -91,32 +105,31 @@ async function fetchFromGoogle(rawQuery: string, page: number = 1) {
         return [];
     }
 }
-// ОБРАБОТЧИКИ ДЛЯ СТРАНИЦЫ ПОИСКА (Возвращают МАССИВ)
+// ОБРАБОТЧИКИ ДЛЯ ПОИСКА (ВОЗВРАЩАЮТ МАССИВ)
 export async function GET(req: Request) {
     const { searchParams } = new URL(req.url);
+    const query = sanitizeQuery(searchParams.get("query") || searchParams.get("q") || searchParams.get("search"));
+    const category = sanitizeQuery(searchParams.get("category"));
     
-    const q = searchParams.get("query") || searchParams.get("q") || searchParams.get("search");
-    const c = searchParams.get("category");
-    const finalQuery = q ? q : (c || "");
-    
+    const finalQuery = query || category || "aesthetic";
     const page = parseInt(searchParams.get("page") || "1", 10) || 1;
-    const images = await fetchFromGoogle(finalQuery, page);
     
-    return NextResponse.json(images);
+    const images = await fetchFromGoogle(finalQuery, page);
+    return NextResponse.json(images, { headers: noCacheHeaders });
 }
 
 export async function POST(req: Request) {
     try {
         const body = await req.json();
-        const q = body.query || body.q || body.search;
-        const c = body.category;
-        const finalQuery = q ? q : (c || "");
+        const query = sanitizeQuery(body.query || body.q || body.search);
+        const category = sanitizeQuery(body.category);
         
+        const finalQuery = query || category || "aesthetic";
         const page = parseInt(body.page || "1", 10) || 1;
-        const images = await fetchFromGoogle(finalQuery, page);
         
-        return NextResponse.json(images);
+        const images = await fetchFromGoogle(finalQuery, page);
+        return NextResponse.json(images, { headers: noCacheHeaders });
     } catch {
-        return NextResponse.json([]);
+        return NextResponse.json([], { headers: noCacheHeaders });
     }
 }

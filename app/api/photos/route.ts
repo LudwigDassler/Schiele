@@ -24,16 +24,16 @@ function isValidImage(url: string) {
     }
 }
 
-// Надежный строковой ID
+// ФУНДАМЕНТАЛЬНОЕ ИСПРАВЛЕНИЕ: Строго числовой ID. 
+// Убраны все toString(), чтобы React не крашился при маршрутизации.
 const generateSafeId = (url: string) => {
     let hash = 0;
     for (let i = 0; i < url.length; i++) {
         hash = Math.imul(31 * hash + url.charCodeAt(i) | 0, 1);
     }
-    return Math.abs(hash).toString(36) + url.length.toString(36);
+    return Math.abs(hash) + Math.floor(Math.random() * 100000);
 };
 
-// БРОНЯ: Встроенный кэш для моментальной навигации
 const memoryCache = new Map();
 
 async function fetchFromGoogle(rawQuery: string, page: number = 1) {
@@ -45,8 +45,6 @@ async function fetchFromGoogle(rawQuery: string, page: number = 1) {
     }
 
     const cacheKey = `${query}-page-${page}`;
-    
-    // Если мы уже искали это недавно — отдаем моментально!
     if (memoryCache.has(cacheKey)) {
         return memoryCache.get(cacheKey); 
     }
@@ -69,7 +67,7 @@ async function fetchFromGoogle(rawQuery: string, page: number = 1) {
         const cleanImages = (data.images || [])
             .filter((img: any) => isValidImage(img.imageUrl))
             .map((img: any) => ({
-                id: generateSafeId(img.imageUrl),
+                id: generateSafeId(img.imageUrl), // Теперь это Number
                 title: img.title || query,
                 image_url: img.imageUrl,
                 url: img.imageUrl,
@@ -83,7 +81,6 @@ async function fetchFromGoogle(rawQuery: string, page: number = 1) {
 
         const uniqueImages = Array.from(new Map(cleanImages.map((item: any) => [item.image_url, item])).values());
         
-        // Запоминаем результат на 10 минут
         if (uniqueImages.length > 0) {
             memoryCache.set(cacheKey, uniqueImages);
             setTimeout(() => memoryCache.delete(cacheKey), 10 * 60 * 1000);
@@ -95,43 +92,23 @@ async function fetchFromGoogle(rawQuery: string, page: number = 1) {
         return [];
     }
 }
-
+// РОУТЫ ДЛЯ ГЛАВНОЙ И КАТЕГОРИЙ (ВОЗВРАЩАЮТ ОБЪЕКТ)
 export async function GET(req: Request) {
     const { searchParams } = new URL(req.url);
-    // Приоритет запросов: сначала поиск, потом категория
-    let query = searchParams.get("query") || searchParams.get("q") || searchParams.get("search");
-    if (!query || query === "All") query = searchParams.get("category");
-    
+    const query = searchParams.get("category") || searchParams.get("query") || searchParams.get("q") || searchParams.get("search") || "";
     const page = parseInt(searchParams.get("page") || "1", 10) || 1;
-    const images = await fetchFromGoogle(query || "", page);
-    
-    // УНИВЕРСАЛЬНЫЙ ФОРМАТ (Предотвращает краши при переходах)
-    return NextResponse.json({
-        data: images,
-        pins: images,
-        photos: images,
-        items: images,
-        images: images
-    });
+    const images = await fetchFromGoogle(query, page);
+    return NextResponse.json({ data: images, pins: images, photos: images, items: images });
 }
 
 export async function POST(req: Request) {
     try {
         const body = await req.json();
-        let query = body.query || body.q || body.search;
-        if (!query || query === "All") query = body.category;
-        
+        const query = body.category || body.query || body.q || body.search || "";
         const page = parseInt(body.page || "1", 10) || 1;
-        const images = await fetchFromGoogle(query || "", page);
-        
-        return NextResponse.json({
-            data: images,
-            pins: images,
-            photos: images,
-            items: images,
-            images: images
-        });
+        const images = await fetchFromGoogle(query, page);
+        return NextResponse.json({ data: images, pins: images, photos: images, items: images });
     } catch {
-        return NextResponse.json({ data: [], pins: [], photos: [], items: [], images: [] });
+        return NextResponse.json({ data: [], pins: [], photos: [], items: [] });
     }
 }

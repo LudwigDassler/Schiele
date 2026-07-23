@@ -5,12 +5,9 @@ import { useRouter } from "next/navigation";
 
 export default function AuthPage() {
   const router = useRouter();
-  const [mode, setMode] = useState<"login" | "register" | "phone">("login");
+  const [mode, setMode] = useState<"login" | "register">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [phone, setPhone] = useState("");
-  const [otp, setOtp] = useState("");
-  const [otpSent, setOtpSent] = useState(false);
   const [loading, setLoading] = useState(false);
   
   const [toastMsg, setToastMsg] = useState<{text: string, type: "success" | "error"} | null>(null);
@@ -42,33 +39,15 @@ export default function AuthPage() {
     setLoading(false);
   }
 
-  async function handlePhoneSend(e: React.FormEvent) {
-    e.preventDefault();
-    setLoading(true);
-    const { error } = await supabase.auth.signInWithOtp({ phone });
+  // РЕАЛЬНЫЙ ОБРАБОТЧИК OAUTH
+  async function handleOAuth(provider: 'google' | 'twitter' | 'github') {
+    const { error } = await supabase.auth.signInWithOAuth({ 
+      provider: provider 
+    });
+    
     if (error) {
       showToast(error.message, "error");
-    } else {
-      setOtpSent(true);
-      showToast("Code sent via SMS", "success");
     }
-    setLoading(false);
-  }
-
-  async function handleOtpVerify(e: React.FormEvent) {
-    e.preventDefault();
-    setLoading(true);
-    const { error } = await supabase.auth.verifyOtp({ phone, token: otp, type: "sms" });
-    if (error) {
-      showToast(error.message, "error");
-    } else {
-      router.push("/");
-    }
-    setLoading(false);
-  }
-
-  function handleOAuthStub(provider: string) {
-    showToast(`${provider} login requires API key configuration in Supabase`, "error");
   }
 
   return (
@@ -80,7 +59,7 @@ export default function AuthPage() {
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
         @keyframes slideUp { from { transform: translate(-50%, 20px); opacity: 0; } to { transform: translate(-50%, 0); opacity: 1; } }
 
-        .auth-card { background: #1a1208; border-radius: 24px; padding: 40px 32px; max-width: 420px; width: "100%"; border: 1px solid #2a1f0e; box-shadow: 0 32px 64px rgba(0,0,0,0.6); animation: fadeIn 0.4s ease; }
+        .auth-card { background: #1a1208; border-radius: 24px; padding: 40px 32px; max-width: 420px; width: 100%; border: 1px solid #2a1f0e; box-shadow: 0 32px 64px rgba(0,0,0,0.6); animation: fadeIn 0.4s ease; }
         
         .logo { font-family: 'Cinzel', Georgia, serif; font-size: 28px; font-weight: 700; color: #d4b896; letter-spacing: 6px; text-transform: uppercase; text-shadow: 0 0 20px rgba(192,82,26,0.3); }
         .logo span { color: #c0521a; }
@@ -120,69 +99,51 @@ export default function AuthPage() {
 
         {/* Tabs */}
         <div className="tab-wrap">
-          {[["login", "Sign In"], ["register", "Register"], ["phone", "Phone"]].map(([m, label]) => (
-            <button key={m} onClick={() => { setMode(m as any); setToastMsg(null); setOtpSent(false); }} className={`tab-btn ${mode === m ? "active" : "inactive"}`}>
+          {[["login", "Sign In"], ["register", "Register"]].map(([m, label]) => (
+            <button key={m} onClick={() => { setMode(m as any); setToastMsg(null); }} className={`tab-btn ${mode === m ? "active" : "inactive"}`}>
               {label}
             </button>
           ))}
         </div>
 
         {/* Email/Password form */}
-        {(mode === "login" || mode === "register") && (
-          <form onSubmit={handleEmail} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-            <input className="field" type="email" placeholder="Email address" value={email} onChange={e => setEmail(e.target.value)} required />
-            <input className="field" type="password" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} required minLength={6} />
-            
-            <button type="submit" disabled={loading} className="primary-btn">
-              {loading ? "Authenticating..." : mode === "login" ? "Enter the void" : "Create identity"}
+        <form onSubmit={handleEmail} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <input className="field" type="email" placeholder="Email address" value={email} onChange={e => setEmail(e.target.value)} required />
+          <input className="field" type="password" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} required minLength={6} />
+          
+          <button type="submit" disabled={loading} className="primary-btn">
+            {loading ? "Authenticating..." : mode === "login" ? "Enter the void" : "Create identity"}
+          </button>
+          
+          {mode === "login" && (
+            <button type="button" onClick={async () => {
+              if (!email) { showToast("Enter your email first", "error"); return; }
+              const { error } = await supabase.auth.resetPasswordForEmail(email);
+              if (error) showToast(error.message, "error");
+              else showToast("Password reset link sent to your email", "success");
+            }} style={{ background: "none", border: "none", color: "#6a4a2a", fontSize: 12, cursor: "pointer", textAlign: "center", marginTop: 4, transition: "color 0.2s" }} onMouseOver={e => e.currentTarget.style.color = "#c0521a"} onMouseOut={e => e.currentTarget.style.color = "#6a4a2a"}>
+              Lost your keys? Reset password
             </button>
-            
-            {mode === "login" && (
-              <button type="button" onClick={async () => {
-                if (!email) { showToast("Enter your email first", "error"); return; }
-                const { error } = await supabase.auth.resetPasswordForEmail(email);
-                if (error) showToast(error.message, "error");
-                else showToast("Password reset link sent to your email", "success");
-              }} style={{ background: "none", border: "none", color: "#6a4a2a", fontSize: 12, cursor: "pointer", textAlign: "center", marginTop: 4, transition: "color 0.2s" }} onMouseOver={e => e.currentTarget.style.color = "#c0521a"} onMouseOut={e => e.currentTarget.style.color = "#6a4a2a"}>
-                Lost your keys? Reset password
-              </button>
-            )}
+          )}
 
-            {/* OAuth Buttons */}
-            <div className="divider">or</div>
-            
-            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              <button type="button" className="oauth-btn" onClick={() => handleOAuthStub("Google")}>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/><path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/><path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/><path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/></svg>
-                Continue with Google
-              </button>
-              <button type="button" className="oauth-btn" onClick={() => handleOAuthStub("GitHub")}>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
-                Continue with GitHub
-              </button>
-            </div>
-          </form>
-        )}
-
-        {/* Phone form */}
-        {mode === "phone" && (
-          <form onSubmit={otpSent ? handleOtpVerify : handlePhoneSend} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-            {!otpSent ? (
-              <>
-                <p style={{ color: "#8a6a4a", fontSize: 13, textAlign: "center", marginBottom: 8 }}>Enter your number to receive an access code</p>
-                <input className="field" type="tel" placeholder="+1 234 567 8900" value={phone} onChange={e => setPhone(e.target.value)} required />
-                <button type="submit" disabled={loading} className="primary-btn">{loading ? "Sending..." : "Request Code"}</button>
-              </>
-            ) : (
-              <>
-                <p style={{ color: "#8a6a4a", fontSize: 13, textAlign: "center", marginBottom: 8 }}>Enter the code sent to <br/><span style={{color: "#d4b896", fontWeight: 700}}>{phone}</span></p>
-                <input className="field" type="text" placeholder="6-digit code" value={otp} onChange={e => setOtp(e.target.value)} required maxLength={6} style={{ textAlign: "center", letterSpacing: 8, fontSize: 18 }} />
-                <button type="submit" disabled={loading} className="primary-btn">{loading ? "Verifying..." : "Verify Access"}</button>
-                <button type="button" onClick={() => setOtpSent(false)} style={{ background: "none", border: "none", color: "#6a4a2a", fontSize: 12, cursor: "pointer", marginTop: 8, transition: "color 0.2s" }} onMouseOver={e => e.currentTarget.style.color = "#c0521a"} onMouseOut={e => e.currentTarget.style.color = "#6a4a2a"}>Use a different number</button>
-              </>
-            )}
-          </form>
-        )}
+          {/* OAuth Buttons */}
+          <div className="divider">or</div>
+          
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <button type="button" className="oauth-btn" onClick={() => handleOAuth('google')}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/><path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/><path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/><path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/></svg>
+              Continue with Google
+            </button>
+            <button type="button" className="oauth-btn" onClick={() => handleOAuth('twitter')}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 22.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
+              Continue with X (Twitter)
+            </button>
+            <button type="button" className="oauth-btn" onClick={() => handleOAuth('github')}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+              Continue with GitHub
+            </button>
+          </div>
+        </form>
 
         <div style={{ marginTop: 32, textAlign: "center" }}>
           <a href="/" style={{ color: "#4a3520", fontSize: 11, textDecoration: "none", textTransform: "uppercase", letterSpacing: 2, fontWeight: 700, transition: "color 0.2s" }} onMouseOver={e => e.currentTarget.style.color = "#c0521a"} onMouseOut={e => e.currentTarget.style.color = "#4a3520"}>

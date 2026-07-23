@@ -130,7 +130,7 @@ export default function Home() {
     }
   }, []);
 
-  // AI Функция подгрузки похожих фото в модалку
+  // ИИ-СЕЛЕКЦИЯ V2.0: Смарт-парсер для модалки
   const fetchRelatedPhotos = useCallback(async (basePhoto: Photo, pageNum: number, reset: boolean) => {
     setRelatedLoading(true);
     if (reset) {
@@ -139,20 +139,39 @@ export default function Home() {
     }
 
     try {
-      // ИИ-эмуляция: вычищаем спецсимволы и берем первые пару слов из заголовка, добавляя "aesthetic"
-      const cleanTitle = (basePhoto.title || "").replace(/[^a-zA-Z0-9а-яА-Я ]/g, "").split(" ").slice(0, 3).join(" ");
-      const aiQuery = cleanTitle.length > 2 ? `${cleanTitle} aesthetic` : searchQuery;
+      // 1. Вырезаем SEO-мусор, оставляем суть
+      const stopWords = ["photo", "image", "picture", "wallpaper", "background", "free", "download", "high", "resolution", "by", "of", "the", "in", "on", "a", "and", "is", "with", "for", "hd", "4k", "stock"];
+      const rawWords = (basePhoto.title || "").toLowerCase().replace(/[^a-zа-я0-9\s]/g, "").split(/\s+/);
+      const keywords = rawWords.filter(w => w.length > 2 && !stopWords.includes(w)).slice(0, 4);
       
+      // 2. Интеллектуальное скрещивание запросов
+      const baseVibe = searchQuery.toLowerCase().replace("aesthetic", "").trim();
+      let aiQuery = "";
+      
+      if (keywords.length > 0) {
+        // Исключаем дублирование слов
+        const uniqueKeywords = keywords.filter(kw => !baseVibe.includes(kw)).join(" ");
+        aiQuery = `${baseVibe} ${uniqueKeywords} aesthetic`.trim();
+      } else {
+        // Если названия нет вообще, углубляем текущий запрос
+        aiQuery = `${baseVibe} details mood aesthetic`;
+      }
+
+      // Чистим двойные пробелы
+      aiQuery = aiQuery.replace(/\s+/g, ' ').trim();
+
       const params = new URLSearchParams({ page: String(pageNum), query: aiQuery });
       const res = await fetch(`/api/search?${params}`, { signal: relatedAbortRef.current?.signal });
       const data = await res.json();
       const rawArray = Array.isArray(data) ? data : (data.data || data.photos || data.items || []);
-      const fetched = rawArray.filter((p: any) => p.src && p.src.startsWith("http") && p.id !== basePhoto.id);
+      
+      // 3. Жесткий анти-двойник: фильтруем по src, чтобы избежать 100% копий
+      const fetched = rawArray.filter((p: any) => p.src && p.src.startsWith("http") && p.src !== basePhoto.src && p.id !== basePhoto.id);
       
       setRelatedPhotos(prev => {
         const combined = reset ? fetched : [...prev, ...fetched];
         const map = new Map();
-        combined.forEach(p => map.set(p.id, p));
+        combined.forEach(p => map.set(p.src, p)); // Map по src - идеальный отсев клонов
         return Array.from(map.values());
       });
       setRelatedHasMore(fetched.length > 0);
@@ -328,14 +347,12 @@ export default function Home() {
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
         body { overflow-x: hidden; background: #0d0a06; font-family: -apple-system, sans-serif; }
 
-        /* ЭЛИТАРНЫЙ КАСТОМНЫЙ СКРОЛЛБАР */
         ::-webkit-scrollbar { width: 6px; height: 6px; }
         ::-webkit-scrollbar-track { background: #0d0a06; }
         ::-webkit-scrollbar-thumb { background: #2a1f0e; border-radius: 10px; }
         ::-webkit-scrollbar-thumb:hover { background: #c0521a; }
         * { scrollbar-width: thin; scrollbar-color: #2a1f0e #0d0a06; }
 
-        /* КИНЕМАТОГРАФИЧЕСКОЕ ЗЕРНО (FILM GRAIN OVERLAY) */
         body::after {
           content: ""; position: fixed; inset: 0; z-index: 9999;
           pointer-events: none; opacity: 0.04;
@@ -418,7 +435,6 @@ export default function Home() {
         .card-action-btn { background: rgba(13,10,6,0.8); border: none; border-radius: 50%; width: 34px; height: 34px; display: flex; align-items: center; justify-content: center; cursor: pointer; color: #fff; transition: all 0.2s; backdrop-filter: blur(4px); }
         .card-action-btn:hover { background: #c0521a; color: #0d0a06; transform: scale(1.1); }
 
-        /* BOARDS STYLING */
         .boards-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
         @media (min-width: 480px) { .boards-grid { grid-template-columns: repeat(3, 1fr); } }
         .board-card { border-radius: 12px; overflow: hidden; border: 1px solid #2a1f0e; background: #1a1208; }
@@ -531,7 +547,6 @@ export default function Home() {
           </div>
         )}
 
-        {/* RESTORED: BOARDS SECTION */}
         {showBoards && (
           <div style={{ padding: 20 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
@@ -691,7 +706,6 @@ export default function Home() {
                 </div>
               </div>
 
-              {/* БЕСКОНЕЧНАЯ ЛЕНТА ИИ-ПОХОЖИХ КАРТИНОК */}
               <div className="modal-bottom">
                 <h3 style={{ fontSize: 13, fontWeight: 700, color: "#d4b896", textTransform: "uppercase", letterSpacing: 2, marginBottom: 24, display: "flex", alignItems: "center", gap: 10 }}>
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#c0521a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3l1.912 5.813a2 2 0 001.275 1.275L21 12l-5.813 1.912a2 2 0 00-1.275 1.275L12 21l-1.912-5.813a2 2 0 00-1.275-1.275L3 12l5.813-1.912a2 2 0 001.275-1.275L12 3z"/></svg>
@@ -706,7 +720,6 @@ export default function Home() {
                   ))}
                 </div>
                 
-                {/* Наблюдатель подгрузки для модалки */}
                 <div ref={modalBottomRef} style={{ padding: "40px 0", textAlign: "center" }}>
                   {relatedLoading && (
                     <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
@@ -721,7 +734,6 @@ export default function Home() {
           </div>
         )}
 
-        {/* RESTORED: BOARD CREATION MODALS */}
         {showSaveToBoard && (
           <div className="modal-backdrop" onClick={() => setShowSaveToBoard(null)}>
             <div onClick={e => e.stopPropagation()} style={{ background: "#0d0a06", border: "1px solid #2a1f0e", borderRadius: 16, padding: 32, maxWidth: 400, width: "100%", display: "flex", flexDirection: "column", gap: 16 }}>

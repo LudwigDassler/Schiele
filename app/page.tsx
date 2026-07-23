@@ -3,10 +3,17 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { supabase } from "../lib/supabase";
 import type { User } from "@supabase/supabase-js";
 
-// Базовые теги переехали в бургер-меню
 const defaultTags = [
   "Aesthetic", "Dark Academia", "Cyberpunk", "Minimalism",
   "Architecture", "Street Photography", "Vintage", "Interior"
+];
+
+// Пул для ИИ-помощника
+const aiVibes = [
+  "Melancholic Soviet Post-Punk", "Ethereal E-Girl Dreamcore", 
+  "Cinematic Neon Noir", "Liminal Poolrooms Aesthetic", 
+  "Dark Academia Library Vintage", "Gothic Renaissance Architecture",
+  "Y2K Nostalgia Grunge", "Cinematic Polaroids Aesthetic"
 ];
 
 type Photo = { id: string; src: string; thumb: string; title: string; link: string };
@@ -40,7 +47,9 @@ export default function Home() {
   const [newSrc, setNewSrc] = useState<string | null>(null);
   const [newBoardName, setNewBoardName] = useState("");
   const [newBoardDesc, setNewBoardDesc] = useState("");
-  const [shareMsg, setShareMsg] = useState("");
+  
+  // Уведомления (Toast)
+  const [toastMsg, setToastMsg] = useState("");
   
   const fileRef = useRef<HTMLInputElement>(null);
   const observerRef = useRef<IntersectionObserver | null>(null);
@@ -60,7 +69,7 @@ export default function Home() {
     });
     
     try {
-      const savedTags = localStorage.getItem("gelbet_user_tags");
+      const savedTags = localStorage.getItem("ghebelt_user_tags");
       if (savedTags) setUserTags(JSON.parse(savedTags));
     } catch (e) { console.error("Could not load tags"); }
     
@@ -152,11 +161,16 @@ export default function Home() {
     return () => observerRef.current?.disconnect();
   }, [hasMore, page, searchQuery, fetchPhotos]);
 
+  function showToast(msg: string) {
+    setToastMsg(msg);
+    setTimeout(() => setToastMsg(""), 2500);
+  }
+
   function saveUserTag(tag: string) {
     const formattedTag = tag.trim().charAt(0).toUpperCase() + tag.trim().slice(1);
     setUserTags(prev => {
       const updated = [formattedTag, ...prev.filter(t => t.toLowerCase() !== formattedTag.toLowerCase())].slice(0, 8);
-      localStorage.setItem("gelbet_user_tags", JSON.stringify(updated));
+      localStorage.setItem("ghebelt_user_tags", JSON.stringify(updated));
       return updated;
     });
   }
@@ -180,6 +194,17 @@ export default function Home() {
     setSearch("");
     setSearchQuery("Aesthetic");
     closeAllPanels();
+  }
+
+  // ИИ-АССИСТЕНТ
+  function handleAIVibe() {
+    showToast("✨ AI is analyzing vibes...");
+    setTimeout(() => {
+      const randomVibe = aiVibes[Math.floor(Math.random() * aiVibes.length)];
+      setSearch(randomVibe);
+      setSearchQuery(randomVibe);
+      saveUserTag(randomVibe);
+    }, 800);
   }
 
   function closeAllPanels() {
@@ -216,12 +241,16 @@ export default function Home() {
       }
     } catch (e) { console.error("Error saving pin:", e); }
     setShowSaveToBoard(null); setSelected(null);
+    showToast("Saved to profile");
   }
 
   async function deletePin(pinId: string) {
     try {
       const res = await fetch(`/api/pins?id=${pinId}`, { method: "DELETE" });
-      if (res.ok) setPins(prev => prev.filter(p => p.id !== pinId));
+      if (res.ok) {
+        setPins(prev => prev.filter(p => p.id !== pinId));
+        showToast("Removed from saved");
+      }
     } catch (e) { console.error("Error deleting pin:", e); }
   }
 
@@ -270,8 +299,12 @@ export default function Home() {
 
   function sharePhoto(photo: Photo) {
     const url = photo.link || window.location.href;
-    if (navigator.share) navigator.share({ title: photo.title, url });
-    else { navigator.clipboard.writeText(url); setShareMsg("Link copied!"); setTimeout(() => setShareMsg(""), 2000); }
+    if (navigator.share) {
+      navigator.share({ title: photo.title || "Ghebelt Vibe", url });
+    } else { 
+      navigator.clipboard.writeText(url); 
+      showToast("Link copied to clipboard!"); 
+    }
     setShowShare(null);
   }
 
@@ -368,20 +401,20 @@ export default function Home() {
         .overlay { opacity: 0; position: absolute; inset: 0; transition: opacity 0.2s ease; display: flex; flex-direction: column; justify-content: space-between; padding: 12px; }
         .card:hover .overlay { opacity: 1; }
         
-        .save-btn { align-self: flex-end; background: #c0521a; color: #0d0a06; border: none; border-radius: 20px; padding: 8px 16px; cursor: pointer; font-weight: 700; font-size: 12px; transition: all 0.15s; }
+        .save-btn { background: #c0521a; color: #0d0a06; border: none; border-radius: 20px; padding: 10px 18px; cursor: pointer; font-weight: 700; font-size: 13px; transition: all 0.15s; }
         .save-btn:hover { background: #d4621a; transform: scale(1.05); }
-        .save-btn.pinned { background: rgba(13,10,6,0.6); color: #fff; border: 1px solid #4a3520; }
+        .save-btn.pinned { background: rgba(13,10,6,0.8); color: #fff; border: 1px solid #4a3520; }
         
-        .card-actions { display: flex; gap: 8px; align-self: flex-end; }
-        .card-action-btn { background: rgba(13,10,6,0.6); border: none; border-radius: 50%; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; cursor: pointer; color: #fff; transition: background 0.2s; }
-        .card-action-btn:hover { background: #c0521a; color: #0d0a06; }
+        .card-action-btn { background: rgba(13,10,6,0.8); border: none; border-radius: 50%; width: 34px; height: 34px; display: flex; align-items: center; justify-content: center; cursor: pointer; color: #fff; transition: all 0.2s; backdrop-filter: blur(4px); }
+        .card-action-btn:hover { background: #c0521a; color: #0d0a06; transform: scale(1.1); }
 
         .modal-backdrop { position: fixed; inset: 0; z-index: 200; background: rgba(0,0,0,0.85); display: flex; align-items: center; justify-content: center; padding: 16px; animation: fadeIn 0.2s ease; }
-        .modal-box { background: #0d0a06; border: 1px solid #2a1f0e; border-radius: 16px; overflow: hidden; max-width: 900px; width: 100%; display: flex; flex-direction: column; max-height: 90vh; box-shadow: 0 32px 80px rgba(0,0,0,0.8); animation: slideUp 0.25s ease; }
+        .modal-box { background: #0d0a06; border: 1px solid #2a1f0e; border-radius: 16px; overflow: hidden; max-width: 1000px; width: 100%; display: flex; flex-direction: column; max-height: 90vh; box-shadow: 0 32px 80px rgba(0,0,0,0.8); animation: slideUp 0.25s ease; }
         @media (min-width: 640px) { .modal-box { flex-direction: row; } }
-        .modal-img { width: 100%; max-height: 45vh; object-fit: cover; display: block; background: #1a1208; }
-        @media (min-width: 640px) { .modal-img { width: 55%; max-height: 90vh; } }
-        .modal-info { flex: 1; padding: 32px; display: flex; flex-direction: column; gap: 24px; overflow-y: auto; background: #0d0a06; }
+        .modal-img-wrap { flex: 1.5; background: #1a1208; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+        .modal-img { width: 100%; max-height: 50vh; object-fit: cover; display: block; }
+        @media (min-width: 640px) { .modal-img { max-height: 90vh; } }
+        .modal-info { flex: 1; padding: 32px; display: flex; flex-direction: column; overflow-y: auto; background: #0d0a06; }
 
         .primary-btn { background: #c0521a; color: #0d0a06; border: none; border-radius: 24px; padding: 14px 24px; cursor: pointer; font-weight: 700; font-size: 14px; width: 100%; transition: background 0.2s; }
         .primary-btn:hover { background: #d4621a; }
@@ -412,7 +445,10 @@ export default function Home() {
         .empty { text-align: center; padding: 100px 20px; color: #4a3520; font-size: 16px; font-family: 'Crimson Text', serif; font-style: italic; }
         .modal-close { background: none; border: none; color: #4a3520; cursor: pointer; font-size: 20px; width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; }
         .modal-close:hover { background: #1a1208; color: #c0521a; }
-        .share-toast { position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); background: #c0521a; color: #0d0a06; padding: 12px 24px; border-radius: 24px; font-size: 14px; font-weight: 700; z-index: 300; }
+        
+        .toast-container { position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); background: #c0521a; color: #0d0a06; padding: 12px 24px; border-radius: 24px; font-size: 14px; font-weight: 700; z-index: 9999; animation: slideUp 0.3s ease; box-shadow: 0 10px 30px rgba(192,82,26,0.3); }
+        
+        .related-masonry { columns: 2; gap: 8px; margin-top: 16px; }
       `}</style>
 
       <main style={{ minHeight: "100vh" }}>
@@ -421,7 +457,7 @@ export default function Home() {
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
           </button>
 
-          <span className="logo" onClick={clearSearch}>GELBET</span>
+          <span className="logo" onClick={clearSearch}>GHEBELT</span>
 
           <form style={{ flex: 1, display: "flex", minWidth: 0 }} onSubmit={handleSearch}>
             <div className="search-wrap">
@@ -433,8 +469,8 @@ export default function Home() {
             </div>
           </form>
 
-          {/* ИИ-Ассистент (пока с уведомлением) */}
-          <button className="hbtn" title="AI Vibe Assistant" onClick={() => alert("AI Vibe Assistant is coming soon!")}>
+          {/* ИИ-АССИСТЕНТ */}
+          <button className="hbtn" title="AI Vibe Generator" onClick={handleAIVibe}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3l1.912 5.813a2 2 0 001.275 1.275L21 12l-5.813 1.912a2 2 0 00-1.275 1.275L12 21l-1.912-5.813a2 2 0 00-1.275-1.275L3 12l5.813-1.912a2 2 0 001.275-1.275L12 3z"/></svg>
           </button>
 
@@ -456,7 +492,6 @@ export default function Home() {
           )}
         </header>
 
-        {/* ЧИСТАЯ ИСТОРИЯ ПОИСКА: Только персональные теги */}
         {!showBoards && !showSaved && userTags.length > 0 && (
           <div className="tags-bar">
             <span style={{color: "#4a3520", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, paddingRight: 8}}>History</span>
@@ -513,7 +548,6 @@ export default function Home() {
           <>
             <div className="grid-wrap">
               <div className="masonry">
-                {/* ЛЕНТА ТОЛЬКО С ФОТОГРАФИЯМИ, НИКАКИХ ЦИТАТ */}
                 {displayPhotos.map((photo, i) => (
                   <div key={`${photo.id}-${i}`} className="card" onClick={() => setSelected(photo)}>
                     <img 
@@ -526,12 +560,14 @@ export default function Home() {
                       }} 
                     />
                     <div className="overlay">
-                      <button className={`save-btn ${isPinned(photo) ? "pinned" : ""}`} onClick={e => { e.stopPropagation(); isPinned(photo) ? null : setShowSaveToBoard(photo); }}>
-                        {isPinned(photo) ? "Saved" : "Save"}
-                      </button>
-                      <div className="card-actions">
-                        <button className="card-action-btn" onClick={e => { e.stopPropagation(); setShowShare(photo); }}>
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+                      <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                        <button className={`save-btn ${isPinned(photo) ? "pinned" : ""}`} onClick={e => { e.stopPropagation(); isPinned(photo) ? null : setShowSaveToBoard(photo); }}>
+                          {isPinned(photo) ? "Saved" : "Save"}
+                        </button>
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "auto", gap: 8 }}>
+                        <button className="card-action-btn" onClick={e => { e.stopPropagation(); setShowShare(photo); }} title="Share">
+                          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
                         </button>
                         {showSaved && <button className="card-action-btn" style={{ background: "rgba(229,62,62,0.8)" }} onClick={e => { e.stopPropagation(); deletePin(photo.id); }}>✕</button>}
                       </div>
@@ -550,7 +586,7 @@ export default function Home() {
             <div className="burger-overlay" onClick={closeAllPanels} />
             <div className="burger-panel">
               <div className="burger-header">
-                <span className="burger-logo">GELBET</span>
+                <span className="burger-logo">GHEBELT</span>
                 <button className="burger-close" onClick={closeAllPanels}>✕</button>
               </div>
               {user && (
@@ -597,29 +633,39 @@ export default function Home() {
           </>
         )}
 
-        {/* ЧИСТОЕ МОДАЛЬНОЕ ОКНО (Без сторонних описаний и заголовков) */}
         {selected && (
           <div className="modal-backdrop" onClick={() => setSelected(null)}>
             <div className="modal-box" onClick={e => e.stopPropagation()}>
-              <img src={selected.src} alt="" className="modal-img" />
+              <div className="modal-img-wrap">
+                <img src={selected.src} alt="" className="modal-img" />
+              </div>
               <div className="modal-info">
-                <div style={{ display: "flex", justifyContent: "space-between" }}>
-                  <button className="hbtn" style={{ background: "#1a1208" }} onClick={() => { setShowShare(selected); setSelected(null); }}>
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 20 }}>
+                  <button className="hbtn" style={{ background: "#1a1208" }} onClick={() => { setShowShare(selected); setSelected(null); }} title="Share">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
                   </button>
                   <button className="modal-close" onClick={() => setSelected(null)}>✕</button>
                 </div>
-                
-                <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                   <div style={{ color: "#4a3520", fontStyle: "italic", fontSize: 13, letterSpacing: 1 }}>Selected Aesthetic</div>
-                </div>
 
-                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: 12, flexShrink: 0 }}>
                   <button className={`primary-btn ${isPinned(selected) ? "pinned-state" : ""}`} onClick={() => isPinned(selected) ? null : setShowSaveToBoard(selected)}>
                     {isPinned(selected) ? "Already saved" : "Save to Board"}
                   </button>
                   {selected.link && <a href={selected.link} target="_blank" rel="noopener noreferrer"><button className="outline-btn">View Original ↗</button></a>}
                 </div>
+
+                {/* БЛОК С ПОХОЖИМИ ФОТОГРАФИЯМИ */}
+                <div style={{ marginTop: 40, paddingTop: 24, borderTop: "1px solid #1a1208", flex: 1 }}>
+                  <h3 style={{ fontSize: 11, fontWeight: 700, color: "#8a6a4a", textTransform: "uppercase", letterSpacing: 2, marginBottom: 16 }}>More Like This</h3>
+                  <div className="related-masonry">
+                    {displayPhotos.filter(p => p.id !== selected.id).slice(0, 12).map((photo, i) => (
+                      <div key={`related-${photo.id}-${i}`} style={{ breakInside: "avoid", marginBottom: 8, cursor: "pointer", borderRadius: 8, overflow: "hidden" }} onClick={() => { document.querySelector('.modal-info')?.scrollTo(0,0); setSelected(photo); }}>
+                        <img src={photo.thumb || photo.src} style={{ width: "100%", display: "block", transition: "filter 0.2s" }} onMouseOver={e => (e.currentTarget.style.filter = "brightness(0.8)")} onMouseOut={e => (e.currentTarget.style.filter = "brightness(1)")} alt="" />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
               </div>
             </div>
           </div>
@@ -684,7 +730,7 @@ export default function Home() {
           </div>
         )}
 
-        {shareMsg && <div className="share-toast">{shareMsg}</div>}
+        {toastMsg && <div className="toast-container">{toastMsg}</div>}
       </main>
     </>
   );

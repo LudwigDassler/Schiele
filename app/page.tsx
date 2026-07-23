@@ -42,7 +42,6 @@ export default function Home() {
   const [relatedLoading, setRelatedLoading] = useState(false);
   const [relatedHasMore, setRelatedHasMore] = useState(true);
   
-  const [showUpload, setShowUpload] = useState(false);
   const [showSaved, setShowSaved] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
   const [showBoards, setShowBoards] = useState(false);
@@ -54,12 +53,10 @@ export default function Home() {
   const [showAIModal, setShowAIModal] = useState(false);
   const [aiPrompt, setAiPrompt] = useState("");
   
-  const [newSrc, setNewSrc] = useState<string | null>(null);
   const [newBoardName, setNewBoardName] = useState("");
   const [newBoardDesc, setNewBoardDesc] = useState("");
   const [toastMsg, setToastMsg] = useState("");
   
-  const fileRef = useRef<HTMLInputElement>(null);
   const observerRef = useRef<IntersectionObserver | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const modalBottomRef = useRef<HTMLDivElement>(null);
@@ -189,8 +186,6 @@ export default function Home() {
   // Observer модального окна (Бесконечные похожие фото)
   useEffect(() => {
     if (!selected) return;
-    
-    // При открытии нового фото - сброс и первичная загрузка
     setRelatedPhotos([]);
     setRelatedPage(1);
     setRelatedHasMore(true);
@@ -281,6 +276,31 @@ export default function Home() {
       }
     } catch (e) {}
     setNewBoardName(""); setNewBoardDesc(""); setShowNewBoard(false);
+  }
+
+  async function updateBoard() {
+    if (!editBoard) return;
+    try {
+      const res = await fetch("/api/boards", { 
+        method: "PUT", 
+        headers: { "Content-Type": "application/json" }, 
+        body: JSON.stringify({ id: editBoard.id, name: editBoard.name, description: editBoard.description }) 
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const updatedBoard = data.board || data.data;
+        if (updatedBoard) setBoards(prev => prev.map(b => b.id === editBoard.id ? updatedBoard : b));
+      }
+    } catch (e) { console.error("Error updating board:", e); }
+    setEditBoard(null);
+  }
+
+  async function deleteBoard(boardId: string) {
+    if (!confirm("Delete this board?")) return;
+    try {
+      const res = await fetch(`/api/boards?id=${boardId}`, { method: "DELETE" });
+      if (res.ok) setBoards(prev => prev.filter(b => b.id !== boardId));
+    } catch (e) { console.error("Error deleting board:", e); }
   }
 
   function isPinned(photo: Photo) { return pins.some(p => p.image_url === photo.src); }
@@ -398,6 +418,17 @@ export default function Home() {
         .card-action-btn { background: rgba(13,10,6,0.8); border: none; border-radius: 50%; width: 34px; height: 34px; display: flex; align-items: center; justify-content: center; cursor: pointer; color: #fff; transition: all 0.2s; backdrop-filter: blur(4px); }
         .card-action-btn:hover { background: #c0521a; color: #0d0a06; transform: scale(1.1); }
 
+        /* BOARDS STYLING */
+        .boards-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+        @media (min-width: 480px) { .boards-grid { grid-template-columns: repeat(3, 1fr); } }
+        .board-card { border-radius: 12px; overflow: hidden; border: 1px solid #2a1f0e; background: #1a1208; }
+        .board-cover { height: 80px; background: linear-gradient(135deg, #2a1f0e, #1a1208); display: flex; align-items: center; justify-content: center; }
+        .board-info { padding: 12px; }
+        .board-actions { display: flex; gap: 8px; margin-top: 10px; }
+        .board-edit-btn, .board-del-btn { flex: 1; padding: 6px; border-radius: 6px; font-size: 11px; cursor: pointer; background: transparent; }
+        .board-edit-btn { border: 1px solid #2a1f0e; color: #8a6a4a; } .board-edit-btn:hover { border-color: #c0521a; color: #c0521a; }
+        .board-del-btn { border: 1px solid #3a1a1a; color: #e53e3e; } .board-del-btn:hover { background: rgba(229,62,62,0.1); }
+
         .modal-backdrop { position: fixed; inset: 0; z-index: 200; background: rgba(0,0,0,0.85); display: flex; align-items: center; justify-content: center; padding: 16px; animation: fadeIn 0.2s ease; }
         .modal-box { background: #0d0a06; border: 1px solid #2a1f0e; border-radius: 16px; width: 100%; max-width: 1000px; max-height: 90vh; overflow-y: auto; box-shadow: 0 32px 80px rgba(0,0,0,0.8); animation: slideUp 0.25s ease; display: flex; flex-direction: column; scroll-behavior: smooth; }
         
@@ -466,6 +497,10 @@ export default function Home() {
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3l1.912 5.813a2 2 0 001.275 1.275L21 12l-5.813 1.912a2 2 0 00-1.275 1.275L12 21l-1.912-5.813a2 2 0 00-1.275-1.275L3 12l5.813-1.912a2 2 0 001.275-1.275L12 3z"/></svg>
           </button>
 
+          <button className={`hbtn ${showBoards ? "active" : ""}`} onClick={() => { setShowBoards(!showBoards); setShowSaved(false); }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+          </button>
+
           <button className={`hbtn ${showSaved ? "active" : ""}`} onClick={() => { setShowSaved(!showSaved); setShowBoards(false); }}>
             <svg width="17" height="17" viewBox="0 0 24 24" fill={showSaved ? "#0d0a06" : "none"} stroke={showSaved ? "#0d0a06" : "currentColor"} strokeWidth="2" strokeLinecap="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
             {pins.length > 0 && <span className="badge">{pins.length}</span>}
@@ -492,6 +527,38 @@ export default function Home() {
         {(showSaved || showBoards) && (
           <div style={{ padding: "12px 20px", fontSize: 14, color: "#8a6a4a", borderBottom: "1px solid #1a1208", display: "flex", alignItems: "center", gap: 12 }}>
             {showSaved && <span>Saved Collection (<span style={{ color: "#c0521a" }}>{pins.length}</span>)</span>}
+            {showBoards && <span>My Boards (<span style={{ color: "#c0521a" }}>{boards.length}</span>)</span>}
+          </div>
+        )}
+
+        {/* RESTORED: BOARDS SECTION */}
+        {showBoards && (
+          <div style={{ padding: 20 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+              <h2 style={{ fontSize: 18, fontWeight: 700, color: "#d4b896", fontFamily: "Cinzel, serif", letterSpacing: 2 }}>MY BOARDS</h2>
+              <button className="primary-btn" style={{ width: "auto", padding: "10px 20px" }} onClick={() => setShowNewBoard(true)}>+ New Board</button>
+            </div>
+            {boards.length === 0
+              ? <div className="empty">No boards yet. Create your first collection.</div>
+              : <div className="boards-grid">
+                  {boards.map(board => (
+                    <div key={board.id} className="board-card">
+                      <div className="board-cover">
+                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#c0521a" strokeWidth="1.5"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+                      </div>
+                      <div className="board-info">
+                        <div style={{ fontSize: 14, fontWeight: 600, color: "#d4b896" }}>{board.name}</div>
+                        {board.description && <div style={{ fontSize: 11, color: "#4a3520", marginTop: 4, fontStyle: "italic" }}>{board.description}</div>}
+                        <div style={{ fontSize: 11, color: "#8a6a4a", marginTop: 8 }}>{pins.filter(p => p.board_id === board.id).length} pins</div>
+                        <div className="board-actions">
+                          <button className="board-edit-btn" onClick={() => setEditBoard(board)}>Edit</button>
+                          <button className="board-del-btn" onClick={() => deleteBoard(board.id)}>Delete</button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+            }
           </div>
         )}
 
@@ -551,6 +618,10 @@ export default function Home() {
               <div style={{ height: 1, background: "#1a1208", margin: "10px 0" }} />
 
               <div style={{ padding: "10px 0" }}>
+                <button className="burger-action" onClick={() => { setShowBoards(true); setShowMenu(false); }}>
+                  <span className="burger-action-icon" style={{ color: "#c0521a" }}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg></span>
+                  <span>My Boards</span>
+                </button>
                 <button className="burger-action" onClick={() => { setShowSaved(true); setShowMenu(false); }}>
                   <span className="burger-action-icon" style={{ color: "#c0521a" }}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg></span>
                   <span>Saved Pins</span>
@@ -650,6 +721,7 @@ export default function Home() {
           </div>
         )}
 
+        {/* RESTORED: BOARD CREATION MODALS */}
         {showSaveToBoard && (
           <div className="modal-backdrop" onClick={() => setShowSaveToBoard(null)}>
             <div onClick={e => e.stopPropagation()} style={{ background: "#0d0a06", border: "1px solid #2a1f0e", borderRadius: 16, padding: 32, maxWidth: 400, width: "100%", display: "flex", flexDirection: "column", gap: 16 }}>
@@ -662,6 +734,21 @@ export default function Home() {
                 <div style={{ height: 1, background: "#1a1208", margin: "10px 0" }} />
                 {boards.map(board => <button key={board.id} className="outline-btn" onClick={() => savePin(showSaveToBoard, board.id)}>{board.name}</button>)}
               </>}
+              <button className="ghost-btn" style={{ marginTop: 10 }} onClick={() => { setShowNewBoard(true); setShowSaveToBoard(null); }}>+ Create new board</button>
+            </div>
+          </div>
+        )}
+
+        {showNewBoard && (
+          <div className="modal-backdrop" onClick={() => setShowNewBoard(false)}>
+            <div onClick={e => e.stopPropagation()} style={{ background: "#0d0a06", border: "1px solid #2a1f0e", borderRadius: 16, padding: 32, maxWidth: 400, width: "100%", display: "flex", flexDirection: "column", gap: 16 }}>
+              <h2 style={{ fontSize: 16, fontWeight: 700, color: "#d4b896", fontFamily: "Cinzel, serif", letterSpacing: 2 }}>NEW BOARD</h2>
+              <input className="field" placeholder="Board name" value={newBoardName} onChange={e => setNewBoardName(e.target.value)} />
+              <input className="field" placeholder="Description (optional)" value={newBoardDesc} onChange={e => setNewBoardDesc(e.target.value)} />
+              <div style={{ display: "flex", gap: 12, marginTop: 10 }}>
+                <button className="ghost-btn" onClick={() => setShowNewBoard(false)}>Cancel</button>
+                <button className="primary-btn" style={{ flex: 1, opacity: !newBoardName ? 0.4 : 1 }} onClick={createBoard}>Create</button>
+              </div>
             </div>
           </div>
         )}
@@ -675,6 +762,21 @@ export default function Home() {
               </div>
               <img src={showShare.src} style={{ width: "100%", borderRadius: 12, maxHeight: 200, objectFit: "cover" }} alt="" />
               <button className="primary-btn" onClick={() => sharePhoto(showShare)}>Copy link</button>
+            </div>
+          </div>
+        )}
+
+        {editBoard && (
+          <div className="modal-backdrop" onClick={() => setEditBoard(null)}>
+            <div onClick={e => e.stopPropagation()} style={{ background: "#0d0a06", border: "1px solid #2a1f0e", borderRadius: 16, padding: 32, maxWidth: 400, width: "100%", display: "flex", flexDirection: "column", gap: 16 }}>
+              <h2 style={{ fontSize: 16, fontWeight: 700, color: "#d4b896", fontFamily: "Cinzel, serif", letterSpacing: 2 }}>EDIT BOARD</h2>
+              <input className="field" placeholder="Board name" value={editBoard.name} onChange={e => setEditBoard({ ...editBoard, name: e.target.value })} />
+              <input className="field" placeholder="Description" value={editBoard.description || ""} onChange={e => setEditBoard({ ...editBoard, description: e.target.value })} />
+              <div style={{ display: "flex", gap: 12, marginTop: 10 }}>
+                <button className="ghost-btn" onClick={() => setEditBoard(null)}>Cancel</button>
+                <button className="primary-btn" style={{ flex: 1 }} onClick={updateBoard}>Save</button>
+              </div>
+              <button className="danger-btn" style={{ marginTop: 10 }} onClick={() => { deleteBoard(editBoard.id); setEditBoard(null); }}>Delete board</button>
             </div>
           </div>
         )}

@@ -25,16 +25,13 @@ export async function POST(req: Request) {
     try {
         const body = await req.json();
         
-        // Бронебойный payload. Подставляем дефолтные значения, 
-        // чтобы строгая схема БД не выкидывала 500 ошибку
+        // Идеально чистый Payload: только те колонки, которые РЕАЛЬНО существуют в твоей БД
         const payload = {
             user_id: body.user_id,
             image_url: body.image_url,
             title: body.title || "Gelbet Vibe",
             board_id: body.board_id || null,
-            source_url: body.source_url || "",
-            source: body.source || "Gelbet",
-            author: body.author || "Aesthetic"
+            source_url: body.source_url || ""
         };
 
         const { data, error } = await supabase

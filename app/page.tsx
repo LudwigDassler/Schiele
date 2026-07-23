@@ -25,7 +25,6 @@ export default function Home() {
   const [searchQuery, setSearchQuery] = useState("Aesthetic");
   const [userTags, setUserTags] = useState<string[]>([]);
   
-  // Состояние для идеального мобильного поиска
   const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
   
@@ -36,6 +35,12 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
+
+  // Состояния для бесконечного скролла похожих фото
+  const [relatedPhotos, setRelatedPhotos] = useState<Photo[]>([]);
+  const [relatedPage, setRelatedPage] = useState(1);
+  const [relatedLoading, setRelatedLoading] = useState(false);
+  const [relatedHasMore, setRelatedHasMore] = useState(true);
   
   const [showUpload, setShowUpload] = useState(false);
   const [showSaved, setShowSaved] = useState(false);
@@ -57,8 +62,10 @@ export default function Home() {
   const fileRef = useRef<HTMLInputElement>(null);
   const observerRef = useRef<IntersectionObserver | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const modalBottomRef = useRef<HTMLDivElement>(null);
   
   const abortControllerRef = useRef<AbortController | null>(null);
+  const relatedAbortRef = useRef<AbortController | null>(null);
   const loadingRef = useRef(false);
 
   useEffect(() => {
@@ -74,7 +81,7 @@ export default function Home() {
     try {
       const savedTags = localStorage.getItem("gelbet_user_tags");
       if (savedTags) setUserTags(JSON.parse(savedTags));
-    } catch (e) { console.error("Could not load tags"); }
+    } catch (e) {}
     
     return () => subscription.unsubscribe();
   }, []);
@@ -85,21 +92,13 @@ export default function Home() {
         fetch(`/api/pins?user_id=${userId}`).catch(() => null),
         fetch(`/api/boards?user_id=${userId}`).catch(() => null)
       ]);
-      
-      if (pinsRes && pinsRes.ok) {
-        const pinsData = await pinsRes.json();
-        setPins(pinsData.pins || pinsData.data || []);
-      }
-      if (boardsRes && boardsRes.ok) {
-        const boardsData = await boardsRes.json();
-        setBoards(boardsData.boards || boardsData.data || []);
-      }
-    } catch (e) { console.error("Supabase Sync Error:", e); }
+      if (pinsRes?.ok) { const d = await pinsRes.json(); setPins(d.pins || d.data || []); }
+      if (boardsRes?.ok) { const d = await boardsRes.json(); setBoards(d.boards || d.data || []); }
+    } catch (e) { console.error("Sync Error:", e); }
   }
 
   const fetchPhotos = useCallback(async (query: string, pageNum: number, reset: boolean) => {
     if (!reset && loadingRef.current) return;
-    
     loadingRef.current = true;
     setLoading(true);
     
@@ -111,10 +110,8 @@ export default function Home() {
     try {
       const params = new URLSearchParams({ page: String(pageNum) });
       if (query) params.set("query", query);
-      
       const res = await fetch(`/api/search?${params}`, { signal: abortControllerRef.current?.signal });
-      if (!res.ok) throw new Error("Server response failed");
-      
+      if (!res.ok) throw new Error("Fetch failed");
       const data = await res.json();
       const rawArray = Array.isArray(data) ? data : (data.data || data.photos || data.items || []);
       const fetched = rawArray.filter((p: any) => p.src && p.src.startsWith("http"));
@@ -125,10 +122,9 @@ export default function Home() {
         combined.forEach(p => map.set(p.id, p));
         return Array.from(map.values());
       });
-      
       setHasMore(fetched.length > 0);
     } catch (e: any) { 
-      if (e.name !== 'AbortError') console.error("Fetch Error:", e); 
+      if (e.name !== 'AbortError') console.error(e); 
     } finally {
       if (!(reset && abortControllerRef.current?.signal.aborted)) {
         setLoading(false);
@@ -137,13 +133,45 @@ export default function Home() {
     }
   }, []);
 
+  // AI Функция подгрузки похожих фото в модалку
+  const fetchRelatedPhotos = useCallback(async (basePhoto: Photo, pageNum: number, reset: boolean) => {
+    setRelatedLoading(true);
+    if (reset) {
+      if (relatedAbortRef.current) relatedAbortRef.current.abort();
+      relatedAbortRef.current = new AbortController();
+    }
+
+    try {
+      // ИИ-эмуляция: вычищаем спецсимволы и берем первые пару слов из заголовка, добавляя "aesthetic"
+      const cleanTitle = (basePhoto.title || "").replace(/[^a-zA-Z0-9а-яА-Я ]/g, "").split(" ").slice(0, 3).join(" ");
+      const aiQuery = cleanTitle.length > 2 ? `${cleanTitle} aesthetic` : searchQuery;
+      
+      const params = new URLSearchParams({ page: String(pageNum), query: aiQuery });
+      const res = await fetch(`/api/search?${params}`, { signal: relatedAbortRef.current?.signal });
+      const data = await res.json();
+      const rawArray = Array.isArray(data) ? data : (data.data || data.photos || data.items || []);
+      const fetched = rawArray.filter((p: any) => p.src && p.src.startsWith("http") && p.id !== basePhoto.id);
+      
+      setRelatedPhotos(prev => {
+        const combined = reset ? fetched : [...prev, ...fetched];
+        const map = new Map();
+        combined.forEach(p => map.set(p.id, p));
+        return Array.from(map.values());
+      });
+      setRelatedHasMore(fetched.length > 0);
+    } catch (e: any) {
+      if (e.name !== 'AbortError') console.error("Related fetch error", e);
+    } finally {
+      setRelatedLoading(false);
+    }
+  }, [searchQuery]);
+
   useEffect(() => {
-    setPage(1);
-    setHasMore(true);
-    setPhotos([]); 
+    setPage(1); setHasMore(true); setPhotos([]); 
     fetchPhotos(searchQuery, 1, true);
   }, [searchQuery, fetchPhotos]);
 
+  // Observer главной ленты
   useEffect(() => {
     if (!bottomRef.current) return;
     observerRef.current?.disconnect();
@@ -158,10 +186,31 @@ export default function Home() {
     return () => observerRef.current?.disconnect();
   }, [hasMore, page, searchQuery, fetchPhotos]);
 
-  function showToast(msg: string) {
-    setToastMsg(msg);
-    setTimeout(() => setToastMsg(""), 2500);
-  }
+  // Observer модального окна (Бесконечные похожие фото)
+  useEffect(() => {
+    if (!selected) return;
+    
+    // При открытии нового фото - сброс и первичная загрузка
+    setRelatedPhotos([]);
+    setRelatedPage(1);
+    setRelatedHasMore(true);
+    fetchRelatedPhotos(selected, 1, true);
+  }, [selected?.id, fetchRelatedPhotos]);
+
+  useEffect(() => {
+    if (!selected || !modalBottomRef.current) return;
+    const observer = new IntersectionObserver(entries => {
+      if (entries[0].isIntersecting && relatedHasMore && !relatedLoading) {
+        const next = relatedPage + 1;
+        setRelatedPage(next);
+        fetchRelatedPhotos(selected, next, false);
+      }
+    }, { threshold: 0.1 });
+    observer.observe(modalBottomRef.current);
+    return () => observer.disconnect();
+  }, [selected, relatedHasMore, relatedLoading, relatedPage, fetchRelatedPhotos]);
+
+  function showToast(msg: string) { setToastMsg(msg); setTimeout(() => setToastMsg(""), 2500); }
 
   function saveUserTag(tag: string) {
     const formattedTag = tag.trim().charAt(0).toUpperCase() + tag.trim().slice(1);
@@ -175,140 +224,71 @@ export default function Home() {
   function handleSearch(e: React.FormEvent) {
     e.preventDefault();
     if (!search.trim()) return;
-    setSearchQuery(search.trim());
-    saveUserTag(search.trim());
-    setIsMobileSearchOpen(false);
-    closeAllPanels();
+    setSearchQuery(search.trim()); saveUserTag(search.trim());
+    setIsMobileSearchOpen(false); closeAllPanels();
   }
 
   function handleTagClick(tag: string) {
-    setSearch(tag);
-    setSearchQuery(tag);
-    saveUserTag(tag);
-    closeAllPanels();
+    setSearch(tag); setSearchQuery(tag); saveUserTag(tag); closeAllPanels();
   }
 
-  function clearSearch() {
-    setSearch("");
-    setSearchQuery("Aesthetic");
-    setIsMobileSearchOpen(false);
-    closeAllPanels();
-  }
+  function clearSearch() { setSearch(""); setSearchQuery("Aesthetic"); setIsMobileSearchOpen(false); closeAllPanels(); }
 
   function handleAIGenerate() {
     if (!aiPrompt.trim()) return;
-    setShowAIModal(false);
-    showToast("✨ AI is crafting your aesthetic...");
-    
+    setShowAIModal(false); showToast("✨ AI is crafting your aesthetic...");
     setTimeout(() => {
       const enhancedQuery = `${aiPrompt.trim()} aesthetic high quality cinematic`;
-      setSearch(enhancedQuery);
-      setSearchQuery(enhancedQuery);
-      saveUserTag(aiPrompt.trim());
-      setAiPrompt("");
+      setSearch(enhancedQuery); setSearchQuery(enhancedQuery); saveUserTag(aiPrompt.trim()); setAiPrompt("");
     }, 800);
   }
 
-  function closeAllPanels() {
-    setShowMenu(false);
-    setShowSaved(false);
-    setShowBoards(false);
-  }
-
-  function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => setNewSrc(reader.result as string);
-    reader.readAsDataURL(file);
-  }
-
-  function handleAdd() {
-    if (!newSrc) return;
-    setPhotos(prev => [{ id: String(Date.now()), src: newSrc!, thumb: newSrc!, title: "User Upload", link: "" }, ...prev]);
-    setShowUpload(false); setNewSrc(null);
-  }
+  function closeAllPanels() { setShowMenu(false); setShowSaved(false); setShowBoards(false); }
 
   async function savePin(photo: Photo, boardId?: string) {
     if (!user) { window.location.href = "/auth"; return; }
     try {
       const res = await fetch("/api/pins", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ user_id: user.id, image_url: photo.src, title: photo.title, board_id: boardId || null, source_url: photo.link })
       });
       if (res.ok) {
         const data = await res.json();
         if (data.pin || data.data) setPins(prev => [data.pin || data.data, ...prev]);
         showToast("Saved to profile");
-      } else {
-        showToast("Error saving pin");
       }
-    } catch (e) { console.error("Error saving pin:", e); showToast("Network error"); }
+    } catch (e) {}
     setShowSaveToBoard(null); setSelected(null);
   }
 
   async function deletePin(pinId: string) {
     try {
       const res = await fetch(`/api/pins?id=${pinId}`, { method: "DELETE" });
-      if (res.ok) {
-        setPins(prev => prev.filter(p => p.id !== pinId));
-        showToast("Removed from saved");
-      }
-    } catch (e) { console.error("Error deleting pin:", e); }
+      if (res.ok) { setPins(prev => prev.filter(p => p.id !== pinId)); showToast("Removed from saved"); }
+    } catch (e) {}
   }
 
   async function createBoard() {
     if (!newBoardName || !user) return;
     try {
       const res = await fetch("/api/boards", { 
-        method: "POST", 
-        headers: { "Content-Type": "application/json" }, 
+        method: "POST", headers: { "Content-Type": "application/json" }, 
         body: JSON.stringify({ user_id: user.id, name: newBoardName, description: newBoardDesc }) 
       });
       if (res.ok) {
         const data = await res.json();
         if (data.board || data.data) setBoards(prev => [data.board || data.data, ...prev]);
       }
-    } catch (e) { console.error("Error creating board:", e); }
+    } catch (e) {}
     setNewBoardName(""); setNewBoardDesc(""); setShowNewBoard(false);
-  }
-
-  async function updateBoard() {
-    if (!editBoard) return;
-    try {
-      const res = await fetch("/api/boards", { 
-        method: "PUT", 
-        headers: { "Content-Type": "application/json" }, 
-        body: JSON.stringify({ id: editBoard.id, name: editBoard.name, description: editBoard.description }) 
-      });
-      if (res.ok) {
-        const data = await res.json();
-        const updatedBoard = data.board || data.data;
-        if (updatedBoard) setBoards(prev => prev.map(b => b.id === editBoard.id ? updatedBoard : b));
-      }
-    } catch (e) { console.error("Error updating board:", e); }
-    setEditBoard(null);
-  }
-
-  async function deleteBoard(boardId: string) {
-    if (!confirm("Delete this board?")) return;
-    try {
-      const res = await fetch(`/api/boards?id=${boardId}`, { method: "DELETE" });
-      if (res.ok) setBoards(prev => prev.filter(b => b.id !== boardId));
-    } catch (e) { console.error("Error deleting board:", e); }
   }
 
   function isPinned(photo: Photo) { return pins.some(p => p.image_url === photo.src); }
 
   function sharePhoto(photo: Photo) {
     const url = photo.link || window.location.href;
-    if (navigator.share) {
-      navigator.share({ title: photo.title || "Gelbet Vibe", url });
-    } else { 
-      navigator.clipboard.writeText(url); 
-      showToast("Link copied to clipboard!"); 
-    }
+    if (navigator.share) navigator.share({ title: photo.title || "Gelbet Vibe", url });
+    else { navigator.clipboard.writeText(url); showToast("Link copied to clipboard!"); }
     setShowShare(null);
   }
 
@@ -328,6 +308,20 @@ export default function Home() {
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
         body { overflow-x: hidden; background: #0d0a06; font-family: -apple-system, sans-serif; }
 
+        /* ЭЛИТАРНЫЙ КАСТОМНЫЙ СКРОЛЛБАР */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #0d0a06; }
+        ::-webkit-scrollbar-thumb { background: #2a1f0e; border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: #c0521a; }
+        * { scrollbar-width: thin; scrollbar-color: #2a1f0e #0d0a06; }
+
+        /* КИНЕМАТОГРАФИЧЕСКОЕ ЗЕРНО (FILM GRAIN OVERLAY) */
+        body::after {
+          content: ""; position: fixed; inset: 0; z-index: 9999;
+          pointer-events: none; opacity: 0.04;
+          background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+        }
+
         .header {
           position: sticky; top: 0; z-index: 100;
           background: rgba(13,10,6,0.95); backdrop-filter: blur(12px);
@@ -335,19 +329,10 @@ export default function Home() {
           display: flex; align-items: center; gap: 10px;
         }
 
-        .logo {
-          font-family: 'Cinzel', Georgia, serif; font-size: 16px; font-weight: 700;
-          color: #c0521a; letter-spacing: 4px; text-transform: uppercase;
-          flex-shrink: 0; cursor: pointer; user-select: none;
-          text-shadow: 0 0 20px rgba(192,82,26,0.4);
-        }
+        .logo { font-family: 'Cinzel', Georgia, serif; font-size: 16px; font-weight: 700; color: #c0521a; letter-spacing: 4px; text-transform: uppercase; flex-shrink: 0; cursor: pointer; user-select: none; text-shadow: 0 0 20px rgba(192,82,26,0.4); }
 
-        /* --- ИДЕАЛЬНЫЙ МОБИЛЬНЫЙ ПОИСК --- */
         .search-form { flex: 1; display: flex; min-width: 0; justify-content: flex-end; }
-        .search-wrap { 
-          flex: 1; display: flex; background: #1a1208; border-radius: 24px; 
-          overflow: hidden; border: 1px solid #2a1f0e; transition: all 0.2s; min-width: 0; 
-        }
+        .search-wrap { flex: 1; display: flex; background: #1a1208; border-radius: 24px; overflow: hidden; border: 1px solid #2a1f0e; transition: all 0.2s; min-width: 0; }
         .search-wrap:focus-within { border-color: #c0521a; box-shadow: 0 0 0 2px rgba(192,82,26,0.2); }
         .search-input { width: 100%; padding: 9px 14px; background: transparent; border: none; color: #d4b896; font-size: 14px; outline: none; }
         .search-input::placeholder { color: #4a3520; }
@@ -359,19 +344,13 @@ export default function Home() {
           .search-wrap { width: 38px; height: 38px; flex: none; border-radius: 50%; background: transparent; border: none; cursor: pointer; }
           .search-input { display: none; }
           .search-btn { width: 38px; height: 38px; border-radius: 50%; pointer-events: none; } 
-          
           .search-form.mobile-active { position: absolute; left: 16px; right: 16px; top: 10px; z-index: 200; flex: 1; }
           .search-form.mobile-active .search-wrap { width: 100%; height: 42px; border-radius: 24px; background: #0d0a06; border: 1px solid #c0521a; flex: 1; display: flex; cursor: text; box-shadow: 0 10px 30px rgba(0,0,0,0.9); }
           .search-form.mobile-active .search-input { display: block; flex: 1; }
           .search-form.mobile-active .search-btn { border-radius: 0; width: 40px; pointer-events: auto; }
         }
-        /* ---------------------------------- */
 
-        .hbtn {
-          background: transparent; border: none; width: 38px; height: 38px; border-radius: 50%;
-          display: flex; align-items: center; justify-content: center;
-          cursor: pointer; color: #6a4a2a; flex-shrink: 0; transition: all 0.2s; position: relative;
-        }
+        .hbtn { background: transparent; border: none; width: 38px; height: 38px; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; color: #6a4a2a; flex-shrink: 0; transition: all 0.2s; position: relative; }
         .hbtn:hover { background: #1a1208; color: #c0521a; }
         .hbtn.active { background: #c0521a; color: #0d0a06; }
         .badge { position: absolute; top: 2px; right: 2px; background: #c0521a; color: #0d0a06; border-radius: 10px; padding: 1px 5px; font-size: 9px; font-weight: 700; border: 2px solid #0d0a06; }
@@ -380,17 +359,9 @@ export default function Home() {
         .avatar-placeholder { width: 32px; height: 32px; border-radius: 50%; cursor: pointer; border: 2px solid #2a1f0e; flex-shrink: 0; background: #c0521a; display: flex; align-items: center; justify-content: center; color: #0d0a06; font-size: 13px; font-weight: 700; }
         .sign-btn { background: #c0521a; color: #0d0a06; border: none; border-radius: 20px; padding: 8px 16px; cursor: pointer; font-size: 12px; font-weight: 700; flex-shrink: 0; text-decoration: none; display: flex; align-items: center; }
 
-        .tags-bar {
-          display: flex; gap: 8px; padding: 12px 16px; align-items: center;
-          overflow-x: auto; scrollbar-width: none;
-          background: #0d0a06; border-bottom: 1px solid #1a1208;
-        }
+        .tags-bar { display: flex; gap: 8px; padding: 12px 16px; align-items: center; overflow-x: auto; scrollbar-width: none; background: #0d0a06; border-bottom: 1px solid #1a1208; }
         .tags-bar::-webkit-scrollbar { display: none; }
-        .tag-pill {
-          background: #1a1208; border: 1px solid #2a1f0e; color: #d4b896;
-          padding: 6px 16px; border-radius: 20px; font-size: 12px; font-weight: 600;
-          white-space: nowrap; cursor: pointer; transition: all 0.2s;
-        }
+        .tag-pill { background: #1a1208; border: 1px solid #2a1f0e; color: #d4b896; padding: 6px 16px; border-radius: 20px; font-size: 12px; font-weight: 600; white-space: nowrap; cursor: pointer; transition: all 0.2s; }
         .tag-pill:hover { background: #2a1f0e; color: #c0521a; border-color: #4a3520; }
         .tag-pill.active { background: #c0521a; color: #0d0a06; border-color: #c0521a; }
 
@@ -428,7 +399,7 @@ export default function Home() {
         .card-action-btn:hover { background: #c0521a; color: #0d0a06; transform: scale(1.1); }
 
         .modal-backdrop { position: fixed; inset: 0; z-index: 200; background: rgba(0,0,0,0.85); display: flex; align-items: center; justify-content: center; padding: 16px; animation: fadeIn 0.2s ease; }
-        .modal-box { background: #0d0a06; border: 1px solid #2a1f0e; border-radius: 16px; width: 100%; max-width: 1000px; max-height: 90vh; overflow-y: auto; box-shadow: 0 32px 80px rgba(0,0,0,0.8); animation: slideUp 0.25s ease; display: flex; flex-direction: column; }
+        .modal-box { background: #0d0a06; border: 1px solid #2a1f0e; border-radius: 16px; width: 100%; max-width: 1000px; max-height: 90vh; overflow-y: auto; box-shadow: 0 32px 80px rgba(0,0,0,0.8); animation: slideUp 0.25s ease; display: flex; flex-direction: column; scroll-behavior: smooth; }
         
         .modal-top { display: flex; flex-direction: column; }
         @media (min-width: 768px) { .modal-top { flex-direction: row; } }
@@ -454,21 +425,10 @@ export default function Home() {
 
         .field { width: 100%; padding: 12px 16px; border-radius: 12px; border: 1px solid #2a1f0e; background: #1a1208; color: #d4b896; font-size: 14px; outline: none; transition: border-color 0.2s; }
         .field:focus { border-color: #c0521a; }
-        .upload-zone { border: 1px dashed #2a1f0e; border-radius: 12px; height: 160px; display: flex; align-items: center; justify-content: center; cursor: pointer; background: #1a1208; }
-
-        .boards-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
-        @media (min-width: 480px) { .boards-grid { grid-template-columns: repeat(3, 1fr); } }
-        .board-card { border-radius: 12px; overflow: hidden; border: 1px solid #2a1f0e; background: #1a1208; }
-        .board-cover { height: 80px; background: linear-gradient(135deg, #2a1f0e, #1a1208); display: flex; align-items: center; justify-content: center; }
-        .board-info { padding: 12px; }
-        .board-actions { display: flex; gap: 8px; margin-top: 10px; }
-        .board-edit-btn, .board-del-btn { flex: 1; padding: 6px; border-radius: 6px; font-size: 11px; cursor: pointer; background: transparent; }
-        .board-edit-btn { border: 1px solid #2a1f0e; color: #8a6a4a; } .board-edit-btn:hover { border-color: #c0521a; color: #c0521a; }
-        .board-del-btn { border: 1px solid #3a1a1a; color: #e53e3e; } .board-del-btn:hover { background: rgba(229,62,62,0.1); }
-
+        
         .spinner { width: 28px; height: 28px; border: 2px solid #2a1f0e; border-top-color: #c0521a; border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto; }
         @keyframes spin { to { transform: rotate(360deg); } }
-        .status-bar { padding: 12px 20px; font-size: 14px; color: #8a6a4a; border-bottom: 1px solid #1a1208; display: flex; align-items: center; gap: 12px; }
+        
         .empty { text-align: center; padding: 100px 20px; color: #4a3520; font-size: 16px; font-family: 'Crimson Text', serif; font-style: italic; }
         .modal-close { background: none; border: none; color: #4a3520; cursor: pointer; font-size: 20px; width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; }
         .modal-close:hover { background: #1a1208; color: #c0521a; }
@@ -494,14 +454,7 @@ export default function Home() {
                 }
               }}
             >
-              <input 
-                ref={searchInputRef}
-                className="search-input" 
-                placeholder="Search visual aesthetics..." 
-                value={search} 
-                onChange={e => setSearch(e.target.value)} 
-                onBlur={() => { if(!search) setIsMobileSearchOpen(false) }}
-              />
+              <input ref={searchInputRef} className="search-input" placeholder="Search visual aesthetics..." value={search} onChange={e => setSearch(e.target.value)} onBlur={() => { if(!search) setIsMobileSearchOpen(false) }} />
               {search && isMobileSearchOpen && <button type="button" onClick={() => { setSearch(""); setIsMobileSearchOpen(false); }} className="search-btn" style={{ fontSize: 16 }}>✕</button>}
               <button type="submit" className="search-btn">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
@@ -511,10 +464,6 @@ export default function Home() {
 
           <button className="hbtn" title="AI Vibe Assistant" onClick={() => setShowAIModal(true)}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3l1.912 5.813a2 2 0 001.275 1.275L21 12l-5.813 1.912a2 2 0 00-1.275 1.275L12 21l-1.912-5.813a2 2 0 00-1.275-1.275L3 12l5.813-1.912a2 2 0 001.275-1.275L12 3z"/></svg>
-          </button>
-
-          <button className={`hbtn ${showBoards ? "active" : ""}`} onClick={() => { setShowBoards(!showBoards); setShowSaved(false); }}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
           </button>
 
           <button className={`hbtn ${showSaved ? "active" : ""}`} onClick={() => { setShowSaved(!showSaved); setShowBoards(false); }}>
@@ -535,51 +484,14 @@ export default function Home() {
           <div className="tags-bar">
             <span style={{color: "#4a3520", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, paddingRight: 8}}>History</span>
             {userTags.map(tag => (
-              <button 
-                key={tag} 
-                className={`tag-pill ${searchQuery === tag ? "active" : ""}`}
-                onClick={() => handleTagClick(tag)}
-              >
-                {tag}
-              </button>
+              <button key={tag} className={`tag-pill ${searchQuery === tag ? "active" : ""}`} onClick={() => handleTagClick(tag)}>{tag}</button>
             ))}
           </div>
         )}
 
         {(showSaved || showBoards) && (
-          <div className="status-bar">
+          <div style={{ padding: "12px 20px", fontSize: 14, color: "#8a6a4a", borderBottom: "1px solid #1a1208", display: "flex", alignItems: "center", gap: 12 }}>
             {showSaved && <span>Saved Collection (<span style={{ color: "#c0521a" }}>{pins.length}</span>)</span>}
-            {showBoards && <span>My Boards (<span style={{ color: "#c0521a" }}>{boards.length}</span>)</span>}
-          </div>
-        )}
-
-        {showBoards && (
-          <div style={{ padding: 20 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-              <h2 style={{ fontSize: 18, fontWeight: 700, color: "#d4b896", fontFamily: "Cinzel, serif", letterSpacing: 2 }}>MY BOARDS</h2>
-              <button className="primary-btn" style={{ width: "auto", padding: "10px 20px" }} onClick={() => setShowNewBoard(true)}>+ New Board</button>
-            </div>
-            {boards.length === 0
-              ? <div className="empty">No boards yet. Create your first collection.</div>
-              : <div className="boards-grid">
-                  {boards.map(board => (
-                    <div key={board.id} className="board-card">
-                      <div className="board-cover">
-                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#c0521a" strokeWidth="1.5"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
-                      </div>
-                      <div className="board-info">
-                        <div style={{ fontSize: 14, fontWeight: 600, color: "#d4b896" }}>{board.name}</div>
-                        {board.description && <div style={{ fontSize: 11, color: "#4a3520", marginTop: 4, fontStyle: "italic" }}>{board.description}</div>}
-                        <div style={{ fontSize: 11, color: "#8a6a4a", marginTop: 8 }}>{pins.filter(p => p.board_id === board.id).length} pins</div>
-                        <div className="board-actions">
-                          <button className="board-edit-btn" onClick={() => setEditBoard(board)}>Edit</button>
-                          <button className="board-del-btn" onClick={() => deleteBoard(board.id)}>Delete</button>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-            }
           </div>
         )}
 
@@ -630,7 +542,7 @@ export default function Home() {
                 </div>
               )}
               
-              <div className="burger-section-title" style={{ padding: "0 16px", fontSize: 10, color: "#4a3520", textTransform: "uppercase", letterSpacing: 2, marginTop: 24, marginBottom: 12 }}>Explore Vibes</div>
+              <div style={{ padding: "0 16px", fontSize: 10, color: "#4a3520", textTransform: "uppercase", letterSpacing: 2, marginTop: 24, marginBottom: 12 }}>Explore Vibes</div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 8, padding: "0 16px 16px" }}>
                 {defaultTags.map(tag => (
                   <button key={tag} className="tag-pill" onClick={() => handleTagClick(tag)}>{tag}</button>
@@ -639,10 +551,6 @@ export default function Home() {
               <div style={{ height: 1, background: "#1a1208", margin: "10px 0" }} />
 
               <div style={{ padding: "10px 0" }}>
-                <button className="burger-action" onClick={() => { setShowBoards(true); setShowMenu(false); }}>
-                  <span className="burger-action-icon" style={{ color: "#c0521a" }}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg></span>
-                  <span>My Boards</span>
-                </button>
                 <button className="burger-action" onClick={() => { setShowSaved(true); setShowMenu(false); }}>
                   <span className="burger-action-icon" style={{ color: "#c0521a" }}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg></span>
                   <span>Saved Pins</span>
@@ -668,7 +576,7 @@ export default function Home() {
                 placeholder="e.g. A rainy day in a cyberpunk city but with warm neon colors..." 
                 value={aiPrompt} 
                 onChange={e => setAiPrompt(e.target.value)}
-                style={{ height: 100, resize: "none", fontFamily: "inherit" }}
+                style={{ height: 100, resize: "none" }}
               />
 
               <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 4 }}>
@@ -697,7 +605,7 @@ export default function Home() {
                 
                 <div className="modal-info">
                   <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 24 }}>
-                    <button className="hbtn" style={{ background: "#1a1208" }} onClick={() => { setShowShare(selected); }} title="Share">
+                    <button className="hbtn" style={{ background: "#1a1208" }} onClick={() => setShowShare(selected)} title="Share">
                       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
                     </button>
                     <button className="modal-close" onClick={() => setSelected(null)}>✕</button>
@@ -712,15 +620,29 @@ export default function Home() {
                 </div>
               </div>
 
+              {/* БЕСКОНЕЧНАЯ ЛЕНТА ИИ-ПОХОЖИХ КАРТИНОК */}
               <div className="modal-bottom">
-                <h3 style={{ fontSize: 13, fontWeight: 700, color: "#d4b896", textTransform: "uppercase", letterSpacing: 2, marginBottom: 20 }}>More Like This</h3>
+                <h3 style={{ fontSize: 13, fontWeight: 700, color: "#d4b896", textTransform: "uppercase", letterSpacing: 2, marginBottom: 24, display: "flex", alignItems: "center", gap: 10 }}>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#c0521a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3l1.912 5.813a2 2 0 001.275 1.275L21 12l-5.813 1.912a2 2 0 00-1.275 1.275L12 21l-1.912-5.813a2 2 0 00-1.275-1.275L3 12l5.813-1.912a2 2 0 001.275-1.275L12 3z"/></svg>
+                  AI Curated Matches
+                </h3>
                 <div className="related-masonry">
-                  {displayPhotos.filter(p => p.id !== selected.id).slice(0, 16).map((photo, i) => (
-                    <div key={`related-${photo.id}-${i}`} style={{ breakInside: "avoid", marginBottom: 12, cursor: "pointer", borderRadius: 12, overflow: "hidden" }} 
-                         onClick={() => { document.querySelector('.modal-box')?.scrollTo(0,0); setSelected(photo); }}>
-                      <img src={photo.thumb || photo.src} style={{ width: "100%", display: "block", transition: "filter 0.2s" }} onMouseOver={e => (e.currentTarget.style.filter = "brightness(0.8)")} onMouseOut={e => (e.currentTarget.style.filter = "brightness(1)")} alt="" />
+                  {relatedPhotos.map((photo, i) => (
+                    <div key={`related-${photo.id}-${i}`} style={{ breakInside: "avoid", marginBottom: 12, cursor: "pointer", borderRadius: 12, overflow: "hidden", border: "1px solid #1a1208" }} 
+                         onClick={() => { document.querySelector('.modal-box')?.scrollTo({top: 0, behavior: 'smooth'}); setSelected(photo); }}>
+                      <img src={photo.thumb || photo.src} style={{ width: "100%", display: "block", transition: "filter 0.3s" }} onMouseOver={e => (e.currentTarget.style.filter = "brightness(0.7)")} onMouseOut={e => (e.currentTarget.style.filter = "brightness(1)")} alt="" />
                     </div>
                   ))}
+                </div>
+                
+                {/* Наблюдатель подгрузки для модалки */}
+                <div ref={modalBottomRef} style={{ padding: "40px 0", textAlign: "center" }}>
+                  {relatedLoading && (
+                    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
+                      <div className="spinner" style={{ width: 22, height: 22, borderWidth: 2 }} />
+                      <span style={{ fontSize: 10, color: "#6a4a2a", textTransform: "uppercase", letterSpacing: 3, fontWeight: 700 }}>Deep Search...</span>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -740,21 +662,6 @@ export default function Home() {
                 <div style={{ height: 1, background: "#1a1208", margin: "10px 0" }} />
                 {boards.map(board => <button key={board.id} className="outline-btn" onClick={() => savePin(showSaveToBoard, board.id)}>{board.name}</button>)}
               </>}
-              <button className="ghost-btn" style={{ marginTop: 10 }} onClick={() => { setShowNewBoard(true); setShowSaveToBoard(null); }}>+ Create new board</button>
-            </div>
-          </div>
-        )}
-
-        {showNewBoard && (
-          <div className="modal-backdrop" onClick={() => setShowNewBoard(false)}>
-            <div onClick={e => e.stopPropagation()} style={{ background: "#0d0a06", border: "1px solid #2a1f0e", borderRadius: 16, padding: 32, maxWidth: 400, width: "100%", display: "flex", flexDirection: "column", gap: 16 }}>
-              <h2 style={{ fontSize: 16, fontWeight: 700, color: "#d4b896", fontFamily: "Cinzel, serif", letterSpacing: 2 }}>NEW BOARD</h2>
-              <input className="field" placeholder="Board name" value={newBoardName} onChange={e => setNewBoardName(e.target.value)} />
-              <input className="field" placeholder="Description (optional)" value={newBoardDesc} onChange={e => setNewBoardDesc(e.target.value)} />
-              <div style={{ display: "flex", gap: 12, marginTop: 10 }}>
-                <button className="ghost-btn" onClick={() => setShowNewBoard(false)}>Cancel</button>
-                <button className="primary-btn" style={{ flex: 1, opacity: !newBoardName ? 0.4 : 1 }} onClick={createBoard}>Create</button>
-              </div>
             </div>
           </div>
         )}
@@ -768,21 +675,6 @@ export default function Home() {
               </div>
               <img src={showShare.src} style={{ width: "100%", borderRadius: 12, maxHeight: 200, objectFit: "cover" }} alt="" />
               <button className="primary-btn" onClick={() => sharePhoto(showShare)}>Copy link</button>
-            </div>
-          </div>
-        )}
-
-        {editBoard && (
-          <div className="modal-backdrop" onClick={() => setEditBoard(null)}>
-            <div onClick={e => e.stopPropagation()} style={{ background: "#0d0a06", border: "1px solid #2a1f0e", borderRadius: 16, padding: 32, maxWidth: 400, width: "100%", display: "flex", flexDirection: "column", gap: 16 }}>
-              <h2 style={{ fontSize: 16, fontWeight: 700, color: "#d4b896", fontFamily: "Cinzel, serif", letterSpacing: 2 }}>EDIT BOARD</h2>
-              <input className="field" placeholder="Board name" value={editBoard.name} onChange={e => setEditBoard({ ...editBoard, name: e.target.value })} />
-              <input className="field" placeholder="Description" value={editBoard.description || ""} onChange={e => setEditBoard({ ...editBoard, description: e.target.value })} />
-              <div style={{ display: "flex", gap: 12, marginTop: 10 }}>
-                <button className="ghost-btn" onClick={() => setEditBoard(null)}>Cancel</button>
-                <button className="primary-btn" style={{ flex: 1 }} onClick={updateBoard}>Save</button>
-              </div>
-              <button className="danger-btn" style={{ marginTop: 10 }} onClick={() => { deleteBoard(editBoard.id); setEditBoard(null); }}>Delete board</button>
             </div>
           </div>
         )}

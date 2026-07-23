@@ -42,7 +42,6 @@ export default function Home() {
   const [showSaveToBoard, setShowSaveToBoard] = useState<Photo | null>(null);
   const [editBoard, setEditBoard] = useState<Board | null>(null);
   
-  // ИИ Помощник
   const [showAIModal, setShowAIModal] = useState(false);
   const [aiPrompt, setAiPrompt] = useState("");
   
@@ -190,13 +189,11 @@ export default function Home() {
     closeAllPanels();
   }
 
-  // ОБРАБОТКА ИИ ЗАПРОСА
   function handleAIGenerate() {
     if (!aiPrompt.trim()) return;
     setShowAIModal(false);
     showToast("✨ AI is crafting your aesthetic...");
     
-    // Эмуляция доработки промпта нейросетью (добавляем нужные теги для парсера)
     setTimeout(() => {
       const enhancedQuery = `${aiPrompt.trim()} aesthetic high quality cinematic`;
       setSearch(enhancedQuery);
@@ -337,15 +334,25 @@ export default function Home() {
           text-shadow: 0 0 20px rgba(192,82,26,0.4);
         }
 
+        /* --- ФИКС МОБИЛЬНОГО ПОИСКА --- */
         .search-wrap {
           flex: 1; display: flex; background: #1a1208; border-radius: 24px;
-          overflow: hidden; border: 1px solid #2a1f0e; transition: all 0.2s; min-width: 0;
+          overflow: hidden; border: 1px solid #2a1f0e; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+          min-width: 40px; 
         }
-        .search-wrap:focus-within { border-color: #c0521a; box-shadow: 0 0 0 2px rgba(192,82,26,0.2); }
-        .search-input { flex: 1; padding: 9px 14px; background: transparent; border: none; color: #d4b896; font-size: 14px; outline: none; min-width: 0; }
+        .search-input { width: 100%; padding: 9px 14px; background: transparent; border: none; color: #d4b896; font-size: 14px; outline: none; }
         .search-input::placeholder { color: #4a3520; }
-        .search-btn { padding: 9px 14px; background: transparent; border: none; color: #6a4a2a; cursor: pointer; transition: color 0.2s; }
+        .search-btn { padding: 9px 14px; background: transparent; border: none; color: #6a4a2a; cursor: pointer; transition: color 0.2s; flex-shrink: 0; }
         .search-btn:hover { color: #c0521a; }
+        
+        @media (max-width: 640px) {
+          .search-wrap:focus-within {
+            position: absolute; left: 16px; right: 16px; top: 10px; height: 38px;
+            z-index: 200; background: #0d0a06; border-color: #c0521a;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.9);
+          }
+        }
+        /* ---------------------------------- */
 
         .hbtn {
           background: transparent; border: none; width: 38px; height: 38px; border-radius: 50%;
@@ -407,13 +414,9 @@ export default function Home() {
         .card-action-btn { background: rgba(13,10,6,0.8); border: none; border-radius: 50%; width: 34px; height: 34px; display: flex; align-items: center; justify-content: center; cursor: pointer; color: #fff; transition: all 0.2s; backdrop-filter: blur(4px); }
         .card-action-btn:hover { background: #c0521a; color: #0d0a06; transform: scale(1.1); }
 
-        /* ОБНОВЛЕННОЕ МОДАЛЬНОЕ ОКНО */
         .modal-backdrop { position: fixed; inset: 0; z-index: 200; background: rgba(0,0,0,0.85); display: flex; align-items: center; justify-content: center; padding: 16px; animation: fadeIn 0.2s ease; }
-        
-        /* Box теперь прокручивается целиком и контент идет друг под другом */
         .modal-box { background: #0d0a06; border: 1px solid #2a1f0e; border-radius: 16px; width: 100%; max-width: 1000px; max-height: 90vh; overflow-y: auto; box-shadow: 0 32px 80px rgba(0,0,0,0.8); animation: slideUp 0.25s ease; display: flex; flex-direction: column; }
         
-        /* Верхний блок: Картинка (слева) + Инфа (справа) на ПК */
         .modal-top { display: flex; flex-direction: column; }
         @media (min-width: 768px) { .modal-top { flex-direction: row; } }
         
@@ -422,7 +425,6 @@ export default function Home() {
         
         .modal-info { flex: 1; padding: 32px; display: flex; flex-direction: column; background: #0d0a06; }
 
-        /* Нижний блок: Похожие картинки */
         .modal-bottom { padding: 32px; border-top: 1px solid #1a1208; background: #0d0a06; }
         .related-masonry { columns: 2; gap: 12px; }
         @media (min-width: 640px) { .related-masonry { columns: 3; } }
@@ -479,7 +481,6 @@ export default function Home() {
             </div>
           </form>
 
-          {/* КНОПКА ИИ-АССИСТЕНТА */}
           <button className="hbtn" title="AI Vibe Assistant" onClick={() => setShowAIModal(true)}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3l1.912 5.813a2 2 0 001.275 1.275L21 12l-5.813 1.912a2 2 0 00-1.275 1.275L12 21l-1.912-5.813a2 2 0 00-1.275-1.275L3 12l5.813-1.912a2 2 0 001.275-1.275L12 3z"/></svg>
           </button>
@@ -623,7 +624,6 @@ export default function Home() {
           </>
         )}
 
-        {/* ФОРМА ИИ-АССИСТЕНТА */}
         {showAIModal && (
           <div className="modal-backdrop" onClick={() => setShowAIModal(false)}>
             <div onClick={e => e.stopPropagation()} style={{ background: "#0d0a06", border: "1px solid #2a1f0e", borderRadius: 16, padding: 32, maxWidth: 440, width: "100%", display: "flex", flexDirection: "column", gap: 16, animation: "slideUp 0.3s ease" }}>
@@ -658,7 +658,6 @@ export default function Home() {
           </div>
         )}
 
-        {/* ОБНОВЛЕННОЕ МОДАЛЬНОЕ ОКНО ДЛЯ ФОТО (С СЕТКОЙ ПОХОЖИХ ВНИЗУ) */}
         {selected && (
           <div className="modal-backdrop" onClick={() => setSelected(null)}>
             <div className="modal-box" onClick={e => e.stopPropagation()}>
@@ -685,7 +684,6 @@ export default function Home() {
                 </div>
               </div>
 
-              {/* ПОХОЖИЕ ФОТОГРАФИИ - ТЕПЕРЬ ПОД ГЛАВНЫМ ФОТО! */}
               <div className="modal-bottom">
                 <h3 style={{ fontSize: 13, fontWeight: 700, color: "#d4b896", textTransform: "uppercase", letterSpacing: 2, marginBottom: 20 }}>More Like This</h3>
                 <div className="related-masonry">

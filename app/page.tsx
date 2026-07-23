@@ -8,12 +8,10 @@ const defaultTags = [
   "Architecture", "Street Photography", "Vintage", "Interior"
 ];
 
-// Пул для ИИ-помощника
 const aiVibes = [
-  "Melancholic Soviet Post-Punk", "Ethereal E-Girl Dreamcore", 
-  "Cinematic Neon Noir", "Liminal Poolrooms Aesthetic", 
-  "Dark Academia Library Vintage", "Gothic Renaissance Architecture",
-  "Y2K Nostalgia Grunge", "Cinematic Polaroids Aesthetic"
+  "Melancholic Soviet Post-Punk", "Ethereal Dreamcore", 
+  "Cinematic Neon Noir", "Liminal Poolrooms", 
+  "Gothic Renaissance", "Y2K Nostalgia Grunge"
 ];
 
 type Photo = { id: string; src: string; thumb: string; title: string; link: string };
@@ -44,11 +42,13 @@ export default function Home() {
   const [showSaveToBoard, setShowSaveToBoard] = useState<Photo | null>(null);
   const [editBoard, setEditBoard] = useState<Board | null>(null);
   
+  // ИИ Помощник
+  const [showAIModal, setShowAIModal] = useState(false);
+  const [aiPrompt, setAiPrompt] = useState("");
+  
   const [newSrc, setNewSrc] = useState<string | null>(null);
   const [newBoardName, setNewBoardName] = useState("");
   const [newBoardDesc, setNewBoardDesc] = useState("");
-  
-  // Уведомления (Toast)
   const [toastMsg, setToastMsg] = useState("");
   
   const fileRef = useRef<HTMLInputElement>(null);
@@ -69,7 +69,7 @@ export default function Home() {
     });
     
     try {
-      const savedTags = localStorage.getItem("ghebelt_user_tags");
+      const savedTags = localStorage.getItem("gelbet_user_tags");
       if (savedTags) setUserTags(JSON.parse(savedTags));
     } catch (e) { console.error("Could not load tags"); }
     
@@ -87,14 +87,11 @@ export default function Home() {
         const pinsData = await pinsRes.json();
         setPins(pinsData.pins || pinsData.data || []);
       }
-      
       if (boardsRes && boardsRes.ok) {
         const boardsData = await boardsRes.json();
         setBoards(boardsData.boards || boardsData.data || []);
       }
-    } catch (e) {
-      console.error("Supabase Sync Error:", e);
-    }
+    } catch (e) { console.error("Supabase Sync Error:", e); }
   }
 
   const fetchPhotos = useCallback(async (query: string, pageNum: number, reset: boolean) => {
@@ -112,10 +109,7 @@ export default function Home() {
       const params = new URLSearchParams({ page: String(pageNum) });
       if (query) params.set("query", query);
       
-      const res = await fetch(`/api/search?${params}`, {
-        signal: abortControllerRef.current?.signal
-      });
-      
+      const res = await fetch(`/api/search?${params}`, { signal: abortControllerRef.current?.signal });
       if (!res.ok) throw new Error("Server response failed");
       
       const data = await res.json();
@@ -170,7 +164,7 @@ export default function Home() {
     const formattedTag = tag.trim().charAt(0).toUpperCase() + tag.trim().slice(1);
     setUserTags(prev => {
       const updated = [formattedTag, ...prev.filter(t => t.toLowerCase() !== formattedTag.toLowerCase())].slice(0, 8);
-      localStorage.setItem("ghebelt_user_tags", JSON.stringify(updated));
+      localStorage.setItem("gelbet_user_tags", JSON.stringify(updated));
       return updated;
     });
   }
@@ -196,14 +190,19 @@ export default function Home() {
     closeAllPanels();
   }
 
-  // ИИ-АССИСТЕНТ
-  function handleAIVibe() {
-    showToast("✨ AI is analyzing vibes...");
+  // ОБРАБОТКА ИИ ЗАПРОСА
+  function handleAIGenerate() {
+    if (!aiPrompt.trim()) return;
+    setShowAIModal(false);
+    showToast("✨ AI is crafting your aesthetic...");
+    
+    // Эмуляция доработки промпта нейросетью (добавляем нужные теги для парсера)
     setTimeout(() => {
-      const randomVibe = aiVibes[Math.floor(Math.random() * aiVibes.length)];
-      setSearch(randomVibe);
-      setSearchQuery(randomVibe);
-      saveUserTag(randomVibe);
+      const enhancedQuery = `${aiPrompt.trim()} aesthetic high quality cinematic`;
+      setSearch(enhancedQuery);
+      setSearchQuery(enhancedQuery);
+      saveUserTag(aiPrompt.trim());
+      setAiPrompt("");
     }, 800);
   }
 
@@ -300,7 +299,7 @@ export default function Home() {
   function sharePhoto(photo: Photo) {
     const url = photo.link || window.location.href;
     if (navigator.share) {
-      navigator.share({ title: photo.title || "Ghebelt Vibe", url });
+      navigator.share({ title: photo.title || "Gelbet Vibe", url });
     } else { 
       navigator.clipboard.writeText(url); 
       showToast("Link copied to clipboard!"); 
@@ -408,13 +407,26 @@ export default function Home() {
         .card-action-btn { background: rgba(13,10,6,0.8); border: none; border-radius: 50%; width: 34px; height: 34px; display: flex; align-items: center; justify-content: center; cursor: pointer; color: #fff; transition: all 0.2s; backdrop-filter: blur(4px); }
         .card-action-btn:hover { background: #c0521a; color: #0d0a06; transform: scale(1.1); }
 
+        /* ОБНОВЛЕННОЕ МОДАЛЬНОЕ ОКНО */
         .modal-backdrop { position: fixed; inset: 0; z-index: 200; background: rgba(0,0,0,0.85); display: flex; align-items: center; justify-content: center; padding: 16px; animation: fadeIn 0.2s ease; }
-        .modal-box { background: #0d0a06; border: 1px solid #2a1f0e; border-radius: 16px; overflow: hidden; max-width: 1000px; width: 100%; display: flex; flex-direction: column; max-height: 90vh; box-shadow: 0 32px 80px rgba(0,0,0,0.8); animation: slideUp 0.25s ease; }
-        @media (min-width: 640px) { .modal-box { flex-direction: row; } }
-        .modal-img-wrap { flex: 1.5; background: #1a1208; display: flex; align-items: center; justify-content: center; overflow: hidden; }
-        .modal-img { width: 100%; max-height: 50vh; object-fit: cover; display: block; }
-        @media (min-width: 640px) { .modal-img { max-height: 90vh; } }
-        .modal-info { flex: 1; padding: 32px; display: flex; flex-direction: column; overflow-y: auto; background: #0d0a06; }
+        
+        /* Box теперь прокручивается целиком и контент идет друг под другом */
+        .modal-box { background: #0d0a06; border: 1px solid #2a1f0e; border-radius: 16px; width: 100%; max-width: 1000px; max-height: 90vh; overflow-y: auto; box-shadow: 0 32px 80px rgba(0,0,0,0.8); animation: slideUp 0.25s ease; display: flex; flex-direction: column; }
+        
+        /* Верхний блок: Картинка (слева) + Инфа (справа) на ПК */
+        .modal-top { display: flex; flex-direction: column; }
+        @media (min-width: 768px) { .modal-top { flex-direction: row; } }
+        
+        .modal-img-wrap { flex: 1.5; background: #1a1208; display: flex; align-items: center; justify-content: center; padding: 20px; }
+        .modal-img { width: 100%; max-height: 70vh; object-fit: contain; display: block; border-radius: 8px; }
+        
+        .modal-info { flex: 1; padding: 32px; display: flex; flex-direction: column; background: #0d0a06; }
+
+        /* Нижний блок: Похожие картинки */
+        .modal-bottom { padding: 32px; border-top: 1px solid #1a1208; background: #0d0a06; }
+        .related-masonry { columns: 2; gap: 12px; }
+        @media (min-width: 640px) { .related-masonry { columns: 3; } }
+        @media (min-width: 1024px) { .related-masonry { columns: 4; } }
 
         .primary-btn { background: #c0521a; color: #0d0a06; border: none; border-radius: 24px; padding: 14px 24px; cursor: pointer; font-weight: 700; font-size: 14px; width: 100%; transition: background 0.2s; }
         .primary-btn:hover { background: #d4621a; }
@@ -425,7 +437,7 @@ export default function Home() {
         .outline-btn { color: #c0521a; border: 1px solid #c0521a; width: 100%; } .outline-btn:hover { background: rgba(192,82,26,0.1); }
         .danger-btn { color: #e53e3e; border: 1px solid #e53e3e; width: 100%; } .danger-btn:hover { background: rgba(229,62,62,0.1); }
 
-        .field { width: 100%; padding: 12px 16px; border-radius: 12px; border: 1px solid #2a1f0e; background: #1a1208; color: #d4b896; font-size: 14px; outline: none; }
+        .field { width: 100%; padding: 12px 16px; border-radius: 12px; border: 1px solid #2a1f0e; background: #1a1208; color: #d4b896; font-size: 14px; outline: none; transition: border-color 0.2s; }
         .field:focus { border-color: #c0521a; }
         .upload-zone { border: 1px dashed #2a1f0e; border-radius: 12px; height: 160px; display: flex; align-items: center; justify-content: center; cursor: pointer; background: #1a1208; }
 
@@ -447,8 +459,6 @@ export default function Home() {
         .modal-close:hover { background: #1a1208; color: #c0521a; }
         
         .toast-container { position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); background: #c0521a; color: #0d0a06; padding: 12px 24px; border-radius: 24px; font-size: 14px; font-weight: 700; z-index: 9999; animation: slideUp 0.3s ease; box-shadow: 0 10px 30px rgba(192,82,26,0.3); }
-        
-        .related-masonry { columns: 2; gap: 8px; margin-top: 16px; }
       `}</style>
 
       <main style={{ minHeight: "100vh" }}>
@@ -457,7 +467,7 @@ export default function Home() {
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
           </button>
 
-          <span className="logo" onClick={clearSearch}>GHEBELT</span>
+          <span className="logo" onClick={clearSearch}>GELBET</span>
 
           <form style={{ flex: 1, display: "flex", minWidth: 0 }} onSubmit={handleSearch}>
             <div className="search-wrap">
@@ -469,8 +479,8 @@ export default function Home() {
             </div>
           </form>
 
-          {/* ИИ-АССИСТЕНТ */}
-          <button className="hbtn" title="AI Vibe Generator" onClick={handleAIVibe}>
+          {/* КНОПКА ИИ-АССИСТЕНТА */}
+          <button className="hbtn" title="AI Vibe Assistant" onClick={() => setShowAIModal(true)}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3l1.912 5.813a2 2 0 001.275 1.275L21 12l-5.813 1.912a2 2 0 00-1.275 1.275L12 21l-1.912-5.813a2 2 0 00-1.275-1.275L3 12l5.813-1.912a2 2 0 001.275-1.275L12 3z"/></svg>
           </button>
 
@@ -550,15 +560,7 @@ export default function Home() {
               <div className="masonry">
                 {displayPhotos.map((photo, i) => (
                   <div key={`${photo.id}-${i}`} className="card" onClick={() => setSelected(photo)}>
-                    <img 
-                      src={photo.src} 
-                      alt="" 
-                      loading="lazy" 
-                      onError={e => { 
-                        const parent = (e.currentTarget as HTMLImageElement).parentElement;
-                        if (parent) parent.style.display = "none"; 
-                      }} 
-                    />
+                    <img src={photo.src} alt="" loading="lazy" onError={e => { const p = (e.currentTarget as HTMLImageElement).parentElement; if (p) p.style.display = "none"; }} />
                     <div className="overlay">
                       <div style={{ display: "flex", justifyContent: "flex-end" }}>
                         <button className={`save-btn ${isPinned(photo) ? "pinned" : ""}`} onClick={e => { e.stopPropagation(); isPinned(photo) ? null : setShowSaveToBoard(photo); }}>
@@ -586,7 +588,7 @@ export default function Home() {
             <div className="burger-overlay" onClick={closeAllPanels} />
             <div className="burger-panel">
               <div className="burger-header">
-                <span className="burger-logo">GHEBELT</span>
+                <span className="burger-logo">GELBET</span>
                 <button className="burger-close" onClick={closeAllPanels}>✕</button>
               </div>
               {user && (
@@ -617,56 +619,85 @@ export default function Home() {
                   <span>Saved Pins</span>
                 </button>
               </div>
-              <div style={{ height: 1, background: "#1a1208", margin: "10px 0" }} />
-              {user ? (
-                <button className="burger-action" onClick={signOut}>
-                  <span className="burger-action-icon" style={{ color: "#4a3520" }}>→</span>
-                  <span style={{ color: "#8a6a4a" }}>Sign out</span>
-                </button>
-              ) : (
-                <a href="/auth" className="burger-action" style={{ textDecoration: "none" }}>
-                  <span className="burger-action-icon" style={{ background: "#c0521a", color: "#0d0a06" }}>→</span>
-                  <span style={{ color: "#c0521a", fontWeight: 600 }}>Sign In / Register</span>
-                </a>
-              )}
             </div>
           </>
         )}
 
+        {/* ФОРМА ИИ-АССИСТЕНТА */}
+        {showAIModal && (
+          <div className="modal-backdrop" onClick={() => setShowAIModal(false)}>
+            <div onClick={e => e.stopPropagation()} style={{ background: "#0d0a06", border: "1px solid #2a1f0e", borderRadius: 16, padding: 32, maxWidth: 440, width: "100%", display: "flex", flexDirection: "column", gap: 16, animation: "slideUp 0.3s ease" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <h2 style={{ fontSize: 16, fontWeight: 700, color: "#c0521a", fontFamily: "Cinzel, serif", letterSpacing: 2 }}>AI VIBE ASSISTANT</h2>
+                <button className="modal-close" onClick={() => setShowAIModal(false)}>✕</button>
+              </div>
+              <p style={{ color: "#8a6a4a", fontSize: 13, lineHeight: 1.5 }}>
+                Describe the mood, era, or aesthetic you are looking for. AI will refine your input to craft the perfect visual search query.
+              </p>
+              
+              <textarea 
+                className="field" 
+                placeholder="e.g. A rainy day in a cyberpunk city but with warm neon colors..." 
+                value={aiPrompt} 
+                onChange={e => setAiPrompt(e.target.value)}
+                style={{ height: 100, resize: "none", fontFamily: "inherit" }}
+              />
+
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 4 }}>
+                <span style={{color: "#4a3520", fontSize: 11, fontWeight: 700, textTransform: "uppercase", width: "100%", letterSpacing: 1}}>Or try suggestions:</span>
+                {aiVibes.map(vibe => (
+                  <button key={vibe} onClick={() => setAiPrompt(vibe)} className="tag-pill" style={{fontSize: 11, padding: "4px 10px"}}>{vibe}</button>
+                ))}
+              </div>
+
+              <div style={{ display: "flex", gap: 12, marginTop: 10 }}>
+                <button className="ghost-btn" onClick={() => setShowAIModal(false)}>Cancel</button>
+                <button className="primary-btn" style={{ flex: 1, opacity: !aiPrompt.trim() ? 0.4 : 1 }} onClick={handleAIGenerate}>Generate Vibe</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ОБНОВЛЕННОЕ МОДАЛЬНОЕ ОКНО ДЛЯ ФОТО (С СЕТКОЙ ПОХОЖИХ ВНИЗУ) */}
         {selected && (
           <div className="modal-backdrop" onClick={() => setSelected(null)}>
             <div className="modal-box" onClick={e => e.stopPropagation()}>
-              <div className="modal-img-wrap">
-                <img src={selected.src} alt="" className="modal-img" />
-              </div>
-              <div className="modal-info">
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 20 }}>
-                  <button className="hbtn" style={{ background: "#1a1208" }} onClick={() => { setShowShare(selected); setSelected(null); }} title="Share">
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
-                  </button>
-                  <button className="modal-close" onClick={() => setSelected(null)}>✕</button>
+              
+              <div className="modal-top">
+                <div className="modal-img-wrap">
+                  <img src={selected.src} alt="" className="modal-img" />
                 </div>
+                
+                <div className="modal-info">
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 24 }}>
+                    <button className="hbtn" style={{ background: "#1a1208" }} onClick={() => { setShowShare(selected); }} title="Share">
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
+                    </button>
+                    <button className="modal-close" onClick={() => setSelected(null)}>✕</button>
+                  </div>
 
-                <div style={{ display: "flex", flexDirection: "column", gap: 12, flexShrink: 0 }}>
-                  <button className={`primary-btn ${isPinned(selected) ? "pinned-state" : ""}`} onClick={() => isPinned(selected) ? null : setShowSaveToBoard(selected)}>
-                    {isPinned(selected) ? "Already saved" : "Save to Board"}
-                  </button>
-                  {selected.link && <a href={selected.link} target="_blank" rel="noopener noreferrer"><button className="outline-btn">View Original ↗</button></a>}
-                </div>
-
-                {/* БЛОК С ПОХОЖИМИ ФОТОГРАФИЯМИ */}
-                <div style={{ marginTop: 40, paddingTop: 24, borderTop: "1px solid #1a1208", flex: 1 }}>
-                  <h3 style={{ fontSize: 11, fontWeight: 700, color: "#8a6a4a", textTransform: "uppercase", letterSpacing: 2, marginBottom: 16 }}>More Like This</h3>
-                  <div className="related-masonry">
-                    {displayPhotos.filter(p => p.id !== selected.id).slice(0, 12).map((photo, i) => (
-                      <div key={`related-${photo.id}-${i}`} style={{ breakInside: "avoid", marginBottom: 8, cursor: "pointer", borderRadius: 8, overflow: "hidden" }} onClick={() => { document.querySelector('.modal-info')?.scrollTo(0,0); setSelected(photo); }}>
-                        <img src={photo.thumb || photo.src} style={{ width: "100%", display: "block", transition: "filter 0.2s" }} onMouseOver={e => (e.currentTarget.style.filter = "brightness(0.8)")} onMouseOut={e => (e.currentTarget.style.filter = "brightness(1)")} alt="" />
-                      </div>
-                    ))}
+                  <div style={{ display: "flex", flexDirection: "column", gap: 12, flexShrink: 0 }}>
+                    <button className={`primary-btn ${isPinned(selected) ? "pinned-state" : ""}`} onClick={() => isPinned(selected) ? null : setShowSaveToBoard(selected)}>
+                      {isPinned(selected) ? "Already saved" : "Save to Board"}
+                    </button>
+                    {selected.link && <a href={selected.link} target="_blank" rel="noopener noreferrer"><button className="outline-btn">View Original ↗</button></a>}
                   </div>
                 </div>
-
               </div>
+
+              {/* ПОХОЖИЕ ФОТОГРАФИИ - ТЕПЕРЬ ПОД ГЛАВНЫМ ФОТО! */}
+              <div className="modal-bottom">
+                <h3 style={{ fontSize: 13, fontWeight: 700, color: "#d4b896", textTransform: "uppercase", letterSpacing: 2, marginBottom: 20 }}>More Like This</h3>
+                <div className="related-masonry">
+                  {displayPhotos.filter(p => p.id !== selected.id).slice(0, 16).map((photo, i) => (
+                    <div key={`related-${photo.id}-${i}`} style={{ breakInside: "avoid", marginBottom: 12, cursor: "pointer", borderRadius: 12, overflow: "hidden" }} 
+                         onClick={() => { document.querySelector('.modal-box')?.scrollTo(0,0); setSelected(photo); }}>
+                      <img src={photo.thumb || photo.src} style={{ width: "100%", display: "block", transition: "filter 0.2s" }} onMouseOver={e => (e.currentTarget.style.filter = "brightness(0.8)")} onMouseOut={e => (e.currentTarget.style.filter = "brightness(1)")} alt="" />
+                    </div>
+                  ))}
+                </div>
+              </div>
+
             </div>
           </div>
         )}

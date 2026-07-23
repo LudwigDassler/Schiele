@@ -25,6 +25,10 @@ export default function Home() {
   const [searchQuery, setSearchQuery] = useState("Aesthetic");
   const [userTags, setUserTags] = useState<string[]>([]);
   
+  // Состояние для идеального мобильного поиска
+  const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  
   const [selected, setSelected] = useState<Photo | null>(null);
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [pins, setPins] = useState<Pin[]>([]);
@@ -173,6 +177,7 @@ export default function Home() {
     if (!search.trim()) return;
     setSearchQuery(search.trim());
     saveUserTag(search.trim());
+    setIsMobileSearchOpen(false);
     closeAllPanels();
   }
 
@@ -186,6 +191,7 @@ export default function Home() {
   function clearSearch() {
     setSearch("");
     setSearchQuery("Aesthetic");
+    setIsMobileSearchOpen(false);
     closeAllPanels();
   }
 
@@ -234,10 +240,12 @@ export default function Home() {
       if (res.ok) {
         const data = await res.json();
         if (data.pin || data.data) setPins(prev => [data.pin || data.data, ...prev]);
+        showToast("Saved to profile");
+      } else {
+        showToast("Error saving pin");
       }
-    } catch (e) { console.error("Error saving pin:", e); }
+    } catch (e) { console.error("Error saving pin:", e); showToast("Network error"); }
     setShowSaveToBoard(null); setSelected(null);
-    showToast("Saved to profile");
   }
 
   async function deletePin(pinId: string) {
@@ -334,23 +342,28 @@ export default function Home() {
           text-shadow: 0 0 20px rgba(192,82,26,0.4);
         }
 
-        /* --- ФИКС МОБИЛЬНОГО ПОИСКА --- */
-        .search-wrap {
-          flex: 1; display: flex; background: #1a1208; border-radius: 24px;
-          overflow: hidden; border: 1px solid #2a1f0e; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-          min-width: 40px; 
+        /* --- ИДЕАЛЬНЫЙ МОБИЛЬНЫЙ ПОИСК --- */
+        .search-form { flex: 1; display: flex; min-width: 0; justify-content: flex-end; }
+        .search-wrap { 
+          flex: 1; display: flex; background: #1a1208; border-radius: 24px; 
+          overflow: hidden; border: 1px solid #2a1f0e; transition: all 0.2s; min-width: 0; 
         }
+        .search-wrap:focus-within { border-color: #c0521a; box-shadow: 0 0 0 2px rgba(192,82,26,0.2); }
         .search-input { width: 100%; padding: 9px 14px; background: transparent; border: none; color: #d4b896; font-size: 14px; outline: none; }
         .search-input::placeholder { color: #4a3520; }
-        .search-btn { padding: 9px 14px; background: transparent; border: none; color: #6a4a2a; cursor: pointer; transition: color 0.2s; flex-shrink: 0; }
+        .search-btn { width: 40px; height: 100%; padding: 0; background: transparent; border: none; color: #6a4a2a; cursor: pointer; transition: color 0.2s; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
         .search-btn:hover { color: #c0521a; }
-        
+
         @media (max-width: 640px) {
-          .search-wrap:focus-within {
-            position: absolute; left: 16px; right: 16px; top: 10px; height: 38px;
-            z-index: 200; background: #0d0a06; border-color: #c0521a;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.9);
-          }
+          .search-form { flex: none; }
+          .search-wrap { width: 38px; height: 38px; flex: none; border-radius: 50%; background: transparent; border: none; cursor: pointer; }
+          .search-input { display: none; }
+          .search-btn { width: 38px; height: 38px; border-radius: 50%; pointer-events: none; } 
+          
+          .search-form.mobile-active { position: absolute; left: 16px; right: 16px; top: 10px; z-index: 200; flex: 1; }
+          .search-form.mobile-active .search-wrap { width: 100%; height: 42px; border-radius: 24px; background: #0d0a06; border: 1px solid #c0521a; flex: 1; display: flex; cursor: text; box-shadow: 0 10px 30px rgba(0,0,0,0.9); }
+          .search-form.mobile-active .search-input { display: block; flex: 1; }
+          .search-form.mobile-active .search-btn { border-radius: 0; width: 40px; pointer-events: auto; }
         }
         /* ---------------------------------- */
 
@@ -471,10 +484,25 @@ export default function Home() {
 
           <span className="logo" onClick={clearSearch}>GELBET</span>
 
-          <form style={{ flex: 1, display: "flex", minWidth: 0 }} onSubmit={handleSearch}>
-            <div className="search-wrap">
-              <input className="search-input" placeholder="Search visual aesthetics..." value={search} onChange={e => setSearch(e.target.value)} />
-              {search && <button type="button" onClick={clearSearch} className="search-btn" style={{ fontSize: 16 }}>✕</button>}
+          <form className={`search-form ${isMobileSearchOpen ? 'mobile-active' : ''}`} onSubmit={handleSearch}>
+            <div 
+              className="search-wrap" 
+              onClick={() => {
+                if (!isMobileSearchOpen) {
+                  setIsMobileSearchOpen(true);
+                  setTimeout(() => searchInputRef.current?.focus(), 50);
+                }
+              }}
+            >
+              <input 
+                ref={searchInputRef}
+                className="search-input" 
+                placeholder="Search visual aesthetics..." 
+                value={search} 
+                onChange={e => setSearch(e.target.value)} 
+                onBlur={() => { if(!search) setIsMobileSearchOpen(false) }}
+              />
+              {search && isMobileSearchOpen && <button type="button" onClick={() => { setSearch(""); setIsMobileSearchOpen(false); }} className="search-btn" style={{ fontSize: 16 }}>✕</button>}
               <button type="submit" className="search-btn">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
               </button>

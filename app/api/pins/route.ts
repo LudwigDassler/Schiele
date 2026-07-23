@@ -1,7 +1,6 @@
 ﻿import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
-// Надежная инициализация клиента БД напрямую в роуте
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 const supabase = createClient(supabaseUrl, supabaseKey);
@@ -25,13 +24,29 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
     try {
         const body = await req.json();
+        
+        // Бронебойный payload. Подставляем дефолтные значения, 
+        // чтобы строгая схема БД не выкидывала 500 ошибку
+        const payload = {
+            user_id: body.user_id,
+            image_url: body.image_url,
+            title: body.title || "Gelbet Vibe",
+            board_id: body.board_id || null,
+            source_url: body.source_url || "",
+            source: body.source || "Gelbet",
+            author: body.author || "Aesthetic"
+        };
+
         const { data, error } = await supabase
             .from("pins")
-            .insert([body])
+            .insert([payload])
             .select()
             .single();
 
-        if (error) throw error;
+        if (error) {
+            console.error("Supabase DB Error:", error);
+            throw error;
+        }
         return NextResponse.json({ pin: data });
     } catch (e: any) {
         return NextResponse.json({ error: e.message || "Failed to save pin" }, { status: 500 });

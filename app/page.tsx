@@ -36,7 +36,6 @@ export default function Home() {
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
 
-  // Состояния для бесконечного скролла похожих фото
   const [relatedPhotos, setRelatedPhotos] = useState<Photo[]>([]);
   const [relatedPage, setRelatedPage] = useState(1);
   const [relatedLoading, setRelatedLoading] = useState(false);
@@ -130,7 +129,7 @@ export default function Home() {
     }
   }, []);
 
-  // ИИ-СЕЛЕКЦИЯ V2.0: Смарт-парсер для модалки
+  // ИИ-СЕЛЕКЦИЯ V3.0: Мультиязычный умный парсер
   const fetchRelatedPhotos = useCallback(async (basePhoto: Photo, pageNum: number, reset: boolean) => {
     setRelatedLoading(true);
     if (reset) {
@@ -139,22 +138,27 @@ export default function Home() {
     }
 
     try {
-      // 1. Вырезаем SEO-мусор, оставляем суть
-      const stopWords = ["photo", "image", "picture", "wallpaper", "background", "free", "download", "high", "resolution", "by", "of", "the", "in", "on", "a", "and", "is", "with", "for", "hd", "4k", "stock"];
-      const rawWords = (basePhoto.title || "").toLowerCase().replace(/[^a-zа-я0-9\s]/g, "").split(/\s+/);
-      const keywords = rawWords.filter(w => w.length > 2 && !stopWords.includes(w)).slice(0, 4);
+      // Жесткая фильтрация мусора из названия картинки (RUS + ENG)
+      const stopWords = new Set([
+        "photo", "image", "picture", "wallpaper", "background", "free", "download", "high", "resolution", 
+        "by", "of", "the", "in", "on", "a", "and", "is", "with", "for", "hd", "4k", "stock", "quality", "cinematic", "aesthetic",
+        "из", "и", "в", "на", "под", "с", "как", "это", "что", "фото", "картинка", "обои", "эстетика", "для"
+      ]);
       
-      // 2. Интеллектуальное скрещивание запросов
-      const baseVibe = searchQuery.toLowerCase().replace("aesthetic", "").trim();
+      const rawWords = (basePhoto.title || "").toLowerCase().replace(/[^a-zа-яё0-9\s]/g, "").split(/\s+/);
+      const keywords = Array.from(new Set(rawWords.filter(w => w.length > 2 && !stopWords.has(w)))).slice(0, 3);
+      
       let aiQuery = "";
-      
       if (keywords.length > 0) {
-        // Исключаем дублирование слов
-        const uniqueKeywords = keywords.filter(kw => !baseVibe.includes(kw)).join(" ");
-        aiQuery = `${baseVibe} ${uniqueKeywords} aesthetic`.trim();
+        aiQuery = keywords.join(" ");
+        // Добавляем только самое первое слово из базового поиска для контекста
+        const baseVibeWord = searchQuery.toLowerCase().replace(/aesthetic/g, "").trim().split(/\s+/)[0];
+        if (baseVibeWord && !aiQuery.includes(baseVibeWord)) {
+            aiQuery = `${baseVibeWord} ${aiQuery}`;
+        }
       } else {
-        // Если названия нет вообще, углубляем текущий запрос
-        aiQuery = `${baseVibe} details mood aesthetic`;
+        // Fallback если парсер вырезал вообще всё
+        aiQuery = `${searchQuery.split(/\s+/)[0]} mood`;
       }
 
       // Чистим двойные пробелы
@@ -165,13 +169,13 @@ export default function Home() {
       const data = await res.json();
       const rawArray = Array.isArray(data) ? data : (data.data || data.photos || data.items || []);
       
-      // 3. Жесткий анти-двойник: фильтруем по src, чтобы избежать 100% копий
+      // Анти-двойник фильтр по ссылке
       const fetched = rawArray.filter((p: any) => p.src && p.src.startsWith("http") && p.src !== basePhoto.src && p.id !== basePhoto.id);
       
       setRelatedPhotos(prev => {
         const combined = reset ? fetched : [...prev, ...fetched];
         const map = new Map();
-        combined.forEach(p => map.set(p.src, p)); // Map по src - идеальный отсев клонов
+        combined.forEach(p => map.set(p.src, p)); 
         return Array.from(map.values());
       });
       setRelatedHasMore(fetched.length > 0);
@@ -187,7 +191,6 @@ export default function Home() {
     fetchPhotos(searchQuery, 1, true);
   }, [searchQuery, fetchPhotos]);
 
-  // Observer главной ленты
   useEffect(() => {
     if (!bottomRef.current) return;
     observerRef.current?.disconnect();
@@ -202,7 +205,6 @@ export default function Home() {
     return () => observerRef.current?.disconnect();
   }, [hasMore, page, searchQuery, fetchPhotos]);
 
-  // Observer модального окна (Бесконечные похожие фото)
   useEffect(() => {
     if (!selected) return;
     setRelatedPhotos([]);
@@ -248,12 +250,17 @@ export default function Home() {
 
   function clearSearch() { setSearch(""); setSearchQuery("Aesthetic"); setIsMobileSearchOpen(false); closeAllPanels(); }
 
+  // Обновленный обработчик ручного AI-поиска
   function handleAIGenerate() {
     if (!aiPrompt.trim()) return;
-    setShowAIModal(false); showToast("✨ AI is crafting your aesthetic...");
+    setShowAIModal(false); showToast("✨ Synthesizing vibe...");
     setTimeout(() => {
-      const enhancedQuery = `${aiPrompt.trim()} aesthetic high quality cinematic`;
-      setSearch(enhancedQuery); setSearchQuery(enhancedQuery); saveUserTag(aiPrompt.trim()); setAiPrompt("");
+      let query = aiPrompt.trim();
+      // Защита: не добавляем английский мусор, если юзер пишет на русском
+      if (!/[а-яА-ЯёЁ]/.test(query) && !query.toLowerCase().includes('aesthetic')) {
+         query += " aesthetic";
+      }
+      setSearch(query); setSearchQuery(query); saveUserTag(query); setAiPrompt("");
     }, 800);
   }
 
@@ -404,9 +411,17 @@ export default function Home() {
 
         .burger-overlay { position: fixed; inset: 0; z-index: 150; background: rgba(0,0,0,0.7); animation: fadeIn 0.2s ease; }
         .burger-panel { position: fixed; top: 0; left: 0; bottom: 0; width: min(300px, 85vw); z-index: 151; background: #0d0a06; border-right: 1px solid #2a1f0e; display: flex; flex-direction: column; animation: slideRight 0.25s ease; overflow-y: auto; }
+        
         @keyframes slideRight { from { transform: translateX(-100%); } to { transform: translateX(0); } }
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
         @keyframes slideUp { from { transform: translateY(16px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+        
+        /* ПЛАВНАЯ АНИМАЦИЯ ПОЯВЛЕНИЯ МОДАЛКИ С ОРАНЖЕВЫМ СВЕЧЕНИЕМ */
+        @keyframes modalGlowUp { 
+          0% { opacity: 0; transform: translateY(30px) scale(0.98); box-shadow: 0 0 0 rgba(192,82,26,0); } 
+          100% { opacity: 1; transform: translateY(0) scale(1); box-shadow: 0 20px 80px rgba(192,82,26,0.15); } 
+        }
+
         .burger-header { padding: 20px 20px 16px; border-bottom: 1px solid #2a1f0e; display: flex; align-items: center; justify-content: space-between; }
         .burger-logo { font-family: 'Cinzel', serif; font-size: 14px; font-weight: 700; letter-spacing: 4px; color: #c0521a; }
         .burger-close { background: none; border: none; font-size: 18px; cursor: pointer; color: #4a3520; width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; }
@@ -445,8 +460,9 @@ export default function Home() {
         .board-edit-btn { border: 1px solid #2a1f0e; color: #8a6a4a; } .board-edit-btn:hover { border-color: #c0521a; color: #c0521a; }
         .board-del-btn { border: 1px solid #3a1a1a; color: #e53e3e; } .board-del-btn:hover { background: rgba(229,62,62,0.1); }
 
-        .modal-backdrop { position: fixed; inset: 0; z-index: 200; background: rgba(0,0,0,0.85); display: flex; align-items: center; justify-content: center; padding: 16px; animation: fadeIn 0.2s ease; }
-        .modal-box { background: #0d0a06; border: 1px solid #2a1f0e; border-radius: 16px; width: 100%; max-width: 1000px; max-height: 90vh; overflow-y: auto; box-shadow: 0 32px 80px rgba(0,0,0,0.8); animation: slideUp 0.25s ease; display: flex; flex-direction: column; scroll-behavior: smooth; }
+        /* BACKDROP ДЛЯ МОДАЛКИ (ТЕМНО-КОРИЧНЕВЫЙ) */
+        .modal-backdrop { position: fixed; inset: 0; z-index: 200; background: rgba(13,10,6,0.9); display: flex; align-items: center; justify-content: center; padding: 16px; animation: fadeIn 0.4s ease; backdrop-filter: blur(5px); }
+        .modal-box { background: #0d0a06; border: 1px solid #2a1f0e; border-radius: 16px; width: 100%; max-width: 1000px; max-height: 90vh; overflow-y: auto; animation: modalGlowUp 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) forwards; display: flex; flex-direction: column; scroll-behavior: smooth; }
         
         .modal-top { display: flex; flex-direction: column; }
         @media (min-width: 768px) { .modal-top { flex-direction: row; } }
@@ -475,6 +491,15 @@ export default function Home() {
         
         .spinner { width: 28px; height: 28px; border: 2px solid #2a1f0e; border-top-color: #c0521a; border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto; }
         @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* АНИМАЦИЯ "НЕЙРОСЕТЬ ДУМАЕТ" */
+        .ai-pulse { width: 40px; height: 40px; border-radius: 50%; background: radial-gradient(circle, #c0521a 0%, transparent 70%); animation: pulseGlow 1.5s infinite alternate; margin: 0 auto 12px; }
+        @keyframes pulseGlow { 
+          0% { transform: scale(0.8); opacity: 0.5; box-shadow: 0 0 10px #c0521a; } 
+          100% { transform: scale(1.5); opacity: 1; box-shadow: 0 0 30px #c0521a, 0 0 60px #d4b896; } 
+        }
+        .ai-text { font-family: 'Cinzel', serif; color: #d4b896; font-size: 11px; letter-spacing: 4px; text-transform: uppercase; animation: flashText 1.5s infinite; }
+        @keyframes flashText { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
         
         .empty { text-align: center; padding: 100px 20px; color: #4a3520; font-size: 16px; font-family: 'Crimson Text', serif; font-style: italic; }
         .modal-close { background: none; border: none; color: #4a3520; cursor: pointer; font-size: 20px; width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; }
@@ -535,7 +560,9 @@ export default function Home() {
           <div className="tags-bar">
             <span style={{color: "#4a3520", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, paddingRight: 8}}>History</span>
             {userTags.map(tag => (
-              <button key={tag} className={`tag-pill ${searchQuery === tag ? "active" : ""}`} onClick={() => handleTagClick(tag)}>{tag}</button>
+              <button key={tag} className={`tag-pill ${searchQuery === tag ? "active" : ""}`} onClick={() => handleTagClick(tag)}>
+                {tag.length > 35 ? tag.substring(0, 35) + "..." : tag}
+              </button>
             ))}
           </div>
         )}
@@ -706,6 +733,7 @@ export default function Home() {
                 </div>
               </div>
 
+              {/* БЕСКОНЕЧНАЯ ЛЕНТА ИИ-ПОХОЖИХ КАРТИНОК */}
               <div className="modal-bottom">
                 <h3 style={{ fontSize: 13, fontWeight: 700, color: "#d4b896", textTransform: "uppercase", letterSpacing: 2, marginBottom: 24, display: "flex", alignItems: "center", gap: 10 }}>
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#c0521a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3l1.912 5.813a2 2 0 001.275 1.275L21 12l-5.813 1.912a2 2 0 00-1.275 1.275L12 21l-1.912-5.813a2 2 0 00-1.275-1.275L3 12l5.813-1.912a2 2 0 001.275-1.275L12 3z"/></svg>
@@ -720,11 +748,11 @@ export default function Home() {
                   ))}
                 </div>
                 
-                <div ref={modalBottomRef} style={{ padding: "40px 0", textAlign: "center" }}>
+                <div ref={modalBottomRef} style={{ padding: "60px 0", textAlign: "center" }}>
                   {relatedLoading && (
-                    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
-                      <div className="spinner" style={{ width: 22, height: 22, borderWidth: 2 }} />
-                      <span style={{ fontSize: 10, color: "#6a4a2a", textTransform: "uppercase", letterSpacing: 3, fontWeight: 700 }}>Deep Search...</span>
+                    <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+                      <div className="ai-pulse" />
+                      <span className="ai-text">Neural Net is extracting vibes...</span>
                     </div>
                   )}
                 </div>

@@ -71,6 +71,7 @@ export default function Home() {
   const abortControllerRef = useRef<AbortController | null>(null);
   const relatedAbortRef = useRef<AbortController | null>(null);
   const loadingRef = useRef(false);
+  const currentRelatedQueryRef = useRef("");
 
   // Клик вне поиска для закрытия истории
   useEffect(() => {
@@ -160,20 +161,39 @@ export default function Home() {
     if (reset) {
       if (relatedAbortRef.current) relatedAbortRef.current.abort();
       relatedAbortRef.current = new AbortController();
+      currentRelatedQueryRef.current = ""; 
     }
     try {
-      const stopWords = new Set(["photo", "image", "picture", "wallpaper", "background", "free", "download", "high", "resolution", "by", "of", "the", "in", "on", "a", "and", "is", "with", "for", "hd", "4k", "stock", "quality", "cinematic", "aesthetic", "из", "и", "в", "на", "под", "с", "как", "это", "что", "фото", "картинка", "обои", "эстетика", "для"]);
-      const rawWords = (basePhoto.title || "").toLowerCase().replace(/[^a-zа-яё0-9\s]/g, "").split(/\s+/);
-      const keywords = Array.from(new Set(rawWords.filter(w => w.length > 2 && !stopWords.has(w)))).slice(0, 3);
-      let aiQuery = "";
-      if (keywords.length > 0) {
-        aiQuery = keywords.join(" ");
-        const baseVibeWord = searchQuery.toLowerCase().replace(/aesthetic/g, "").trim().split(/\s+/)[0];
-        if (baseVibeWord && !aiQuery.includes(baseVibeWord)) aiQuery = `${baseVibeWord} ${aiQuery}`;
-      } else {
-        aiQuery = `${searchQuery.split(/\s+/)[0]} mood`;
+      let aiQuery = currentRelatedQueryRef.current;
+
+      if (reset && !aiQuery) {
+        try {
+          const aiRes = await fetch("/api/ai", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "analyze_image", payload: basePhoto.src })
+          });
+          if (aiRes.ok) {
+            const aiData = await aiRes.json();
+            if (aiData.result) aiQuery = aiData.result;
+          }
+        } catch (err) { console.error("Vision AI error:", err); }
+
+        if (!aiQuery) {
+          const stopWords = new Set(["photo", "image", "picture", "wallpaper", "background", "free", "download", "high", "resolution", "by", "of", "the", "in", "on", "a", "and", "is", "with", "for", "hd", "4k", "stock", "quality", "cinematic", "aesthetic", "из", "и", "в", "на", "под", "с", "как", "это", "что", "фото", "картинка", "обои", "эстетика", "для"]);
+          const rawWords = (basePhoto.title || "").toLowerCase().replace(/[^a-zа-яё0-9\s]/g, "").split(/\s+/);
+          const keywords = Array.from(new Set(rawWords.filter(w => w.length > 2 && !stopWords.has(w)))).slice(0, 3);
+          if (keywords.length > 0) {
+            aiQuery = keywords.join(" ");
+            const baseVibeWord = searchQuery.toLowerCase().replace(/aesthetic/g, "").trim().split(/\s+/)[0];
+            if (baseVibeWord && !aiQuery.includes(baseVibeWord)) aiQuery = `${baseVibeWord} ${aiQuery}`;
+          } else {
+            aiQuery = `${searchQuery.split(/\s+/)[0]} mood`;
+          }
+        }
+        aiQuery = aiQuery.replace(/\s+/g, ' ').trim();
+        currentRelatedQueryRef.current = aiQuery;
       }
-      aiQuery = aiQuery.replace(/\s+/g, ' ').trim();
+
       const params = new URLSearchParams({ page: String(pageNum), query: aiQuery });
       const res = await fetch(`/api/search?${params}`, { signal: relatedAbortRef.current?.signal });
       const data = await res.json();
@@ -277,16 +297,29 @@ export default function Home() {
 
   function clearSearch() { setSearch(""); setSearchQuery("Aesthetic"); setIsMobileSearchOpen(false); closeAllPanels(); }
 
-  function handleAIGenerate() {
+  async function handleAIGenerate() {
     if (!aiPrompt.trim()) return;
-    setShowAIModal(false); showToast("✨ Synthesizing vibe...");
-    setTimeout(() => {
+    setShowAIModal(false); showToast("✨ AI is synthesizing perfect vibe...");
+    
+    try {
+      const aiRes = await fetch("/api/ai", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "enhance_prompt", payload: aiPrompt.trim() })
+      });
+      
       let query = aiPrompt.trim();
-      if (!/[а-яА-ЯёЁ]/.test(query) && !query.toLowerCase().includes('aesthetic')) {
-         query += " aesthetic";
+      if (aiRes.ok) {
+         const data = await aiRes.json();
+         if (data.result) query = data.result;
+      } else {
+         if (!/[а-яА-ЯёЁ]/.test(query) && !query.toLowerCase().includes('aesthetic')) query += " aesthetic";
       }
+      
       setSearch(query); setSearchQuery(query); saveUserTag(query); setAiPrompt("");
-    }, 800);
+      setIsMobileSearchOpen(false); setIsSearchFocused(false);
+    } catch (e) {
+      showToast("AI network error. Defaulting to standard search.");
+    }
   }
 
   function closeAllPanels() { setShowMenu(false); setShowSaved(false); setShowBoards(false); }

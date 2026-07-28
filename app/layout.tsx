@@ -1,7 +1,7 @@
 ﻿"use client";
 import { SessionProvider } from "next-auth/react";
-import MetalLoader from "../components/MetalLoader";
-import { useState, useEffect } from "react";
+import GelbetLoader from "../components/GelbetLoader";
+import { useState } from "react";
 import "./globals.css";
 
 export default function RootLayout({
@@ -11,16 +11,11 @@ export default function RootLayout({
 }) {
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    const timer = setTimeout(() => setLoading(false), 3500);
-    return () => clearTimeout(timer);
-  }, []);
-
   return (
     <html lang="ru">
       <body>
         <SessionProvider>
-          {loading ? <MetalLoader /> : children}
+          {loading ? <GelbetLoader onComplete={() => setLoading(false)} /> : children}
         </SessionProvider>
       </body>
     </html>

@@ -2,6 +2,9 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { supabase } from "../lib/supabase";
 import type { User } from "@supabase/supabase-js";
+import { checkNsfw } from "../lib/nsfw";
+import PinCard from "../components/PinCard";
+import AgeGateModal from "../components/AgeGateModal";
 
 const defaultTags = [
   "Aesthetic", "Dark Academia", "Cyberpunk", "Minimalism",
@@ -9,25 +12,25 @@ const defaultTags = [
 ];
 
 const aiVibes = [
-  "Melancholic Soviet Post-Punk", "Ethereal Dreamcore", 
-  "Cinematic Neon Noir", "Liminal Poolrooms", 
+  "Melancholic Soviet Post-Punk", "Ethereal Dreamcore",
+  "Cinematic Neon Noir", "Liminal Poolrooms",
   "Gothic Renaissance", "Y2K Nostalgia Grunge"
 ];
 
-type Photo = { id: string; src: string; thumb: string; title: string; link: string };
+type Photo = { id: string; src: string; thumb: string; title: string; link: string; isNsfw?: boolean };
 type Board = { id: string; name: string; description?: string };
 type Pin = { id: string; image_url: string; title: string; board_id?: string; source_url?: string };
 
 export default function Home() {
   const [user, setUser] = useState<User | null>(null);
-  
+
   const [search, setSearch] = useState("");
   const [searchQuery, setSearchQuery] = useState("Aesthetic");
   const [userTags, setUserTags] = useState<string[]>([]);
-  
+
   const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
-  
+
   const [selected, setSelected] = useState<Photo | null>(null);
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [pins, setPins] = useState<Pin[]>([]);
@@ -40,7 +43,7 @@ export default function Home() {
   const [relatedPage, setRelatedPage] = useState(1);
   const [relatedLoading, setRelatedLoading] = useState(false);
   const [relatedHasMore, setRelatedHasMore] = useState(true);
-  
+
   const [showSaved, setShowSaved] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
   const [showBoards, setShowBoards] = useState(false);
@@ -48,18 +51,21 @@ export default function Home() {
   const [showShare, setShowShare] = useState<Photo | null>(null);
   const [showSaveToBoard, setShowSaveToBoard] = useState<Photo | null>(null);
   const [editBoard, setEditBoard] = useState<Board | null>(null);
-  
+
   const [showAIModal, setShowAIModal] = useState(false);
   const [aiPrompt, setAiPrompt] = useState("");
-  
+
   const [newBoardName, setNewBoardName] = useState("");
   const [newBoardDesc, setNewBoardDesc] = useState("");
   const [toastMsg, setToastMsg] = useState("");
-  
+
+  const [nsfwAllowed, setNsfwAllowed] = useState(false);
+  const [showAgeGate, setShowAgeGate] = useState(false);
+
   const observerRef = useRef<IntersectionObserver | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const modalBottomRef = useRef<HTMLDivElement>(null);
-  
+
   const abortControllerRef = useRef<AbortController | null>(null);
   const relatedAbortRef = useRef<AbortController | null>(null);
   const loadingRef = useRef(false);
@@ -73,12 +79,15 @@ export default function Home() {
       setUser(session?.user ?? null);
       if (session?.user) fetchUserData(session.user.id);
     });
-    
+
     try {
       const savedTags = localStorage.getItem("gelbet_user_tags");
       if (savedTags) setUserTags(JSON.parse(savedTags));
+
+      const allowedNsfw = localStorage.getItem("gelbet_nsfw_18plus");
+      if (allowedNsfw === "true") setNsfwAllowed(true);
     } catch (e) {}
-    
+
     return () => subscription.unsubscribe();
   }, []);
 
@@ -97,7 +106,7 @@ export default function Home() {
     if (!reset && loadingRef.current) return;
     loadingRef.current = true;
     setLoading(true);
-    
+
     if (reset) {
       if (abortControllerRef.current) abortControllerRef.current.abort();
       abortControllerRef.current = new AbortController();
@@ -110,8 +119,12 @@ export default function Home() {
       if (!res.ok) throw new Error("Fetch failed");
       const data = await res.json();
       const rawArray = Array.isArray(data) ? data : (data.data || data.photos || data.items || []);
-      const fetched = rawArray.filter((p: any) => p.src && p.src.startsWith("http"));
       
+      const isNsfwQuery = checkNsfw(query);
+      const fetched = rawArray
+        .filter((p: any) => p.src && p.src.startsWith("http"))
+        .map((p: any) => ({ ...p, isNsfw: isNsfwQuery || checkNsfw(p.title || "") }));
+
       setPhotos(prev => {
         const combined = reset ? fetched : [...prev, ...fetched];
         const map = new Map();
@@ -119,8 +132,8 @@ export default function Home() {
         return Array.from(map.values());
       });
       setHasMore(fetched.length > 0);
-    } catch (e: any) { 
-      if (e.name !== 'AbortError') console.error(e); 
+    } catch (e: any) {
+      if (e.name !== 'AbortError') console.error(e);
     } finally {
       if (!(reset && abortControllerRef.current?.signal.aborted)) {
         setLoading(false);
@@ -129,7 +142,6 @@ export default function Home() {
     }
   }, []);
 
-  // ИИ-СЕЛЕКЦИЯ V3.0: Мультиязычный умный парсер
   const fetchRelatedPhotos = useCallback(async (basePhoto: Photo, pageNum: number, reset: boolean) => {
     setRelatedLoading(true);
     if (reset) {
@@ -138,44 +150,42 @@ export default function Home() {
     }
 
     try {
-      // Жесткая фильтрация мусора из названия картинки (RUS + ENG)
       const stopWords = new Set([
-        "photo", "image", "picture", "wallpaper", "background", "free", "download", "high", "resolution", 
+        "photo", "image", "picture", "wallpaper", "background", "free", "download", "high", "resolution",
         "by", "of", "the", "in", "on", "a", "and", "is", "with", "for", "hd", "4k", "stock", "quality", "cinematic", "aesthetic",
         "из", "и", "в", "на", "под", "с", "как", "это", "что", "фото", "картинка", "обои", "эстетика", "для"
       ]);
-      
+
       const rawWords = (basePhoto.title || "").toLowerCase().replace(/[^a-zа-яё0-9\s]/g, "").split(/\s+/);
       const keywords = Array.from(new Set(rawWords.filter(w => w.length > 2 && !stopWords.has(w)))).slice(0, 3);
-      
+
       let aiQuery = "";
       if (keywords.length > 0) {
         aiQuery = keywords.join(" ");
-        // Добавляем только самое первое слово из базового поиска для контекста
         const baseVibeWord = searchQuery.toLowerCase().replace(/aesthetic/g, "").trim().split(/\s+/)[0];
         if (baseVibeWord && !aiQuery.includes(baseVibeWord)) {
             aiQuery = `${baseVibeWord} ${aiQuery}`;
         }
       } else {
-        // Fallback если парсер вырезал вообще всё
         aiQuery = `${searchQuery.split(/\s+/)[0]} mood`;
       }
 
-      // Чистим двойные пробелы
       aiQuery = aiQuery.replace(/\s+/g, ' ').trim();
 
       const params = new URLSearchParams({ page: String(pageNum), query: aiQuery });
       const res = await fetch(`/api/search?${params}`, { signal: relatedAbortRef.current?.signal });
       const data = await res.json();
       const rawArray = Array.isArray(data) ? data : (data.data || data.photos || data.items || []);
-      
-      // Анти-двойник фильтр по ссылке
-      const fetched = rawArray.filter((p: any) => p.src && p.src.startsWith("http") && p.src !== basePhoto.src && p.id !== basePhoto.id);
-      
+
+      const isNsfwQuery = checkNsfw(aiQuery);
+      const fetched = rawArray
+        .filter((p: any) => p.src && p.src.startsWith("http") && p.src !== basePhoto.src && p.id !== basePhoto.id)
+        .map((p: any) => ({ ...p, isNsfw: isNsfwQuery || checkNsfw(p.title || "") }));
+
       setRelatedPhotos(prev => {
         const combined = reset ? fetched : [...prev, ...fetched];
         const map = new Map();
-        combined.forEach(p => map.set(p.src, p)); 
+        combined.forEach(p => map.set(p.src, p));
         return Array.from(map.values());
       });
       setRelatedHasMore(fetched.length > 0);
@@ -187,7 +197,7 @@ export default function Home() {
   }, [searchQuery]);
 
   useEffect(() => {
-    setPage(1); setHasMore(true); setPhotos([]); 
+    setPage(1); setHasMore(true); setPhotos([]);
     fetchPhotos(searchQuery, 1, true);
   }, [searchQuery, fetchPhotos]);
 
@@ -250,13 +260,11 @@ export default function Home() {
 
   function clearSearch() { setSearch(""); setSearchQuery("Aesthetic"); setIsMobileSearchOpen(false); closeAllPanels(); }
 
-  // Обновленный обработчик ручного AI-поиска
   function handleAIGenerate() {
     if (!aiPrompt.trim()) return;
     setShowAIModal(false); showToast("✨ Synthesizing vibe...");
     setTimeout(() => {
       let query = aiPrompt.trim();
-      // Защита: не добавляем английский мусор, если юзер пишет на русском
       if (!/[а-яА-ЯёЁ]/.test(query) && !query.toLowerCase().includes('aesthetic')) {
          query += " aesthetic";
       }
@@ -292,9 +300,9 @@ export default function Home() {
   async function createBoard() {
     if (!newBoardName || !user) return;
     try {
-      const res = await fetch("/api/boards", { 
-        method: "POST", headers: { "Content-Type": "application/json" }, 
-        body: JSON.stringify({ user_id: user.id, name: newBoardName, description: newBoardDesc }) 
+      const res = await fetch("/api/boards", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: user.id, name: newBoardName, description: newBoardDesc })
       });
       if (res.ok) {
         const data = await res.json();
@@ -307,10 +315,10 @@ export default function Home() {
   async function updateBoard() {
     if (!editBoard) return;
     try {
-      const res = await fetch("/api/boards", { 
-        method: "PUT", 
-        headers: { "Content-Type": "application/json" }, 
-        body: JSON.stringify({ id: editBoard.id, name: editBoard.name, description: editBoard.description }) 
+      const res = await fetch("/api/boards", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: editBoard.id, name: editBoard.name, description: editBoard.description })
       });
       if (res.ok) {
         const data = await res.json();
@@ -338,10 +346,8 @@ export default function Home() {
     setShowShare(null);
   }
 
-  async function signOut() { await supabase.auth.signOut(); setPins([]); setBoards([]); closeAllPanels(); }
-
   const displayPhotos = showSaved
-    ? pins.map(p => ({ id: p.id, src: p.image_url, thumb: p.image_url, title: p.title || "", link: p.source_url || "" }))
+    ? pins.map(p => ({ id: p.id, src: p.image_url, thumb: p.image_url, title: p.title || "", link: p.source_url || "", isNsfw: checkNsfw(p.title || "") }))
     : photos;
 
   const userAvatar = user?.user_metadata?.avatar_url || "";
@@ -387,7 +393,7 @@ export default function Home() {
           .search-form { flex: none; }
           .search-wrap { width: 38px; height: 38px; flex: none; border-radius: 50%; background: transparent; border: none; cursor: pointer; }
           .search-input { display: none; }
-          .search-btn { width: 38px; height: 38px; border-radius: 50%; pointer-events: none; } 
+          .search-btn { width: 38px; height: 38px; border-radius: 50%; pointer-events: none; }
           .search-form.mobile-active { position: absolute; left: 16px; right: 16px; top: 10px; z-index: 200; flex: 1; }
           .search-form.mobile-active .search-wrap { width: 100%; height: 42px; border-radius: 24px; background: #0d0a06; border: 1px solid #c0521a; flex: 1; display: flex; cursor: text; box-shadow: 0 10px 30px rgba(0,0,0,0.9); }
           .search-form.mobile-active .search-input { display: block; flex: 1; }
@@ -411,15 +417,13 @@ export default function Home() {
 
         .burger-overlay { position: fixed; inset: 0; z-index: 150; background: rgba(0,0,0,0.7); animation: fadeIn 0.2s ease; }
         .burger-panel { position: fixed; top: 0; left: 0; bottom: 0; width: min(300px, 85vw); z-index: 151; background: #0d0a06; border-right: 1px solid #2a1f0e; display: flex; flex-direction: column; animation: slideRight 0.25s ease; overflow-y: auto; }
-        
+
         @keyframes slideRight { from { transform: translateX(-100%); } to { transform: translateX(0); } }
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
         @keyframes slideUp { from { transform: translateY(16px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
-        
-        /* ПЛАВНАЯ АНИМАЦИЯ ПОЯВЛЕНИЯ МОДАЛКИ С ОРАНЖЕВЫМ СВЕЧЕНИЕМ */
-        @keyframes modalGlowUp { 
-          0% { opacity: 0; transform: translateY(30px) scale(0.98); box-shadow: 0 0 0 rgba(192,82,26,0); } 
-          100% { opacity: 1; transform: translateY(0) scale(1); box-shadow: 0 20px 80px rgba(192,82,26,0.15); } 
+        @keyframes modalGlowUp {
+          0% { opacity: 0; transform: translateY(30px) scale(0.98); box-shadow: 0 0 0 rgba(192,82,26,0); }
+          100% { opacity: 1; transform: translateY(0) scale(1); box-shadow: 0 20px 80px rgba(192,82,26,0.15); }
         }
 
         .burger-header { padding: 20px 20px 16px; border-bottom: 1px solid #2a1f0e; display: flex; align-items: center; justify-content: space-between; }
@@ -438,15 +442,17 @@ export default function Home() {
         @media (min-width: 1280px) { .masonry { columns: 6; } }
 
         .card { break-inside: avoid; margin-bottom: 8px; border-radius: 12px; overflow: hidden; background: #1a1208; position: relative; cursor: zoom-in; }
-        .card img { width: 100%; display: block; height: auto; transition: filter 0.2s; }
+        .card img { width: 100%; display: block; height: auto; transition: filter 0.2s, transform 0.2s; }
         .card:hover img { filter: brightness(0.85); }
         .overlay { opacity: 0; position: absolute; inset: 0; transition: opacity 0.2s ease; display: flex; flex-direction: column; justify-content: space-between; padding: 12px; }
         .card:hover .overlay { opacity: 1; }
-        
+
+        .nsfw-badge { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(13,10,6,0.75); border: 1px solid #c0521a; color: #c0521a; font-family: 'Cinzel', serif; font-weight: 700; font-size: 14px; padding: 8px 16px; border-radius: 20px; backdrop-filter: blur(8px); pointer-events: none; letter-spacing: 2px; }
+
         .save-btn { background: #c0521a; color: #0d0a06; border: none; border-radius: 20px; padding: 10px 18px; cursor: pointer; font-weight: 700; font-size: 13px; transition: all 0.15s; }
         .save-btn:hover { background: #d4621a; transform: scale(1.05); }
         .save-btn.pinned { background: rgba(13,10,6,0.8); color: #fff; border: 1px solid #4a3520; }
-        
+
         .card-action-btn { background: rgba(13,10,6,0.8); border: none; border-radius: 50%; width: 34px; height: 34px; display: flex; align-items: center; justify-content: center; cursor: pointer; color: #fff; transition: all 0.2s; backdrop-filter: blur(4px); }
         .card-action-btn:hover { background: #c0521a; color: #0d0a06; transform: scale(1.1); }
 
@@ -460,16 +466,15 @@ export default function Home() {
         .board-edit-btn { border: 1px solid #2a1f0e; color: #8a6a4a; } .board-edit-btn:hover { border-color: #c0521a; color: #c0521a; }
         .board-del-btn { border: 1px solid #3a1a1a; color: #e53e3e; } .board-del-btn:hover { background: rgba(229,62,62,0.1); }
 
-        /* BACKDROP ДЛЯ МОДАЛКИ (ТЕМНО-КОРИЧНЕВЫЙ) */
         .modal-backdrop { position: fixed; inset: 0; z-index: 200; background: rgba(13,10,6,0.9); display: flex; align-items: center; justify-content: center; padding: 16px; animation: fadeIn 0.4s ease; backdrop-filter: blur(5px); }
         .modal-box { background: #0d0a06; border: 1px solid #2a1f0e; border-radius: 16px; width: 100%; max-width: 1000px; max-height: 90vh; overflow-y: auto; animation: modalGlowUp 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) forwards; display: flex; flex-direction: column; scroll-behavior: smooth; }
-        
+
         .modal-top { display: flex; flex-direction: column; }
         @media (min-width: 768px) { .modal-top { flex-direction: row; } }
-        
+
         .modal-img-wrap { flex: 1.5; background: #1a1208; display: flex; align-items: center; justify-content: center; padding: 20px; }
         .modal-img { width: 100%; max-height: 70vh; object-fit: contain; display: block; border-radius: 8px; }
-        
+
         .modal-info { flex: 1; padding: 32px; display: flex; flex-direction: column; background: #0d0a06; }
 
         .modal-bottom { padding: 32px; border-top: 1px solid #1a1208; background: #0d0a06; }
@@ -480,7 +485,7 @@ export default function Home() {
         .primary-btn { background: #c0521a; color: #0d0a06; border: none; border-radius: 24px; padding: 14px 24px; cursor: pointer; font-weight: 700; font-size: 14px; width: 100%; transition: background 0.2s; }
         .primary-btn:hover { background: #d4621a; }
         .primary-btn.pinned-state { background: #1a1208; color: #c0521a; border: 1px solid #c0521a; }
-        
+
         .ghost-btn, .outline-btn, .danger-btn { border-radius: 20px; padding: 12px 24px; cursor: pointer; font-weight: 600; font-size: 14px; transition: all 0.2s; background: transparent; }
         .ghost-btn { color: #8a6a4a; border: 1px solid #2a1f0e; } .ghost-btn:hover { border-color: #4a3520; color: #d4b896; }
         .outline-btn { color: #c0521a; border: 1px solid #c0521a; width: 100%; } .outline-btn:hover { background: rgba(192,82,26,0.1); }
@@ -488,23 +493,22 @@ export default function Home() {
 
         .field { width: 100%; padding: 12px 16px; border-radius: 12px; border: 1px solid #2a1f0e; background: #1a1208; color: #d4b896; font-size: 14px; outline: none; transition: border-color 0.2s; }
         .field:focus { border-color: #c0521a; }
-        
+
         .spinner { width: 28px; height: 28px; border: 2px solid #2a1f0e; border-top-color: #c0521a; border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto; }
         @keyframes spin { to { transform: rotate(360deg); } }
 
-        /* АНИМАЦИЯ "НЕЙРОСЕТЬ ДУМАЕТ" */
         .ai-pulse { width: 40px; height: 40px; border-radius: 50%; background: radial-gradient(circle, #c0521a 0%, transparent 70%); animation: pulseGlow 1.5s infinite alternate; margin: 0 auto 12px; }
-        @keyframes pulseGlow { 
-          0% { transform: scale(0.8); opacity: 0.5; box-shadow: 0 0 10px #c0521a; } 
-          100% { transform: scale(1.5); opacity: 1; box-shadow: 0 0 30px #c0521a, 0 0 60px #d4b896; } 
+        @keyframes pulseGlow {
+          0% { transform: scale(0.8); opacity: 0.5; box-shadow: 0 0 10px #c0521a; }
+          100% { transform: scale(1.5); opacity: 1; box-shadow: 0 0 30px #c0521a, 0 0 60px #d4b896; }
         }
         .ai-text { font-family: 'Cinzel', serif; color: #d4b896; font-size: 11px; letter-spacing: 4px; text-transform: uppercase; animation: flashText 1.5s infinite; }
         @keyframes flashText { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
-        
+
         .empty { text-align: center; padding: 100px 20px; color: #4a3520; font-size: 16px; font-family: 'Crimson Text', serif; font-style: italic; }
         .modal-close { background: none; border: none; color: #4a3520; cursor: pointer; font-size: 20px; width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; }
         .modal-close:hover { background: #1a1208; color: #c0521a; }
-        
+
         .toast-container { position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); background: #c0521a; color: #0d0a06; padding: 12px 24px; border-radius: 24px; font-size: 14px; font-weight: 700; z-index: 9999; animation: slideUp 0.3s ease; box-shadow: 0 10px 30px rgba(192,82,26,0.3); }
       `}</style>
 
@@ -517,20 +521,10 @@ export default function Home() {
           <span className="logo" onClick={clearSearch}>GELBET</span>
 
           <form className={`search-form ${isMobileSearchOpen ? 'mobile-active' : ''}`} onSubmit={handleSearch}>
-            <div 
-              className="search-wrap" 
-              onClick={() => {
-                if (!isMobileSearchOpen) {
-                  setIsMobileSearchOpen(true);
-                  setTimeout(() => searchInputRef.current?.focus(), 50);
-                }
-              }}
-            >
+            <div className="search-wrap" onClick={() => { if (!isMobileSearchOpen) { setIsMobileSearchOpen(true); setTimeout(() => searchInputRef.current?.focus(), 50); } }}>
               <input ref={searchInputRef} className="search-input" placeholder="Search visual aesthetics..." value={search} onChange={e => setSearch(e.target.value)} onBlur={() => { if(!search) setIsMobileSearchOpen(false) }} />
               {search && isMobileSearchOpen && <button type="button" onClick={() => { setSearch(""); setIsMobileSearchOpen(false); }} className="search-btn" style={{ fontSize: 16 }}>✕</button>}
-              <button type="submit" className="search-btn">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-              </button>
+              <button type="submit" className="search-btn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></button>
             </div>
           </form>
 
@@ -560,9 +554,7 @@ export default function Home() {
           <div className="tags-bar">
             <span style={{color: "#4a3520", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, paddingRight: 8}}>History</span>
             {userTags.map(tag => (
-              <button key={tag} className={`tag-pill ${searchQuery === tag ? "active" : ""}`} onClick={() => handleTagClick(tag)}>
-                {tag.length > 35 ? tag.substring(0, 35) + "..." : tag}
-              </button>
+              <button key={tag} className={`tag-pill ${searchQuery === tag ? "active" : ""}`} onClick={() => handleTagClick(tag)}>{tag.length > 35 ? tag.substring(0, 35) + "..." : tag}</button>
             ))}
           </div>
         )}
@@ -580,27 +572,24 @@ export default function Home() {
               <h2 style={{ fontSize: 18, fontWeight: 700, color: "#d4b896", fontFamily: "Cinzel, serif", letterSpacing: 2 }}>MY BOARDS</h2>
               <button className="primary-btn" style={{ width: "auto", padding: "10px 20px" }} onClick={() => setShowNewBoard(true)}>+ New Board</button>
             </div>
-            {boards.length === 0
-              ? <div className="empty">No boards yet. Create your first collection.</div>
-              : <div className="boards-grid">
-                  {boards.map(board => (
-                    <div key={board.id} className="board-card">
-                      <div className="board-cover">
-                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#c0521a" strokeWidth="1.5"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
-                      </div>
-                      <div className="board-info">
-                        <div style={{ fontSize: 14, fontWeight: 600, color: "#d4b896" }}>{board.name}</div>
-                        {board.description && <div style={{ fontSize: 11, color: "#4a3520", marginTop: 4, fontStyle: "italic" }}>{board.description}</div>}
-                        <div style={{ fontSize: 11, color: "#8a6a4a", marginTop: 8 }}>{pins.filter(p => p.board_id === board.id).length} pins</div>
-                        <div className="board-actions">
-                          <button className="board-edit-btn" onClick={() => setEditBoard(board)}>Edit</button>
-                          <button className="board-del-btn" onClick={() => deleteBoard(board.id)}>Delete</button>
-                        </div>
+            {boards.length === 0 ? <div className="empty">No boards yet. Create your first collection.</div> : (
+              <div className="boards-grid">
+                {boards.map(board => (
+                  <div key={board.id} className="board-card">
+                    <div className="board-cover"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#c0521a" strokeWidth="1.5"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg></div>
+                    <div className="board-info">
+                      <div style={{ fontSize: 14, fontWeight: 600, color: "#d4b896" }}>{board.name}</div>
+                      {board.description && <div style={{ fontSize: 11, color: "#4a3520", marginTop: 4, fontStyle: "italic" }}>{board.description}</div>}
+                      <div style={{ fontSize: 11, color: "#8a6a4a", marginTop: 8 }}>{pins.filter(p => p.board_id === board.id).length} pins</div>
+                      <div className="board-actions">
+                        <button className="board-edit-btn" onClick={() => setEditBoard(board)}>Edit</button>
+                        <button className="board-del-btn" onClick={() => deleteBoard(board.id)}>Delete</button>
                       </div>
                     </div>
-                  ))}
-                </div>
-            }
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
@@ -609,22 +598,17 @@ export default function Home() {
             <div className="grid-wrap">
               <div className="masonry">
                 {displayPhotos.map((photo, i) => (
-                  <div key={`${photo.id}-${i}`} className="card" onClick={() => setSelected(photo)}>
-                    <img src={photo.src} alt="" loading="lazy" onError={e => { const p = (e.currentTarget as HTMLImageElement).parentElement; if (p) p.style.display = "none"; }} />
-                    <div className="overlay">
-                      <div style={{ display: "flex", justifyContent: "flex-end" }}>
-                        <button className={`save-btn ${isPinned(photo) ? "pinned" : ""}`} onClick={e => { e.stopPropagation(); isPinned(photo) ? null : setShowSaveToBoard(photo); }}>
-                          {isPinned(photo) ? "Saved" : "Save"}
-                        </button>
-                      </div>
-                      <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "auto", gap: 8 }}>
-                        <button className="card-action-btn" onClick={e => { e.stopPropagation(); setShowShare(photo); }} title="Share">
-                          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
-                        </button>
-                        {showSaved && <button className="card-action-btn" style={{ background: "rgba(229,62,62,0.8)" }} onClick={e => { e.stopPropagation(); deletePin(photo.id); }}>✕</button>}
-                      </div>
-                    </div>
-                  </div>
+                  <PinCard 
+                    key={`${photo.id}-${i}`}
+                    photo={photo}
+                    nsfwAllowed={nsfwAllowed}
+                    isPinned={isPinned(photo)}
+                    showSaved={showSaved}
+                    onClick={() => { const isBlurred = photo.isNsfw && !nsfwAllowed; if (isBlurred) setShowAgeGate(true); else setSelected(photo); }}
+                    onSaveClick={(e: any) => { e.stopPropagation(); if (!isPinned(photo)) setShowSaveToBoard(photo); }}
+                    onShareClick={(e: any) => { e.stopPropagation(); setShowShare(photo); }}
+                    onRemoveClick={(e: any) => { e.stopPropagation(); deletePin(photo.id); }}
+                  />
                 ))}
               </div>
             </div>
@@ -637,37 +621,21 @@ export default function Home() {
           <>
             <div className="burger-overlay" onClick={closeAllPanels} />
             <div className="burger-panel">
-              <div className="burger-header">
-                <span className="burger-logo">GELBET</span>
-                <button className="burger-close" onClick={closeAllPanels}>✕</button>
-              </div>
+              <div className="burger-header"><span className="burger-logo">GELBET</span><button className="burger-close" onClick={closeAllPanels}>✕</button></div>
               {user && (
                 <div style={{ padding: "20px 16px", borderBottom: "1px solid #1a1208", display: "flex", alignItems: "center", gap: 14 }}>
                   {userAvatar ? <img src={userAvatar} className="avatar" style={{ width: 40, height: 40 }} alt="" /> : <div className="avatar-placeholder" style={{ width: 40, height: 40, fontSize: 16 }}>{(userName[0] || "U").toUpperCase()}</div>}
-                  <div>
-                    <div style={{ fontWeight: 600, fontSize: 14, color: "#d4b896" }}>{userName}</div>
-                    <a href="/profile" style={{ color: "#8a6a4a", fontSize: 12, textDecoration: "none" }}>Edit profile</a>
-                  </div>
+                  <div><div style={{ fontWeight: 600, fontSize: 14, color: "#d4b896" }}>{userName}</div><a href="/profile" style={{ color: "#8a6a4a", fontSize: 12, textDecoration: "none" }}>Edit profile</a></div>
                 </div>
               )}
-              
               <div style={{ padding: "0 16px", fontSize: 10, color: "#4a3520", textTransform: "uppercase", letterSpacing: 2, marginTop: 24, marginBottom: 12 }}>Explore Vibes</div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 8, padding: "0 16px 16px" }}>
-                {defaultTags.map(tag => (
-                  <button key={tag} className="tag-pill" onClick={() => handleTagClick(tag)}>{tag}</button>
-                ))}
+                {defaultTags.map(tag => <button key={tag} className="tag-pill" onClick={() => handleTagClick(tag)}>{tag}</button>)}
               </div>
               <div style={{ height: 1, background: "#1a1208", margin: "10px 0" }} />
-
               <div style={{ padding: "10px 0" }}>
-                <button className="burger-action" onClick={() => { setShowBoards(true); setShowMenu(false); }}>
-                  <span className="burger-action-icon" style={{ color: "#c0521a" }}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg></span>
-                  <span>My Boards</span>
-                </button>
-                <button className="burger-action" onClick={() => { setShowSaved(true); setShowMenu(false); }}>
-                  <span className="burger-action-icon" style={{ color: "#c0521a" }}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg></span>
-                  <span>Saved Pins</span>
-                </button>
+                <button className="burger-action" onClick={() => { setShowBoards(true); setShowMenu(false); }}><span className="burger-action-icon" style={{ color: "#c0521a" }}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg></span><span>My Boards</span></button>
+                <button className="burger-action" onClick={() => { setShowSaved(true); setShowMenu(false); }}><span className="burger-action-icon" style={{ color: "#c0521a" }}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg></span><span>Saved Pins</span></button>
               </div>
             </div>
           </>
@@ -680,25 +648,12 @@ export default function Home() {
                 <h2 style={{ fontSize: 16, fontWeight: 700, color: "#c0521a", fontFamily: "Cinzel, serif", letterSpacing: 2 }}>AI VIBE ASSISTANT</h2>
                 <button className="modal-close" onClick={() => setShowAIModal(false)}>✕</button>
               </div>
-              <p style={{ color: "#8a6a4a", fontSize: 13, lineHeight: 1.5 }}>
-                Describe the mood, era, or aesthetic you are looking for. AI will refine your input to craft the perfect visual search query.
-              </p>
-              
-              <textarea 
-                className="field" 
-                placeholder="e.g. A rainy day in a cyberpunk city but with warm neon colors..." 
-                value={aiPrompt} 
-                onChange={e => setAiPrompt(e.target.value)}
-                style={{ height: 100, resize: "none" }}
-              />
-
+              <p style={{ color: "#8a6a4a", fontSize: 13, lineHeight: 1.5 }}>Describe the mood, era, or aesthetic you are looking for. AI will refine your input to craft the perfect visual search query.</p>
+              <textarea className="field" placeholder="e.g. A rainy day in a cyberpunk city but with warm neon colors..." value={aiPrompt} onChange={e => setAiPrompt(e.target.value)} style={{ height: 100, resize: "none" }} />
               <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 4 }}>
                 <span style={{color: "#4a3520", fontSize: 11, fontWeight: 700, textTransform: "uppercase", width: "100%", letterSpacing: 1}}>Or try suggestions:</span>
-                {aiVibes.map(vibe => (
-                  <button key={vibe} onClick={() => setAiPrompt(vibe)} className="tag-pill" style={{fontSize: 11, padding: "4px 10px"}}>{vibe}</button>
-                ))}
+                {aiVibes.map(vibe => <button key={vibe} onClick={() => setAiPrompt(vibe)} className="tag-pill" style={{fontSize: 11, padding: "4px 10px"}}>{vibe}</button>)}
               </div>
-
               <div style={{ display: "flex", gap: 12, marginTop: 10 }}>
                 <button className="ghost-btn" onClick={() => setShowAIModal(false)}>Cancel</button>
                 <button className="primary-btn" style={{ flex: 1, opacity: !aiPrompt.trim() ? 0.4 : 1 }} onClick={handleAIGenerate}>Generate Vibe</button>
@@ -707,23 +662,23 @@ export default function Home() {
           </div>
         )}
 
+        {showAgeGate && (
+          <AgeGateModal 
+            onCancel={() => setShowAgeGate(false)} 
+            onConfirm={() => { setNsfwAllowed(true); localStorage.setItem("gelbet_nsfw_18plus", "true"); setShowAgeGate(false); showToast("Content unlocked"); }} 
+          />
+        )}
+
         {selected && (
           <div className="modal-backdrop" onClick={() => setSelected(null)}>
             <div className="modal-box" onClick={e => e.stopPropagation()}>
-              
               <div className="modal-top">
-                <div className="modal-img-wrap">
-                  <img src={selected.src} alt="" className="modal-img" />
-                </div>
-                
+                <div className="modal-img-wrap"><img src={selected.src} alt="" className="modal-img" /></div>
                 <div className="modal-info">
                   <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 24 }}>
-                    <button className="hbtn" style={{ background: "#1a1208" }} onClick={() => setShowShare(selected)} title="Share">
-                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
-                    </button>
+                    <button className="hbtn" style={{ background: "#1a1208" }} onClick={() => setShowShare(selected)} title="Share"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg></button>
                     <button className="modal-close" onClick={() => setSelected(null)}>✕</button>
                   </div>
-
                   <div style={{ display: "flex", flexDirection: "column", gap: 12, flexShrink: 0 }}>
                     <button className={`primary-btn ${isPinned(selected) ? "pinned-state" : ""}`} onClick={() => isPinned(selected) ? null : setShowSaveToBoard(selected)}>
                       {isPinned(selected) ? "Already saved" : "Save to Board"}
@@ -732,8 +687,6 @@ export default function Home() {
                   </div>
                 </div>
               </div>
-
-              {/* БЕСКОНЕЧНАЯ ЛЕНТА ИИ-ПОХОЖИХ КАРТИНОК */}
               <div className="modal-bottom">
                 <h3 style={{ fontSize: 13, fontWeight: 700, color: "#d4b896", textTransform: "uppercase", letterSpacing: 2, marginBottom: 24, display: "flex", alignItems: "center", gap: 10 }}>
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#c0521a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3l1.912 5.813a2 2 0 001.275 1.275L21 12l-5.813 1.912a2 2 0 00-1.275 1.275L12 21l-1.912-5.813a2 2 0 00-1.275-1.275L3 12l5.813-1.912a2 2 0 001.275-1.275L12 3z"/></svg>
@@ -741,23 +694,21 @@ export default function Home() {
                 </h3>
                 <div className="related-masonry">
                   {relatedPhotos.map((photo, i) => (
-                    <div key={`related-${photo.id}-${i}`} style={{ breakInside: "avoid", marginBottom: 12, cursor: "pointer", borderRadius: 12, overflow: "hidden", border: "1px solid #1a1208" }} 
-                         onClick={() => { document.querySelector('.modal-box')?.scrollTo({top: 0, behavior: 'smooth'}); setSelected(photo); }}>
-                      <img src={photo.thumb || photo.src} style={{ width: "100%", display: "block", transition: "filter 0.3s" }} onMouseOver={e => (e.currentTarget.style.filter = "brightness(0.7)")} onMouseOut={e => (e.currentTarget.style.filter = "brightness(1)")} alt="" />
-                    </div>
+                    <PinCard 
+                      key={`related-${photo.id}-${i}`}
+                      photo={photo}
+                      nsfwAllowed={nsfwAllowed}
+                      isPinned={isPinned(photo)}
+                      onClick={() => { const isBlurred = photo.isNsfw && !nsfwAllowed; if (isBlurred) setShowAgeGate(true); else { document.querySelector('.modal-box')?.scrollTo({top: 0, behavior: 'smooth'}); setSelected(photo); } }}
+                      onSaveClick={(e: any) => { e.stopPropagation(); if (!isPinned(photo)) setShowSaveToBoard(photo); }}
+                      onShareClick={(e: any) => { e.stopPropagation(); setShowShare(photo); }}
+                    />
                   ))}
                 </div>
-                
                 <div ref={modalBottomRef} style={{ padding: "60px 0", textAlign: "center" }}>
-                  {relatedLoading && (
-                    <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
-                      <div className="ai-pulse" />
-                      <span className="ai-text">Neural Net is extracting vibes...</span>
-                    </div>
-                  )}
+                  {relatedLoading && <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}><div className="ai-pulse" /><span className="ai-text">Neural Net is extracting vibes...</span></div>}
                 </div>
               </div>
-
             </div>
           </div>
         )}
@@ -765,15 +716,9 @@ export default function Home() {
         {showSaveToBoard && (
           <div className="modal-backdrop" onClick={() => setShowSaveToBoard(null)}>
             <div onClick={e => e.stopPropagation()} style={{ background: "#0d0a06", border: "1px solid #2a1f0e", borderRadius: 16, padding: 32, maxWidth: 400, width: "100%", display: "flex", flexDirection: "column", gap: 16 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <h2 style={{ fontSize: 16, fontWeight: 700, color: "#d4b896", fontFamily: "Cinzel, serif", letterSpacing: 2 }}>SAVE TO BOARD</h2>
-                <button className="modal-close" onClick={() => setShowSaveToBoard(null)}>✕</button>
-              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}><h2 style={{ fontSize: 16, fontWeight: 700, color: "#d4b896", fontFamily: "Cinzel, serif", letterSpacing: 2 }}>SAVE TO BOARD</h2><button className="modal-close" onClick={() => setShowSaveToBoard(null)}>✕</button></div>
               <button className="primary-btn" onClick={() => savePin(showSaveToBoard)}>Save directly</button>
-              {boards.length > 0 && <>
-                <div style={{ height: 1, background: "#1a1208", margin: "10px 0" }} />
-                {boards.map(board => <button key={board.id} className="outline-btn" onClick={() => savePin(showSaveToBoard, board.id)}>{board.name}</button>)}
-              </>}
+              {boards.length > 0 && <><div style={{ height: 1, background: "#1a1208", margin: "10px 0" }} />{boards.map(board => <button key={board.id} className="outline-btn" onClick={() => savePin(showSaveToBoard, board.id)}>{board.name}</button>)}</>}
               <button className="ghost-btn" style={{ marginTop: 10 }} onClick={() => { setShowNewBoard(true); setShowSaveToBoard(null); }}>+ Create new board</button>
             </div>
           </div>
@@ -785,10 +730,7 @@ export default function Home() {
               <h2 style={{ fontSize: 16, fontWeight: 700, color: "#d4b896", fontFamily: "Cinzel, serif", letterSpacing: 2 }}>NEW BOARD</h2>
               <input className="field" placeholder="Board name" value={newBoardName} onChange={e => setNewBoardName(e.target.value)} />
               <input className="field" placeholder="Description (optional)" value={newBoardDesc} onChange={e => setNewBoardDesc(e.target.value)} />
-              <div style={{ display: "flex", gap: 12, marginTop: 10 }}>
-                <button className="ghost-btn" onClick={() => setShowNewBoard(false)}>Cancel</button>
-                <button className="primary-btn" style={{ flex: 1, opacity: !newBoardName ? 0.4 : 1 }} onClick={createBoard}>Create</button>
-              </div>
+              <div style={{ display: "flex", gap: 12, marginTop: 10 }}><button className="ghost-btn" onClick={() => setShowNewBoard(false)}>Cancel</button><button className="primary-btn" style={{ flex: 1, opacity: !newBoardName ? 0.4 : 1 }} onClick={createBoard}>Create</button></div>
             </div>
           </div>
         )}
@@ -796,10 +738,7 @@ export default function Home() {
         {showShare && (
           <div className="modal-backdrop" onClick={() => setShowShare(null)}>
             <div onClick={e => e.stopPropagation()} style={{ background: "#0d0a06", border: "1px solid #2a1f0e", borderRadius: 16, padding: 32, maxWidth: 360, width: "100%", display: "flex", flexDirection: "column", gap: 16 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <h2 style={{ fontSize: 16, fontWeight: 700, color: "#d4b896", fontFamily: "Cinzel, serif", letterSpacing: 2 }}>SHARE</h2>
-                <button className="modal-close" onClick={() => setShowShare(null)}>✕</button>
-              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}><h2 style={{ fontSize: 16, fontWeight: 700, color: "#d4b896", fontFamily: "Cinzel, serif", letterSpacing: 2 }}>SHARE</h2><button className="modal-close" onClick={() => setShowShare(null)}>✕</button></div>
               <img src={showShare.src} style={{ width: "100%", borderRadius: 12, maxHeight: 200, objectFit: "cover" }} alt="" />
               <button className="primary-btn" onClick={() => sharePhoto(showShare)}>Copy link</button>
             </div>
@@ -812,10 +751,7 @@ export default function Home() {
               <h2 style={{ fontSize: 16, fontWeight: 700, color: "#d4b896", fontFamily: "Cinzel, serif", letterSpacing: 2 }}>EDIT BOARD</h2>
               <input className="field" placeholder="Board name" value={editBoard.name} onChange={e => setEditBoard({ ...editBoard, name: e.target.value })} />
               <input className="field" placeholder="Description" value={editBoard.description || ""} onChange={e => setEditBoard({ ...editBoard, description: e.target.value })} />
-              <div style={{ display: "flex", gap: 12, marginTop: 10 }}>
-                <button className="ghost-btn" onClick={() => setEditBoard(null)}>Cancel</button>
-                <button className="primary-btn" style={{ flex: 1 }} onClick={updateBoard}>Save</button>
-              </div>
+              <div style={{ display: "flex", gap: 12, marginTop: 10 }}><button className="ghost-btn" onClick={() => setEditBoard(null)}>Cancel</button><button className="primary-btn" style={{ flex: 1 }} onClick={updateBoard}>Save</button></div>
               <button className="danger-btn" style={{ marginTop: 10 }} onClick={() => { deleteBoard(editBoard.id); setEditBoard(null); }}>Delete board</button>
             </div>
           </div>

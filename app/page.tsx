@@ -47,6 +47,9 @@ export default function Home() {
   const [toastMsg, setToastMsg] = useState("");
   const [nsfwAllowed, setNsfwAllowed] = useState(false);
   const [showAgeGate, setShowAgeGate] = useState(false);
+  
+  // НОВОЕ: Состояние для отображения того, что именно увидел ИИ
+  const [activeVibe, setActiveVibe] = useState("");
 
   const observerRef = useRef<IntersectionObserver | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -102,33 +105,45 @@ export default function Home() {
 
   const fetchRelatedPhotos = useCallback(async (basePhoto: Photo, pageNum: number, reset: boolean) => {
     setRelatedLoading(true);
-    if (reset) { if (relatedAbortRef.current) relatedAbortRef.current.abort(); relatedAbortRef.current = new AbortController(); currentRelatedQueryRef.current = ""; }
+    if (reset) { 
+      if (relatedAbortRef.current) relatedAbortRef.current.abort(); 
+      relatedAbortRef.current = new AbortController(); 
+      currentRelatedQueryRef.current = ""; 
+      setActiveVibe("Neural net is extracting aesthetic...");
+    }
     
     try {
       let aiQuery = currentRelatedQueryRef.current;
       
       if (reset && !aiQuery) {
         try {
+          // УДАР 1: Пытаемся проанализировать картинку
           const aiRes = await fetch("/api/ai", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "analyze_image", payload: basePhoto.src }) });
+          
           if (aiRes.ok) {
             const aiData = await aiRes.json();
             if (aiData.result) aiQuery = aiData.result;
           } else {
-             showToast("AI Vision failed (Network blocked). Using fallback.");
+             // УДАР 2: Если картинку не дали скачать, анализируем её название через ИИ!
+             const textRes = await fetch("/api/ai", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "enhance_prompt", payload: basePhoto.title || "dark cinematic aesthetic" }) });
+             if (textRes.ok) {
+                const textData = await textRes.json();
+                if (textData.result) aiQuery = textData.result;
+             }
           }
-        } catch (err) { console.error(err); showToast("AI Engine unreachable."); }
+        } catch (err) { 
+           console.error("AI Pipeline failed", err); 
+        }
 
-        if (!aiQuery) {
-          const stopWords = new Set(["photo", "image", "picture", "wallpaper", "background", "free", "download", "high", "resolution", "by", "of", "the", "in", "on", "a", "and", "is", "with", "for", "hd", "4k", "stock", "quality", "cinematic", "aesthetic", "из", "и", "в", "на", "под", "с", "как", "это", "что", "фото", "картинка", "обои", "эстетика", "для"]);
-          const rawWords = (basePhoto.title || "").toLowerCase().replace(/[^a-zа-яё0-9\s]/g, "").split(/\s+/);
-          const keywords = Array.from(new Set(rawWords.filter(w => w.length > 2 && !stopWords.has(w)))).slice(0, 3);
-          
-          if (keywords.length > 0) aiQuery = keywords.join(" ") + " aesthetic";
-          else aiQuery = "dark cinematic aesthetic"; // Бронебойный запасной вариант вместо "Настроение mood"
+        // ПОСЛЕДНИЙ РУБЕЖ (Абсолютно безопасный визуал, никакого "Настроения")
+        if (!aiQuery || aiQuery.length < 3) {
+           aiQuery = "dark cinematic moody aesthetic";
         }
         
-        aiQuery = aiQuery.replace(/\s+/g, ' ').trim();
+        // Очищаем запрос от грязи перед отправкой в поиск
+        aiQuery = aiQuery.replace(/[^a-zA-Z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
         currentRelatedQueryRef.current = aiQuery;
+        setActiveVibe(aiQuery);
       }
 
       const params = new URLSearchParams({ page: String(pageNum), query: aiQuery });
@@ -293,7 +308,15 @@ export default function Home() {
                 <div className="modal-info"><div style={{ display: "flex", justifyContent: "space-between", marginBottom: 24 }}><button className="hbtn" style={{ background: "#1a1208" }} onClick={() => setShowShare(selected)} title="Share"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg></button><button className="modal-close" onClick={() => setSelected(null)}>✕</button></div><div style={{ display: "flex", flexDirection: "column", gap: 12, flexShrink: 0 }}><button className={`primary-btn ${isPinned(selected) ? "pinned-state" : ""}`} onClick={() => isPinned(selected) ? null : setShowSaveToBoard(selected)}>{isPinned(selected) ? "Already saved" : "Save to Board"}</button>{selected.link && <a href={selected.link} target="_blank" rel="noopener noreferrer"><button className="outline-btn">View Original ↗</button></a>}</div></div>
               </div>
               <div className="modal-bottom">
-                <h3 style={{ fontSize: 13, fontWeight: 700, color: "#d4b896", textTransform: "uppercase", letterSpacing: 2, marginBottom: 24, display: "flex", alignItems: "center", gap: 10 }}>AI Curated Matches</h3>
+                <h3 style={{ fontSize: 13, fontWeight: 700, color: "#d4b896", textTransform: "uppercase", letterSpacing: 2, marginBottom: 4, display: "flex", alignItems: "center", gap: 10 }}>AI Curated Matches</h3>
+                
+                {/* ПРОЗРАЧНОСТЬ: Показываем, что именно сгенерировал ИИ */}
+                {activeVibe && (
+                   <div style={{ fontSize: 11, color: "#c0521a", marginBottom: 20, fontStyle: "italic", letterSpacing: 1 }}>
+                     Vibe detected: {activeVibe.toLowerCase()}
+                   </div>
+                )}
+
                 <div className="related-masonry">{relatedPhotos.map((photo, i) => (<PinCard key={`related-${photo.id}-${i}`} photo={photo} nsfwAllowed={nsfwAllowed} isPinned={isPinned(photo)} onClick={() => { const isBlurred = photo.isNsfw && !nsfwAllowed; if (isBlurred) setShowAgeGate(true); else { document.querySelector('.modal-box')?.scrollTo({top: 0, behavior: 'smooth'}); setSelected(photo); } }} onSaveClick={(e: any) => { e.stopPropagation(); if (!isPinned(photo)) setShowSaveToBoard(photo); }} onShareClick={(e: any) => { e.stopPropagation(); setShowShare(photo); }} />))}</div>
                 <div ref={modalBottomRef} style={{ padding: "60px 0", textAlign: "center" }}>{relatedLoading && <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}><div className="ai-pulse" /><span className="ai-text">Neural Net is extracting vibes...</span></div>}</div>
               </div>

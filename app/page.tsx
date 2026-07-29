@@ -7,7 +7,6 @@ import PinCard from "../components/PinCard";
 import AgeGateModal from "../components/AgeGateModal";
 
 const defaultTags = ["Aesthetic", "Dark Academia", "Cyberpunk", "Minimalism", "Architecture", "Street Photography", "Vintage", "Interior"];
-const aiVibes = ["Melancholic Soviet Post-Punk", "Ethereal Dreamcore", "Cinematic Neon Noir", "Liminal Poolrooms", "Gothic Renaissance", "Y2K Nostalgia Grunge"];
 
 type Photo = { id: string; src: string; thumb: string; title: string; link: string; isNsfw?: boolean };
 type Board = { id: string; name: string; description?: string };
@@ -47,8 +46,6 @@ export default function Home() {
   const [toastMsg, setToastMsg] = useState("");
   const [nsfwAllowed, setNsfwAllowed] = useState(false);
   const [showAgeGate, setShowAgeGate] = useState(false);
-  
-  // НОВОЕ: Состояние для отображения того, что именно увидел ИИ
   const [activeVibe, setActiveVibe] = useState("");
 
   const observerRef = useRef<IntersectionObserver | null>(null);
@@ -109,7 +106,7 @@ export default function Home() {
       if (relatedAbortRef.current) relatedAbortRef.current.abort(); 
       relatedAbortRef.current = new AbortController(); 
       currentRelatedQueryRef.current = ""; 
-      setActiveVibe("Neural net is extracting aesthetic...");
+      setActiveVibe("Scanning subject...");
     }
     
     try {
@@ -117,30 +114,21 @@ export default function Home() {
       
       if (reset && !aiQuery) {
         try {
-          // УДАР 1: Пытаемся проанализировать картинку
           const aiRes = await fetch("/api/ai", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "analyze_image", payload: basePhoto.src }) });
-          
           if (aiRes.ok) {
             const aiData = await aiRes.json();
             if (aiData.result) aiQuery = aiData.result;
-          } else {
-             // УДАР 2: Если картинку не дали скачать, анализируем её название через ИИ!
-             const textRes = await fetch("/api/ai", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "enhance_prompt", payload: basePhoto.title || "dark cinematic aesthetic" }) });
-             if (textRes.ok) {
-                const textData = await textRes.json();
-                if (textData.result) aiQuery = textData.result;
-             }
           }
-        } catch (err) { 
-           console.error("AI Pipeline failed", err); 
-        }
+        } catch (err) { console.error("Vision failed", err); }
 
-        // ПОСЛЕДНИЙ РУБЕЖ (Абсолютно безопасный визуал, никакого "Настроения")
+        // ЕСЛИ ИИ НЕ СПРАВИЛСЯ: Берем ключевые слова из оригинального названия картинки
         if (!aiQuery || aiQuery.length < 3) {
-           aiQuery = "dark cinematic moody aesthetic";
+           const stopWords = new Set(["photo", "image", "picture", "wallpaper", "background", "free", "download", "high", "resolution", "by", "of", "the", "in", "on", "a", "and", "is", "with", "for", "hd", "4k", "stock", "quality", "из", "и", "в", "на", "под", "с", "как", "это", "что", "фото", "картинка", "обои", "эстетика", "для"]);
+           const rawWords = (basePhoto.title || "").toLowerCase().replace(/[^a-zа-яё0-9\s]/g, "").split(/\s+/);
+           const keywords = Array.from(new Set(rawWords.filter(w => w.length > 2 && !stopWords.has(w)))).slice(0, 3);
+           aiQuery = keywords.length > 0 ? keywords.join(" ") : searchQuery.split(/\s+/)[0];
         }
         
-        // Очищаем запрос от грязи перед отправкой в поиск
         aiQuery = aiQuery.replace(/[^a-zA-Z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
         currentRelatedQueryRef.current = aiQuery;
         setActiveVibe(aiQuery);
@@ -156,7 +144,7 @@ export default function Home() {
       setRelatedPhotos(prev => { const combined = reset ? fetched : [...prev, ...fetched]; const map = new Map(); combined.forEach(p => map.set(p.src, p)); return Array.from(map.values()); });
       setRelatedHasMore(fetched.length > 0);
     } catch (e: any) { } finally { setRelatedLoading(false); }
-  }, []);
+  }, [searchQuery]);
 
   useEffect(() => { setPage(1); setHasMore(true); setPhotos([]); fetchPhotos(searchQuery, 1, true); }, [searchQuery, fetchPhotos]);
 
@@ -298,7 +286,12 @@ export default function Home() {
 
         {showAIModal && (<div className="modal-backdrop" onClick={() => setShowAIModal(false)}><div onClick={e => e.stopPropagation()} style={{ background: "#0d0a06", border: "1px solid #2a1f0e", borderRadius: 16, padding: 32, maxWidth: 440, width: "100%", display: "flex", flexDirection: "column", gap: 16, animation: "slideUp 0.3s ease" }}><div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}><h2 style={{ fontSize: 16, fontWeight: 700, color: "#c0521a", fontFamily: "Cinzel, serif", letterSpacing: 2 }}>AI VIBE ASSISTANT</h2><button className="modal-close" onClick={() => setShowAIModal(false)}>✕</button></div><textarea className="field" placeholder="e.g. A rainy day in a cyberpunk city but with warm neon colors..." value={aiPrompt} onChange={e => setAiPrompt(e.target.value)} style={{ height: 100, resize: "none" }} /><div style={{ display: "flex", gap: 12, marginTop: 10 }}><button className="ghost-btn" onClick={() => setShowAIModal(false)}>Cancel</button><button className="primary-btn" style={{ flex: 1, opacity: !aiPrompt.trim() ? 0.4 : 1 }} onClick={handleAIGenerate}>Generate Vibe</button></div></div></div>)}
 
-        {showAgeGate && (<AgeGateModal onCancel={() => setShowAgeGate(false)} onConfirm={() => { setNsfwAllowed(true); localStorage.setItem("gelbet_nsfw_18plus", "true"); setShowAgeGate(false); showToast("Content unlocked"); }} />)}
+        {/* СУПЕР ФИКС: Окно 18+ теперь всегда поверх ВСЕГО */}
+        {showAgeGate && (
+          <div style={{ position: "fixed", inset: 0, zIndex: 99999 }}>
+            <AgeGateModal onCancel={() => setShowAgeGate(false)} onConfirm={() => { setNsfwAllowed(true); localStorage.setItem("gelbet_nsfw_18plus", "true"); setShowAgeGate(false); showToast("Content unlocked"); }} />
+          </div>
+        )}
 
         {selected && (
           <div className="modal-backdrop" onClick={() => setSelected(null)}>
@@ -310,15 +303,14 @@ export default function Home() {
               <div className="modal-bottom">
                 <h3 style={{ fontSize: 13, fontWeight: 700, color: "#d4b896", textTransform: "uppercase", letterSpacing: 2, marginBottom: 4, display: "flex", alignItems: "center", gap: 10 }}>AI Curated Matches</h3>
                 
-                {/* ПРОЗРАЧНОСТЬ: Показываем, что именно сгенерировал ИИ */}
                 {activeVibe && (
                    <div style={{ fontSize: 11, color: "#c0521a", marginBottom: 20, fontStyle: "italic", letterSpacing: 1 }}>
-                     Vibe detected: {activeVibe.toLowerCase()}
+                     AI Search: {activeVibe.toLowerCase()}
                    </div>
                 )}
 
                 <div className="related-masonry">{relatedPhotos.map((photo, i) => (<PinCard key={`related-${photo.id}-${i}`} photo={photo} nsfwAllowed={nsfwAllowed} isPinned={isPinned(photo)} onClick={() => { const isBlurred = photo.isNsfw && !nsfwAllowed; if (isBlurred) setShowAgeGate(true); else { document.querySelector('.modal-box')?.scrollTo({top: 0, behavior: 'smooth'}); setSelected(photo); } }} onSaveClick={(e: any) => { e.stopPropagation(); if (!isPinned(photo)) setShowSaveToBoard(photo); }} onShareClick={(e: any) => { e.stopPropagation(); setShowShare(photo); }} />))}</div>
-                <div ref={modalBottomRef} style={{ padding: "60px 0", textAlign: "center" }}>{relatedLoading && <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}><div className="ai-pulse" /><span className="ai-text">Neural Net is extracting vibes...</span></div>}</div>
+                <div ref={modalBottomRef} style={{ padding: "60px 0", textAlign: "center" }}>{relatedLoading && <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}><div className="ai-pulse" /><span className="ai-text">Scanning subject...</span></div>}</div>
               </div>
             </div>
           </div>

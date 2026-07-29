@@ -14,7 +14,7 @@ export async function POST(req: Request) {
 
     const model = genAI.getGenerativeModel({ model: "gemini-3.6-flash" });
 
-    // СЦЕНАРИЙ 1: Работа с текстом (если фото заблокировано)
+    // СЦЕНАРИЙ 1: Текстовый поиск (Волшебная палочка) — Ищет эстетику и вайб
     if (action === "enhance_prompt") {
       const prompt = `You are a strict aesthetic curator. The user provided this text: "${payload}". Extract the core visual aesthetic, era, or mood. Return ONLY 3 to 5 English keywords separated by spaces. Ignore character names, focus strictly on visual style (e.g., "dark neo-noir cinematic"). No punctuation.`;
       const result = await model.generateContent(prompt);
@@ -22,7 +22,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ result: text });
     }
 
-    // СЦЕНАРИЙ 2: Машинное зрение (Анализ картинки)
+    // СЦЕНАРИЙ 2: Клик по картинке — Ищет КОНКРЕТНЫЙ ОБЪЕКТ/ПЕРСОНАЖА (Как в Pinterest)
     if (action === "analyze_image") {
       const imageResp = await fetch(payload, {
         headers: {
@@ -39,13 +39,16 @@ export async function POST(req: Request) {
       const base64Image = buffer.toString("base64");
       const mimeType = imageResp.headers.get("content-type") || "image/jpeg";
 
-      // ГЕНИАЛЬНЫЙ ПРОМПТ: Запрещаем читать текст на фото!
-      const prompt = `You are an expert art director. Analyze this image. Extract strictly 3 to 5 visual keywords (separated by spaces) that describe the core aesthetic, atmosphere, lighting, and style (e.g., "gloomy cinematic neo-noir"). STRONGLY IGNORE ANY TEXT written on the image (like logos, subtitles, or watermarks). Focus ONLY on the visual mood. Return ONLY the keywords, no commas, no extra text.`;
+      // НОВЫЙ ЖЕСТКИЙ ПРОМПТ: Никаких "вайбов" и "настроений". Только факты.
+      const prompt = `You are a visual search engine for a Pinterest clone. The user wants to find visually and contextually IDENTICAL images. 
+      Identify the SPECIFIC subject of this image (e.g., the exact character name like "Rust Cohle", exact actor, specific anime, specific car model). 
+      Return ONLY 2 to 4 precise English keywords describing the literal subject. 
+      Do NOT describe abstract moods like "sad" or "dark". DO NOT use words like "aesthetic" or "mood". 
+      Just return the concrete subject name.`;
       
       const imageParts = [{ inlineData: { data: base64Image, mimeType } }];
       const result = await model.generateContent([prompt, ...imageParts]);
       
-      // Очищаем ответ от любого мусора, оставляем только слова через пробел
       const text = result.response.text().trim().replace(/[^a-zA-Z0-9\s]/g, "").replace(/\s+/g, " ");
       return NextResponse.json({ result: text });
     }

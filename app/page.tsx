@@ -4,7 +4,6 @@ import { supabase } from "../lib/supabase";
 import type { User } from "@supabase/supabase-js";
 import { checkNsfw } from "../lib/nsfw";
 import PinCard from "../components/PinCard";
-import AgeGateModal from "../components/AgeGateModal";
 
 const defaultTags = ["Aesthetic", "Dark Academia", "Cyberpunk", "Minimalism", "Architecture", "Street Photography", "Vintage", "Interior"];
 
@@ -121,7 +120,6 @@ export default function Home() {
           }
         } catch (err) { console.error("Vision failed", err); }
 
-        // ЕСЛИ ИИ НЕ СПРАВИЛСЯ: Берем ключевые слова из оригинального названия картинки
         if (!aiQuery || aiQuery.length < 3) {
            const stopWords = new Set(["photo", "image", "picture", "wallpaper", "background", "free", "download", "high", "resolution", "by", "of", "the", "in", "on", "a", "and", "is", "with", "for", "hd", "4k", "stock", "quality", "из", "и", "в", "на", "под", "с", "как", "это", "что", "фото", "картинка", "обои", "эстетика", "для"]);
            const rawWords = (basePhoto.title || "").toLowerCase().replace(/[^a-zа-яё0-9\s]/g, "").split(/\s+/);
@@ -286,10 +284,18 @@ export default function Home() {
 
         {showAIModal && (<div className="modal-backdrop" onClick={() => setShowAIModal(false)}><div onClick={e => e.stopPropagation()} style={{ background: "#0d0a06", border: "1px solid #2a1f0e", borderRadius: 16, padding: 32, maxWidth: 440, width: "100%", display: "flex", flexDirection: "column", gap: 16, animation: "slideUp 0.3s ease" }}><div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}><h2 style={{ fontSize: 16, fontWeight: 700, color: "#c0521a", fontFamily: "Cinzel, serif", letterSpacing: 2 }}>AI VIBE ASSISTANT</h2><button className="modal-close" onClick={() => setShowAIModal(false)}>✕</button></div><textarea className="field" placeholder="e.g. A rainy day in a cyberpunk city but with warm neon colors..." value={aiPrompt} onChange={e => setAiPrompt(e.target.value)} style={{ height: 100, resize: "none" }} /><div style={{ display: "flex", gap: 12, marginTop: 10 }}><button className="ghost-btn" onClick={() => setShowAIModal(false)}>Cancel</button><button className="primary-btn" style={{ flex: 1, opacity: !aiPrompt.trim() ? 0.4 : 1 }} onClick={handleAIGenerate}>Generate Vibe</button></div></div></div>)}
 
-        {/* СУПЕР ФИКС: Окно 18+ теперь всегда поверх ВСЕГО */}
+        {/* ЖЕЛЕЗОБЕТОННОЕ ОКНО 18+ (Теперь встроено прямо в страницу) */}
         {showAgeGate && (
-          <div style={{ position: "fixed", inset: 0, zIndex: 99999 }}>
-            <AgeGateModal onCancel={() => setShowAgeGate(false)} onConfirm={() => { setNsfwAllowed(true); localStorage.setItem("gelbet_nsfw_18plus", "true"); setShowAgeGate(false); showToast("Content unlocked"); }} />
+          <div className="modal-backdrop" style={{ zIndex: 99999, display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={() => setShowAgeGate(false)}>
+            <div onClick={e => e.stopPropagation()} style={{ background: "#0d0a06", border: "1px solid #c0521a", borderRadius: 16, padding: 32, maxWidth: 400, width: "100%", display: "flex", flexDirection: "column", alignItems: "center", gap: 16, animation: "slideUp 0.3s ease", boxShadow: "0 20px 50px rgba(0,0,0,0.9)" }}>
+              <div style={{ fontSize: 48, filter: "drop-shadow(0 0 10px rgba(192,82,26,0.5))" }}>🔞</div>
+              <h2 style={{ fontSize: 18, fontWeight: 700, color: "#d4b896", fontFamily: "Cinzel, serif", letterSpacing: 2, textAlign: "center" }}>SENSITIVE CONTENT</h2>
+              <p style={{ color: "#8a6a4a", fontSize: 14, textAlign: "center", lineHeight: 1.5 }}>This material may contain explicit imagery. You must be at least 18 years old to view this content.</p>
+              <div style={{ display: "flex", gap: 12, width: "100%", marginTop: 10 }}>
+                <button className="ghost-btn" style={{ flex: 1 }} onClick={() => setShowAgeGate(false)}>Go Back</button>
+                <button className="primary-btn" style={{ flex: 1 }} onClick={() => { setNsfwAllowed(true); localStorage.setItem("gelbet_nsfw_18plus", "true"); setShowAgeGate(false); showToast("Content unlocked"); }}>I am 18+</button>
+              </div>
+            </div>
           </div>
         )}
 

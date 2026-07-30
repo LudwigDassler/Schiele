@@ -16,16 +16,21 @@ export function useTasteProfile() {
       if (status === "init" || status === "ready") {
         console.log(`[Local AI]: ${message}`);
       } else if (status === "done") {
-        console.log(`[Local AI]: Вектор вкуса рассчитан (${embedding.length} параметров).`);
+        console.log(`[Local AI]: Вектор рассчитан (${embedding.length} параметров).`);
         
         if (!userTasteProfile.current) {
           userTasteProfile.current = embedding;
         } else {
-          userTasteProfile.current = userTasteProfile.current.map((val: number, i: number) => (val + embedding[i]) / 2);
+          // 1. Складываем векторы (объединяем опыт)
+          const merged = userTasteProfile.current.map((val: number, i: number) => val + embedding[i]);
+          
+          // 2. L2 Нормализация (высчитываем длину и нормализуем, чтобы вектор не "затухал")
+          const magnitude = Math.sqrt(merged.reduce((sum, val) => sum + val * val, 0));
+          userTasteProfile.current = merged.map(val => val / magnitude);
         }
         
         localStorage.setItem("schiele_taste_vector", JSON.stringify(userTasteProfile.current));
-        console.log("[Local AI]: Личный профиль вкуса обновлен.");
+        console.log("[Local AI]: Профиль вкуса откалиброван и нормализован.");
       }
     };
 

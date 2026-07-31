@@ -48,6 +48,7 @@ export default function Home() {
   const [nsfwAllowed, setNsfwAllowed] = useState(false);
   const [showAgeGate, setShowAgeGate] = useState(false);
   const [activeVibe, setActiveVibe] = useState("");
+  const [mainImgLoaded, setMainImgLoaded] = useState(false);
 
   const observerRef = useRef<IntersectionObserver | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -74,6 +75,8 @@ export default function Home() {
     try { const savedTags = localStorage.getItem("gelbet_user_tags"); if (savedTags) setUserTags(JSON.parse(savedTags)); const allowedNsfw = localStorage.getItem("gelbet_nsfw_18plus"); if (allowedNsfw === "true") setNsfwAllowed(true); } catch (e) {}
     return () => subscription.unsubscribe();
   }, []);
+
+  useEffect(() => { if (selected) setMainImgLoaded(false); }, [selected?.id]);
 
   async function fetchUserData(userId: string) {
     try {
@@ -124,12 +127,12 @@ export default function Home() {
 
         if (!aiQuery || aiQuery.length < 3) {
            const stopWords = new Set(["photo", "image", "picture", "wallpaper", "background", "free", "download", "high", "resolution", "by", "of", "the", "in", "on", "a", "and", "is", "with", "for", "hd", "4k", "stock", "quality", "??", "?", "?", "??", "???", "?", "???", "???", "???", "????", "????????", "????", "????????", "???"]);
-           const rawWords = (basePhoto.title || "").toLowerCase().replace(/[^a-z?-??0-9\s]/g, "").split(/\s+/);
+           const rawWords = (basePhoto.title || "").toLowerCase().replace(/[^a-zа-яё0-9\s]/g, "").split(/\s+/);
            const keywords = Array.from(new Set(rawWords.filter(w => w.length > 2 && !stopWords.has(w)))).slice(0, 3);
            aiQuery = keywords.length > 0 ? keywords.join(" ") : searchQuery.split(/\s+/)[0];
         }
         
-        aiQuery = aiQuery.replace(/[^a-zA-Z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+        aiQuery = aiQuery.replace(/[^a-zA-Zа-яА-ЯёЁ0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
         currentRelatedQueryRef.current = aiQuery;
         setActiveVibe(aiQuery);
       }
@@ -160,7 +163,14 @@ export default function Home() {
 
   useEffect(() => {
     if (!selected || !modalBottomRef.current) return;
-    const observer = new IntersectionObserver(entries => { if (entries[0].isIntersecting && relatedHasMore && !relatedLoading) { const next = relatedPage + 1; setRelatedPage(next); fetchRelatedPhotos(selected, next, false); } }, { threshold: 0.1 });
+    const observer = new IntersectionObserver(entries => { 
+      // ИСПРАВЛЕНИЕ: Блокируем пагинацию, пока ИИ не закончил сканирование (защита от мусорной выдачи)
+      if (entries[0].isIntersecting && relatedHasMore && !relatedLoading && currentRelatedQueryRef.current) { 
+        const next = relatedPage + 1; 
+        setRelatedPage(next); 
+        fetchRelatedPhotos(selected, next, false); 
+      } 
+    }, { threshold: 0.1 });
     observer.observe(modalBottomRef.current);
     return () => observer.disconnect();
   }, [selected, relatedHasMore, relatedLoading, relatedPage, fetchRelatedPhotos]);
@@ -188,7 +198,7 @@ export default function Home() {
   function closeAllPanels() { setShowMenu(false); setShowSaved(false); setShowBoards(false); }
   async function savePin(photo: Photo, boardId?: string) { if (!user) { window.location.href = "/auth"; return; } try { const res = await fetch("/api/pins", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ user_id: user.id, image_url: photo.src, title: photo.title, board_id: boardId || null, source_url: photo.link }) }); if (res.ok) { const data = await res.json(); if (data.pin || data.data) setPins(prev => [data.pin || data.data, ...prev]); showToast("Saved to profile"); } } catch (e) {} setShowSaveToBoard(null); setSelected(null); }
   async function deletePin(pinId: string) { try { const res = await fetch(`/api/pins?id=${pinId}`, { method: "DELETE" }); if (res.ok) { setPins(prev => prev.filter(p => p.id !== pinId)); showToast("Removed from saved"); } } catch (e) {} }
-  async function createBoard() { if (!newBoardName || !user) return; try { const res = await fetch("/api/boards", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ user_id: user.id, name: newBoardName, description: newBoardDesc }) }); if (res.ok) { const data = await res.json(); if (data.board || data.data) setBoards(prev => [data.board || data.data, ...prev]); } } catch (e) {} setNewBoardName(""); setNewBoardDesc(""); setShowNewBoard(false); }
+  async function createBoard() { if (!newBoardName || !user) return; try { const res = await fetch("/api/boards", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ user_id: user.id, name: newBoardName, description: newBoardDesc }) }); if (res.ok) { const data = await res.json(); if (data.board || data.data) setBoards(prev => [data.board || data.data, ...prev]); } } catch (e) {} setNewBoardName(""); setNewBoardDesc(""); setShowNewBoard(false); showToast("Archive Created!"); }
   async function updateBoard() { if (!editBoard) return; try { const res = await fetch("/api/boards", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: editBoard.id, name: editBoard.name, description: editBoard.description }) }); if (res.ok) { const data = await res.json(); const updatedBoard = data.board || data.data; if (updatedBoard) setBoards(prev => prev.map(b => b.id === editBoard.id ? updatedBoard : b)); } } catch (e) {} setEditBoard(null); }
   async function deleteBoard(boardId: string) { if (!confirm("Delete this board?")) return; try { const res = await fetch(`/api/boards?id=${boardId}`, { method: "DELETE" }); if (res.ok) setBoards(prev => prev.filter(b => b.id !== boardId)); } catch (e) {} }
   function isPinned(photo: Photo) { return pins.some(p => p.image_url === photo.src); }
@@ -203,14 +213,7 @@ export default function Home() {
         @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Crimson+Text:ital,wght@0,400;0,600;1,400&display=swap');
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
         
-        /* CLEAN BACKGROUND REDESIGN */
-        body { 
-          overflow-x: hidden; 
-          background: radial-gradient(circle at 50% 50%, #150f08 0%, #050403 100%); 
-          background-attachment: fixed;
-          font-family: -apple-system, sans-serif; 
-        }
-        
+        body { overflow-x: hidden; background: radial-gradient(circle at 50% 50%, #150f08 0%, #050403 100%); background-attachment: fixed; font-family: -apple-system, sans-serif; }
         ::-webkit-scrollbar { width: 6px; height: 6px; } ::-webkit-scrollbar-track { background: #0d0a06; } ::-webkit-scrollbar-thumb { background: #2a1f0e; border-radius: 10px; } ::-webkit-scrollbar-thumb:hover { background: #c0521a; } * { scrollbar-width: thin; scrollbar-color: #2a1f0e #0d0a06; }
         .header { position: sticky; top: 0; z-index: 100; background: rgba(5, 4, 3, 0.85); backdrop-filter: blur(12px); border-bottom: 1px solid #1a1208; padding: 10px 16px; display: flex; align-items: center; gap: 10px; }
         .logo { font-family: 'Cinzel', Georgia, serif; font-size: 16px; font-weight: 700; color: #c0521a; letter-spacing: 4px; text-transform: uppercase; flex-shrink: 0; cursor: pointer; user-select: none; text-shadow: 0 0 20px rgba(192,82,26,0.2); }
@@ -246,7 +249,6 @@ export default function Home() {
         .field { width: 100%; padding: 12px 16px; border-radius: 4px; border: 1px solid #1a1208; background: #0d0a06; color: #d4b896; font-size: 14px; outline: none; transition: border-color 0.2s; } .field:focus { border-color: #2a1f0e; }
         .spinner { width: 28px; height: 28px; border: 2px solid #1a1208; border-top-color: #8a6a4a; border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto; } @keyframes spin { to { transform: rotate(360deg); } }
         
-        /* NEW AI ECLIPSE ANIMATION */
         .ai-sphere-wrap { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 24px; padding: 60px 0; }
         .ai-sphere { width: 70px; height: 70px; border-radius: 50%; background: #000; box-shadow: 0 0 40px 10px rgba(192,82,26,0.3), inset 0 0 20px rgba(192,82,26,0.2); animation: eclipse 4s infinite ease-in-out; position: relative; }
         .ai-sphere::after { content: ''; position: absolute; inset: 0; border-radius: 50%; background: radial-gradient(circle at 35% 35%, rgba(255,255,255,0.05), transparent 50%); }
@@ -288,7 +290,7 @@ export default function Home() {
         {showBoards && (
           <div style={{ padding: 20 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}><h2 style={{ fontSize: 16, fontWeight: 700, color: "#d4b896", fontFamily: "Cinzel, serif", letterSpacing: 2 }}>MY BOARDS</h2><button className="primary-btn" style={{ width: "auto", padding: "8px 16px", fontSize: 11 }} onClick={() => setShowNewBoard(true)}>+ New Board</button></div>
-            {boards.length === 0 ? <div className="empty">No boards yet. Create your first collection.</div> : (<div className="boards-grid">{boards.map(board => (<div key={board.id} className="board-card"><div className="board-cover"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#2a1f0e" strokeWidth="1.5"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg></div><div className="board-info"><div style={{ fontSize: 14, fontWeight: 600, color: "#d4b896" }}>{board.name}</div>{board.description && <div style={{ fontSize: 12, color: "#4a3520", marginTop: 4, fontFamily: "'Crimson Text', serif", fontStyle: "italic" }}>{board.description}</div>}<div style={{ fontSize: 11, color: "#8a6a4a", marginTop: 8 }}>{pins.filter(p => p.board_id === board.id).length} pins</div><div className="board-actions"><button className="board-edit-btn" onClick={() => setEditBoard(board)}>Edit</button><button className="board-del-btn" onClick={() => deleteBoard(board.id)}>Delete</button></div></div></div>))}</div>)}
+            {boards.length === 0 ? <div className="empty">No boards yet. Create your first collection.</div> : (<div className="boards-grid">{boards.map(board => (<div key={board.id} className="board-card"><div className="board-cover"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#2a1f0e" strokeWidth="1.5"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg></div><div className="board-info"><div style={{ fontSize: 14, fontWeight: 600, color: "#d4b896" }}>{board.name}</div>{board.description && <div style={{ fontSize: 12, color: "#4a3520", marginTop: 4, fontFamily: "'Crimson Text', serif", fontStyle: "italic" }}>{board.description}</div><div style={{ fontSize: 11, color: "#8a6a4a", marginTop: 8 }}>{pins.filter(p => p.board_id === board.id).length} pins</div><div className="board-actions"><button className="board-edit-btn" onClick={() => setEditBoard(board)}>Edit</button><button className="board-del-btn" onClick={() => deleteBoard(board.id)}>Delete</button></div></div></div>))}</div>)}
           </div>
         )}
 
@@ -298,9 +300,23 @@ export default function Home() {
 
         {showMenu && (<><div className="burger-overlay" onClick={closeAllPanels} /><div className="burger-panel"><div className="burger-header"><span className="burger-logo">GELBET</span><button className="burger-close" onClick={closeAllPanels}>×</button></div>{user && (<div style={{ padding: "24px 16px", borderBottom: "1px solid #1a1208", display: "flex", alignItems: "center", gap: 14 }}>{userAvatar ? <img src={userAvatar} className="avatar" style={{ width: 44, height: 44 }} alt="" /> : <div className="avatar-placeholder" style={{ width: 44, height: 44, fontSize: 16 }}>{(userName[0] || "U").toUpperCase()}</div>}<div><div style={{ fontWeight: 600, fontSize: 14, color: "#d4b896" }}>{userName}</div><a href="/profile" style={{ color: "#8a6a4a", fontSize: 12, textDecoration: "none", marginTop: 4, display: "block" }}>Edit profile</a></div></div>)}<div style={{ padding: "0 16px", fontSize: 10, color: "#4a3520", textTransform: "uppercase", letterSpacing: 2, marginTop: 24, marginBottom: 16 }}>Explore Archives</div><div style={{ display: "flex", flexWrap: "wrap", gap: 8, padding: "0 16px 20px" }}>{defaultTags.map(tag => <button key={tag} className="tag-pill" onClick={() => handleTagClick(tag)}>{tag}</button>)}</div><div style={{ height: 1, background: "#1a1208", margin: "10px 0" }} /><div style={{ padding: "10px 0" }}><button className="burger-action" onClick={() => { setShowBoards(true); setShowMenu(false); }}><span className="burger-action-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg></span><span>My Boards</span></button><button className="burger-action" onClick={() => { setShowSaved(true); setShowMenu(false); }}><span className="burger-action-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg></span><span>Saved Pins</span></button></div></div></>)}
 
+        {/* ВОТ ОНО! ВОЗВРАЩЕННОЕ ОКНО СОЗДАНИЯ ДОСКИ */}
+        {showNewBoard && (
+          <div className="modal-backdrop" style={{ zIndex: 300 }} onClick={() => setShowNewBoard(false)}>
+            <div onClick={e => e.stopPropagation()} style={{ background: "#080604", border: "1px solid #1a1208", borderRadius: 8, padding: 32, maxWidth: 400, width: "100%", display: "flex", flexDirection: "column", gap: 16 }}>
+              <h2 style={{ fontSize: 14, fontWeight: 700, color: "#d4b896", fontFamily: "Cinzel, serif", letterSpacing: 2 }}>CREATE NEW ARCHIVE</h2>
+              <input className="field" placeholder="Board Name" value={newBoardName} onChange={e => setNewBoardName(e.target.value)} autoFocus />
+              <textarea className="field" placeholder="Description (optional)" value={newBoardDesc} onChange={e => setNewBoardDesc(e.target.value)} style={{ height: 80, resize: "none" }} />
+              <div style={{ display: "flex", gap: 12, marginTop: 10 }}>
+                <button className="ghost-btn" onClick={() => setShowNewBoard(false)}>Cancel</button>
+                <button className="primary-btn" style={{ flex: 1, opacity: !newBoardName.trim() ? 0.4 : 1 }} disabled={!newBoardName.trim()} onClick={createBoard}>Establish</button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {showAIModal && (<div className="modal-backdrop" onClick={() => setShowAIModal(false)}><div onClick={e => e.stopPropagation()} style={{ background: "#080604", border: "1px solid #1a1208", borderRadius: 8, padding: 32, maxWidth: 440, width: "100%", display: "flex", flexDirection: "column", gap: 16, animation: "slideUp 0.3s ease" }}><div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}><h2 style={{ fontSize: 14, fontWeight: 700, color: "#8a6a4a", fontFamily: "Cinzel, serif", letterSpacing: 2 }}>AI VIBE ASSISTANT</h2><button className="modal-close" onClick={() => setShowAIModal(false)}>×</button></div><textarea className="field" placeholder="Describe a specific mood or aesthetic..." value={aiPrompt} onChange={e => setAiPrompt(e.target.value)} style={{ height: 100, resize: "none" }} /><div style={{ display: "flex", gap: 12, marginTop: 10 }}><button className="ghost-btn" onClick={() => setShowAIModal(false)}>Cancel</button><button className="primary-btn" style={{ flex: 1, opacity: !aiPrompt.trim() ? 0.4 : 1 }} onClick={handleAIGenerate}>Synthesize</button></div></div></div>)}
 
-        {/* НОВЫЙ ДИЗАЙН 18+ (РЕДИЗАЙН ПОД АРХИВНУЮ ЭСТЕТИКУ) */}
         {showAgeGate && (
           <div className="modal-backdrop" style={{ zIndex: 99999 }} onClick={() => setShowAgeGate(false)}>
             <div onClick={e => e.stopPropagation()} style={{ background: "#050403", border: "1px solid #1a1208", borderRadius: 4, padding: "40px", maxWidth: 440, width: "100%", display: "flex", flexDirection: "column", alignItems: "center", gap: 24, animation: "slideUp 0.3s ease", boxShadow: "0 20px 60px rgba(0,0,0,0.9)" }}>
@@ -321,7 +337,14 @@ export default function Home() {
           <div className="modal-backdrop" onClick={() => setSelected(null)}>
             <div className="modal-box" onClick={e => e.stopPropagation()}>
               <div className="modal-top">
-                <div className="modal-img-wrap"><img src={selected.src} alt="" className="modal-img" /></div>
+                <div className="modal-img-wrap" style={{ position: "relative" }}>
+                  {!mainImgLoaded && (
+                    <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                       <div className="ai-sphere" style={{ width: 40, height: 40, animation: 'eclipse 2s infinite ease-in-out', boxShadow: 'none' }} />
+                    </div>
+                  )}
+                  <img src={selected.src} alt="" className="modal-img" onLoad={() => setMainImgLoaded(true)} style={{ opacity: mainImgLoaded ? 1 : 0, transition: "opacity 0.4s ease" }} />
+                </div>
                 <div className="modal-info"><div style={{ display: "flex", justifyContent: "space-between", marginBottom: 24 }}><button className="hbtn" style={{ background: "#1a1208" }} onClick={() => sharePhoto(selected)} title="Share"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg></button><button className="modal-close" onClick={() => setSelected(null)}>×</button></div><div style={{ display: "flex", flexDirection: "column", gap: 12, flexShrink: 0 }}><button className={`primary-btn ${isPinned(selected) ? "pinned-state" : ""}`} onClick={() => isPinned(selected) ? null : savePin(selected)}>{isPinned(selected) ? "Saved" : "Save to Archive"}</button>{selected.link && <a href={selected.link} target="_blank" rel="noopener noreferrer"><button className="outline-btn">View Original ↗</button></a>}</div></div>
               </div>
               <div className="modal-bottom">
@@ -335,7 +358,6 @@ export default function Home() {
 
                 <div className="related-masonry">{relatedPhotos.map((photo, i) => (<PinCard key={`related-${photo.id}-${i}`} photo={photo} nsfwAllowed={nsfwAllowed} isPinned={isPinned(photo)} onClick={() => { feedLocalAI(photo.src, photo.id); const isBlurred = photo.isNsfw && !nsfwAllowed; if (isBlurred) setShowAgeGate(true); else { document.querySelector('.modal-box')?.scrollTo({top: 0, behavior: 'smooth'}); setSelected(photo); } }} onSaveClick={(e: any) => { e.stopPropagation(); if (!isPinned(photo)) savePin(photo); }} onShareClick={(e: any) => { e.stopPropagation(); sharePhoto(photo); }} />))}</div>
                 <div ref={modalBottomRef} style={{ textAlign: "center" }}>
-                  {/* ОБНОВЛЕННАЯ АНИМАЦИЯ ПОДГРУЗКИ ИИ В МОДАЛКЕ */}
                   {relatedLoading && (
                     <div className="ai-sphere-wrap">
                       <div className="ai-sphere" />

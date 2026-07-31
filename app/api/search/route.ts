@@ -16,11 +16,9 @@ function isValidImage(url: string) {
         if (p.protocol !== "http:" && p.protocol !== "https:") return false;
         if (BAD_DOMAINS.some(domain => p.hostname.includes(domain))) return false;
         
-        const validExt = /\.(jpeg|jpg|gif|png|webp|avif|bmp)$/i.test(p.pathname);
-        if (!validExt && !p.hostname.includes("unsplash.com") && !p.hostname.includes("pinimg.com")) {
-            return false;
-        }
-        return true;
+        // ФИКС ДЛЯ LED ZEPPELIN И ПРОЧИХ: Мы больше не требуем обязательного .jpg в конце ссылки,
+        // так как DDG использует прокси Bing, где расширений в URL просто нет.
+        return true; 
     } catch {
         return false;
     }
@@ -50,12 +48,7 @@ export const sanitizeQuery = (q: string | null) => {
     return q.trim();
 };
 
-// ==========================================
-// ИИ-ОПТИМИЗАТОР (ТЕПЕРЬ УМНЫЙ И БЫСТРЫЙ)
-// ==========================================
 async function enhanceSearchQuery(rawQuery: string) {
-    // БАЙПАС ДЛЯ СКОРОСТИ: Если это простые английские слова (до 4 слов), пропускаем ИИ. 
-    // Это заставит главную страницу грузиться мгновенно.
     if (/^[a-zA-Z0-9\s\-]+$/.test(rawQuery) && rawQuery.split(/\s+/).length <= 4) {
         return rawQuery;
     }
@@ -71,28 +64,24 @@ async function enhanceSearchQuery(rawQuery: string) {
     try {
         const randomKey = keys[Math.floor(Math.random() * keys.length)];
         const genAI = new GoogleGenerativeAI(randomKey);
-        
-        // ВЕРНУЛ ТВОЮ 3.6 ВЕРСИЮ, КАК ПРОСИЛ!
         const model = genAI.getGenerativeModel({ model: "gemini-3.6-flash" });
         
-        const prompt = `You are a search query optimizer. 
+        // ФИКС МОЗГОВ: Запрещаем буквальный перевод культовых и музыкальных явлений
+        const prompt = `You are an expert search query optimizer for a visual archive (like Pinterest).
         User query: "${rawQuery}"
-        1. Translate to English if needed.
-        2. Disambiguate context (e.g., "Луна 2112" -> "Moon 2009 sci-fi movie").
-        3. Return ONLY the English search string. No quotes, no extra text.`;
+        Task:
+        1. Contextualize. If the query is a music band, artist, or specific cultural phenomenon (e.g., 'ГрОб', 'Гражданская оборона', 'Led Zeppelin', 'Король и Шут'), DO NOT translate it literally (e.g. no "coffins" or "civil defense"). Identify it as a band and output the English name + "band aesthetic photography". (e.g. "ГрОб" -> "Grazhdanskaya Oborona punk band aesthetic").
+        2. If it's a general concept, translate to English for better search results.
+        3. Return ONLY the final optimized English search string. No extra text, no quotes.`;
         
         const result = await model.generateContent(prompt);
         const optimized = result.response.text().replace(/["'\n]/g, " ").trim();
         return optimized || rawQuery;
     } catch (e) {
-        console.error("[AI Optimizer Error]:", e);
         return rawQuery;
     }
 }
 
-// ==========================================
-// ПАРСЕР DUCKDUCKGO (СТАБИЛЬНЫЙ)
-// ==========================================
 export async function fetchFromDuckDuckGo(rawQuery: string | null, page: number = 1) {
     const query = rawQuery || "aesthetic";
     const cacheKey = `${query}-page-${page}`;
@@ -110,7 +99,6 @@ export async function fetchFromDuckDuckGo(rawQuery: string | null, page: number 
             setTimeout(() => memoryCache.delete(smartQueryKey), 15 * 60 * 1000); 
         }
 
-        // ЖЕСТКО фиксируем ОДИН User-Agent на оба запроса, чтобы DDG не банил за подозрительность
         const ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
 
         const htmlResp = await fetch(`https://duckduckgo.com/?q=${encodeURIComponent(smartQuery)}&ia=images&iax=images`, {
@@ -123,16 +111,11 @@ export async function fetchFromDuckDuckGo(rawQuery: string | null, page: number 
         
         const html = await htmlResp.text();
         const vqdMatch = html.match(/vqd=["']?([^"'\s&]+)["']?/);
-        
-        if (!vqdMatch) {
-            console.error("[DDG Parser] vqd not found.");
-            return [];
-        }
+        if (!vqdMatch) return [];
         
         const vqd = vqdMatch[1];
         const offset = (page - 1) * 100;
         
-        // ВЕРНУЛ l=us-en. Мы переводим запросы на англ, так что американская выдача идеальна и не ломает API.
         const apiUrl = `https://duckduckgo.com/i.js?l=us-en&o=json&q=${encodeURIComponent(smartQuery)}&vqd=${vqd}&f=,,,&p=-1&s=${offset}`;
         
         const imgResp = await fetch(apiUrl, {
@@ -168,7 +151,6 @@ export async function fetchFromDuckDuckGo(rawQuery: string | null, page: number 
         }
         return uniqueImages.slice(0, 40); 
     } catch (e) {
-        console.error("Search Error:", e);
         return [];
     }
 }

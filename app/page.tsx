@@ -41,6 +41,7 @@ export default function Home() {
   const [showSaveToBoard, setShowSaveToBoard] = useState<Photo | null>(null);
   const [editBoard, setEditBoard] = useState<Board | null>(null);
   const [showAIModal, setShowAIModal] = useState(false);
+  const [isAILoading, setIsAILoading] = useState(false);
   const [aiPrompt, setAiPrompt] = useState("");
   const [newBoardName, setNewBoardName] = useState("");
   const [newBoardDesc, setNewBoardDesc] = useState("");
@@ -126,7 +127,7 @@ export default function Home() {
         } catch (err) { console.error("Vision failed", err); }
 
         if (!aiQuery || aiQuery.length < 3) {
-           const stopWords = new Set(["photo", "image", "picture", "wallpaper", "background", "free", "download", "high", "resolution", "by", "of", "the", "in", "on", "a", "and", "is", "with", "for", "hd", "4k", "stock", "quality", "??", "?", "?", "??", "???", "?", "???", "???", "???", "????", "????????", "????", "????????", "???"]);
+           const stopWords = new Set(["photo", "image", "picture", "wallpaper", "background", "free", "download", "high", "resolution", "by", "of", "the", "in", "on", "a", "and", "is", "with", "for", "hd", "4k", "stock", "quality"]);
            const rawWords = (basePhoto.title || "").toLowerCase().replace(/[^a-zа-яё0-9\s]/g, "").split(/\s+/);
            const keywords = Array.from(new Set(rawWords.filter(w => w.length > 2 && !stopWords.has(w)))).slice(0, 3);
            aiQuery = keywords.length > 0 ? keywords.join(" ") : searchQuery.split(/\s+/)[0];
@@ -164,7 +165,6 @@ export default function Home() {
   useEffect(() => {
     if (!selected || !modalBottomRef.current) return;
     const observer = new IntersectionObserver(entries => { 
-      // ИСПРАВЛЕНИЕ: Блокируем пагинацию, пока ИИ не закончил сканирование (защита от мусорной выдачи)
       if (entries[0].isIntersecting && relatedHasMore && !relatedLoading && currentRelatedQueryRef.current) { 
         const next = relatedPage + 1; 
         setRelatedPage(next); 
@@ -185,14 +185,25 @@ export default function Home() {
 
   async function handleAIGenerate() {
     if (!aiPrompt.trim()) return;
-    setShowAIModal(false); showToast("✨ AI is synthesizing perfect vibe...");
+    setShowAIModal(false); 
+    setIsAILoading(true);
+    
     try {
       const aiRes = await fetch("/api/ai", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "enhance_prompt", payload: aiPrompt.trim() }) });
       let query = aiPrompt.trim();
-      if (aiRes.ok) { const data = await aiRes.json(); if (data.result) query = data.result; } 
-      else { showToast("AI Engine unreachable. Using raw query."); if (!/[а-яА-ЯёЁ]/.test(query) && !query.toLowerCase().includes('aesthetic')) query += " aesthetic"; }
+      if (aiRes.ok) { 
+          const data = await aiRes.json(); 
+          if (data.result) query = data.result; 
+      } else { 
+          showToast("AI Engine unreachable."); 
+          if (!/[а-яА-ЯёЁ]/.test(query) && !query.toLowerCase().includes('aesthetic')) query += " aesthetic"; 
+      }
       setSearch(query); setSearchQuery(query); saveUserTag(query); setAiPrompt(""); setIsMobileSearchOpen(false); setIsSearchFocused(false);
-    } catch (e) { showToast("AI network error. Defaulting to standard search."); }
+    } catch (e) { 
+        showToast("AI network error."); 
+    } finally {
+        setIsAILoading(false);
+    }
   }
 
   function closeAllPanels() { setShowMenu(false); setShowSaved(false); setShowBoards(false); }
@@ -209,7 +220,7 @@ export default function Home() {
 
   return (
     <>
-      <style>{`
+      <style jsx global>{`
         @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Crimson+Text:ital,wght@0,400;0,600;1,400&display=swap');
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
         
@@ -256,9 +267,17 @@ export default function Home() {
         .ai-text { font-family: 'Cinzel', serif; color: #d4b896; font-size: 13px; letter-spacing: 6px; text-transform: uppercase; text-shadow: 0 0 15px rgba(212,184,150,0.3); font-weight: 400; }
         
         .empty { text-align: center; padding: 100px 20px; color: #4a3520; font-size: 16px; font-family: 'Crimson Text', serif; font-style: italic; } .modal-close { background: none; border: none; color: #4a3520; cursor: pointer; font-size: 20px; width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; transition: all 0.2s; } .modal-close:hover { background: #1a1208; color: #8a6a4a; }
-        .toast-container { position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); background: #150f08; border: 1px solid #2a1f0e; color: #d4b896; padding: 14px 28px; border-radius: 8px; font-size: 13px; font-weight: 600; letter-spacing: 2px; text-transform: uppercase; z-index: 9999; animation: slideUp 0.3s ease; box-shadow: 0 10px 40px rgba(0,0,0,0.9); display: flex; align-items: center; justify-content: center; transition: all 0.3s ease; } .toast-thinking { color: #e3b378; border-color: #6a4a2a; box-shadow: 0 0 25px rgba(227, 179, 120, 0.15); animation: slideUp 0.3s ease, pulseThinking 1.5s infinite alternate; } @keyframes pulseThinking { 0% { box-shadow: 0 0 10px rgba(227, 179, 120, 0.05); border-color: #2a1f0e; } 100% { box-shadow: 0 0 35px rgba(227, 179, 120, 0.3); border-color: #c0521a; text-shadow: 0 0 10px rgba(227, 179, 120, 0.5); } } .mini-sphere-wrap { display: flex; align-items: center; justify-content: center; position: relative; width: 16px; height: 16px; margin-right: 14px; } .mini-sphere { width: 10px; height: 10px; border-radius: 50%; background: radial-gradient(circle at 30% 30%, #e3b378, #c0521a); box-shadow: 0 0 10px #c0521a; animation: spherePulse 1.2s infinite alternate; position: relative; z-index: 2; } .mini-sphere::before, .mini-sphere::after { content: ''; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); border-radius: 50%; border: 1px solid rgba(227, 179, 120, 0.6); animation: waveRipple 2s infinite cubic-bezier(0.1, 0.5, 0.3, 1); z-index: 1; } .mini-sphere::after { animation-delay: 1s; } @keyframes spherePulse { 0% { transform: scale(0.9); box-shadow: 0 0 5px rgba(192,82,26,0.5); } 100% { transform: scale(1.2); box-shadow: 0 0 15px rgba(227,179,120,1); } } @keyframes waveRipple { 0% { width: 10px; height: 10px; opacity: 1; } 100% { width: 34px; height: 34px; opacity: 0; } }
-      `}.cinematic-loader { position: fixed; inset: 0; z-index: 9999; display: flex; align-items: center; justify-content: center; background: rgba(5,4,3,0.5); backdrop-filter: blur(8px); animation: fadeIn 0.4s ease; } .cinematic-sphere { width: 50px; height: 50px; border-radius: 50%; background: radial-gradient(circle at 30% 30%, #e3b378, #c0521a); box-shadow: 0 0 50px #c0521a; animation: cinematicPulse 2s infinite alternate; position: relative; } .cinematic-sphere::before, .cinematic-sphere::after { content: ''; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); border-radius: 50%; border: 1px solid rgba(227, 179, 120, 0.4); animation: cinematicRipple 3s infinite cubic-bezier(0.1, 0.5, 0.3, 1); } .cinematic-sphere::after { animation-delay: 1.5s; } @keyframes cinematicPulse { 0% { transform: scale(0.8); box-shadow: 0 0 20px rgba(192,82,26,0.3); } 100% { transform: scale(1.2); box-shadow: 0 0 80px rgba(227,179,120,0.8); } } @keyframes cinematicRipple { 0% { width: 50px; height: 50px; opacity: 1; } 100% { width: 300px; height: 300px; opacity: 0; } } 
-</style>
+        .toast-container { position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); background: #150f08; border: 1px solid #2a1f0e; color: #d4b896; padding: 14px 28px; border-radius: 8px; font-size: 13px; font-weight: 600; letter-spacing: 2px; text-transform: uppercase; z-index: 9999; animation: slideUp 0.3s ease; box-shadow: 0 10px 40px rgba(0,0,0,0.9); display: flex; align-items: center; justify-content: center; transition: all 0.3s ease; }
+        
+        .mini-ai-loader { position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); z-index: 9999; width: 36px; height: 36px; border-radius: 50%; background: #080604; border: 1px solid #2a1f0e; box-shadow: 0 10px 30px rgba(0,0,0,0.9), 0 0 20px rgba(192,82,26,0.2); animation: slideUp 0.3s ease, floatOrb 3s infinite ease-in-out; display: flex; align-items: center; justify-content: center; }
+        .mini-ai-core { width: 12px; height: 12px; border-radius: 50%; background: radial-gradient(circle at 30% 30%, #e3b378, #c0521a); box-shadow: 0 0 10px #c0521a; animation: corePulse 1.5s infinite alternate; position: relative; z-index: 2; }
+        .mini-ai-loader::before, .mini-ai-loader::after { content: ''; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); border-radius: 50%; border: 1px solid rgba(227, 179, 120, 0.4); animation: coreRipple 2s infinite cubic-bezier(0.1, 0.5, 0.3, 1); z-index: 1; }
+        .mini-ai-loader::after { animation-delay: 1s; }
+        
+        @keyframes floatOrb { 0%, 100% { transform: translateX(-50%) translateY(0); } 50% { transform: translateX(-50%) translateY(-5px); } }
+        @keyframes corePulse { 0% { transform: scale(0.8); opacity: 0.7; box-shadow: 0 0 5px rgba(192,82,26,0.5); } 100% { transform: scale(1.3); opacity: 1; box-shadow: 0 0 15px rgba(227,179,120,1); } }
+        @keyframes coreRipple { 0% { width: 12px; height: 12px; opacity: 1; } 100% { width: 44px; height: 44px; opacity: 0; } }
+      `}</style>
 
       <main style={{ minHeight: "100vh" }}>
         <header className="header">
@@ -268,12 +287,12 @@ export default function Home() {
             <div className="search-container" ref={searchContainerRef}>
               <div className="search-wrap" onClick={() => { if (!isMobileSearchOpen) { setIsMobileSearchOpen(true); setTimeout(() => searchInputRef.current?.focus(), 50); } }}>
                 <input ref={searchInputRef} className="search-input" placeholder="Search visual archives..." value={search} onChange={e => setSearch(e.target.value)} onFocus={() => setIsSearchFocused(true)} />
-                {search && isMobileSearchOpen && <button type="button" onClick={() => { setSearch(""); setIsMobileSearchOpen(false); setIsSearchFocused(false); }} className="search-btn" style={{ fontSize: 16 }}>×</button>}
+                {search && isMobileSearchOpen && <button type="button" onClick={() => { setSearch(""); setIsMobileSearchOpen(false); setIsSearchFocused(false); }} className="search-btn" style={{ fontSize: 16 }}>✕</button>}
                 <button type="submit" className="search-btn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></button>
               </div>
               {isSearchFocused && (
                 <div className="search-dropdown">
-                  {userTags.length > 0 && (<><div className="search-dropdown-header"><span>Recent Searches</span><button type="button" onClick={clearAllTags} className="search-dropdown-clear-all">Clear All</button></div>{userTags.map(tag => (<div key={tag} className="search-dropdown-item" onClick={() => handleTagClick(tag)}><span className="search-dropdown-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></span><span className="search-dropdown-text">{tag}</span><button type="button" className="search-dropdown-remove" onClick={(e) => removeUserTag(tag, e)}>×</button></div>))} <div style={{ height: 1, background: "#1a1208", margin: "4px 16px 8px" }} /></>)}
+                  {userTags.length > 0 && (<><div className="search-dropdown-header"><span>Recent Searches</span><button type="button" onClick={clearAllTags} className="search-dropdown-clear-all">Clear All</button></div>{userTags.map(tag => (<div key={tag} className="search-dropdown-item" onClick={() => handleTagClick(tag)}><span className="search-dropdown-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></span><span className="search-dropdown-text">{tag}</span><button type="button" className="search-dropdown-remove" onClick={(e) => removeUserTag(tag, e)}>✕</button></div>))} <div style={{ height: 1, background: "#1a1208", margin: "4px 16px 8px" }} /></>)}
                   <div className="search-dropdown-header"><span>Trending Vibes</span></div>
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 6, padding: "8px 16px 12px" }}>{defaultTags.map(tag => (<button type="button" key={tag} className="tag-pill" onClick={() => handleTagClick(tag)}>{tag}</button>))}</div>
                 </div>
@@ -299,9 +318,8 @@ export default function Home() {
           <><div className="grid-wrap"><div className="masonry">{displayPhotos.map((photo, i) => (<PinCard key={`${photo.id}-${i}`} photo={photo} nsfwAllowed={nsfwAllowed} isPinned={isPinned(photo)} showSaved={showSaved} onClick={() => { feedLocalAI(photo.src, photo.id); const isBlurred = photo.isNsfw && !nsfwAllowed; if (isBlurred) setShowAgeGate(true); else setSelected(photo); }} onSaveClick={(e: any) => { e.stopPropagation(); if (!isPinned(photo)) savePin(photo); }} onShareClick={(e: any) => { e.stopPropagation(); sharePhoto(photo); }} onRemoveClick={(e: any) => { e.stopPropagation(); deletePin(photo.id); }} />))}</div></div>{displayPhotos.length === 0 && !loading && <div className="empty">{showSaved ? "Archive is empty." : "Nothing found."}</div>}{!showSaved && <div ref={bottomRef} style={{ padding: "40px", textAlign: "center" }}>{loading && <div className="spinner" />}</div>}</>
         )}
 
-        {showMenu && (<><div className="burger-overlay" onClick={closeAllPanels} /><div className="burger-panel"><div className="burger-header"><span className="burger-logo">GELBET</span><button className="burger-close" onClick={closeAllPanels}>×</button></div>{user && (<div style={{ padding: "24px 16px", borderBottom: "1px solid #1a1208", display: "flex", alignItems: "center", gap: 14 }}>{userAvatar ? <img src={userAvatar} className="avatar" style={{ width: 44, height: 44 }} alt="" /> : <div className="avatar-placeholder" style={{ width: 44, height: 44, fontSize: 16 }}>{(userName[0] || "U").toUpperCase()}</div>}<div><div style={{ fontWeight: 600, fontSize: 14, color: "#d4b896" }}>{userName}</div><a href="/profile" style={{ color: "#8a6a4a", fontSize: 12, textDecoration: "none", marginTop: 4, display: "block" }}>Edit profile</a></div></div>)}<div style={{ padding: "0 16px", fontSize: 10, color: "#4a3520", textTransform: "uppercase", letterSpacing: 2, marginTop: 24, marginBottom: 16 }}>Explore Archives</div><div style={{ display: "flex", flexWrap: "wrap", gap: 8, padding: "0 16px 20px" }}>{defaultTags.map(tag => <button key={tag} className="tag-pill" onClick={() => handleTagClick(tag)}>{tag}</button>)}</div><div style={{ height: 1, background: "#1a1208", margin: "10px 0" }} /><div style={{ padding: "10px 0" }}><button className="burger-action" onClick={() => { setShowBoards(true); setShowMenu(false); }}><span className="burger-action-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg></span><span>My Boards</span></button><button className="burger-action" onClick={() => { setShowSaved(true); setShowMenu(false); }}><span className="burger-action-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg></span><span>Saved Pins</span></button></div></div></>)}
+        {showMenu && (<><div className="burger-overlay" onClick={closeAllPanels} /><div className="burger-panel"><div className="burger-header"><span className="burger-logo">GELBET</span><button className="burger-close" onClick={closeAllPanels}>✕</button></div>{user && (<div style={{ padding: "24px 16px", borderBottom: "1px solid #1a1208", display: "flex", alignItems: "center", gap: 14 }}>{userAvatar ? <img src={userAvatar} className="avatar" style={{ width: 44, height: 44 }} alt="" /> : <div className="avatar-placeholder" style={{ width: 44, height: 44, fontSize: 16 }}>{(userName[0] || "U").toUpperCase()}</div>}<div><div style={{ fontWeight: 600, fontSize: 14, color: "#d4b896" }}>{userName}</div><a href="/profile" style={{ color: "#8a6a4a", fontSize: 12, textDecoration: "none", marginTop: 4, display: "block" }}>Edit profile</a></div></div>)}<div style={{ padding: "0 16px", fontSize: 10, color: "#4a3520", textTransform: "uppercase", letterSpacing: 2, marginTop: 24, marginBottom: 16 }}>Explore Archives</div><div style={{ display: "flex", flexWrap: "wrap", gap: 8, padding: "0 16px 20px" }}>{defaultTags.map(tag => <button key={tag} className="tag-pill" onClick={() => handleTagClick(tag)}>{tag}</button>)}</div><div style={{ height: 1, background: "#1a1208", margin: "10px 0" }} /><div style={{ padding: "10px 0" }}><button className="burger-action" onClick={() => { setShowBoards(true); setShowMenu(false); }}><span className="burger-action-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg></span><span>My Boards</span></button><button className="burger-action" onClick={() => { setShowSaved(true); setShowMenu(false); }}><span className="burger-action-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg></span><span>Saved Pins</span></button></div></div></>)}
 
-        {/* ВОТ ОНО! ВОЗВРАЩЕННОЕ ОКНО СОЗДАНИЯ ДОСКИ */}
         {showNewBoard && (
           <div className="modal-backdrop" style={{ zIndex: 300 }} onClick={() => setShowNewBoard(false)}>
             <div onClick={e => e.stopPropagation()} style={{ background: "#080604", border: "1px solid #1a1208", borderRadius: 8, padding: 32, maxWidth: 400, width: "100%", display: "flex", flexDirection: "column", gap: 16 }}>
@@ -316,7 +334,7 @@ export default function Home() {
           </div>
         )}
 
-        {showAIModal && (<div className="modal-backdrop" onClick={() => setShowAIModal(false)}><div onClick={e => e.stopPropagation()} style={{ background: "#080604", border: "1px solid #1a1208", borderRadius: 8, padding: 32, maxWidth: 440, width: "100%", display: "flex", flexDirection: "column", gap: 16, animation: "slideUp 0.3s ease" }}><div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}><h2 style={{ fontSize: 14, fontWeight: 700, color: "#8a6a4a", fontFamily: "Cinzel, serif", letterSpacing: 2 }}>AI VIBE ASSISTANT</h2><button className="modal-close" onClick={() => setShowAIModal(false)}>×</button></div><textarea className="field" placeholder="Describe a specific mood or aesthetic..." value={aiPrompt} onChange={e => setAiPrompt(e.target.value)} style={{ height: 100, resize: "none" }} /><div style={{ display: "flex", gap: 12, marginTop: 10 }}><button className="ghost-btn" onClick={() => setShowAIModal(false)}>Cancel</button><button className="primary-btn" style={{ flex: 1, opacity: !aiPrompt.trim() ? 0.4 : 1 }} onClick={handleAIGenerate}>Synthesize</button></div></div></div>)}
+        {showAIModal && (<div className="modal-backdrop" onClick={() => setShowAIModal(false)}><div onClick={e => e.stopPropagation()} style={{ background: "#080604", border: "1px solid #1a1208", borderRadius: 8, padding: 32, maxWidth: 440, width: "100%", display: "flex", flexDirection: "column", gap: 16, animation: "slideUp 0.3s ease" }}><div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}><h2 style={{ fontSize: 14, fontWeight: 700, color: "#8a6a4a", fontFamily: "Cinzel, serif", letterSpacing: 2 }}>AI VIBE ASSISTANT</h2><button className="modal-close" onClick={() => setShowAIModal(false)}>✕</button></div><textarea className="field" placeholder="Describe a specific mood or aesthetic..." value={aiPrompt} onChange={e => setAiPrompt(e.target.value)} style={{ height: 100, resize: "none" }} /><div style={{ display: "flex", gap: 12, marginTop: 10 }}><button className="ghost-btn" onClick={() => setShowAIModal(false)}>Cancel</button><button className="primary-btn" style={{ flex: 1, opacity: !aiPrompt.trim() ? 0.4 : 1 }} onClick={handleAIGenerate}>Synthesize</button></div></div></div>)}
 
         {showAgeGate && (
           <div className="modal-backdrop" style={{ zIndex: 99999 }} onClick={() => setShowAgeGate(false)}>
@@ -346,7 +364,7 @@ export default function Home() {
                   )}
                   <img src={selected.src} alt="" className="modal-img" onLoad={() => setMainImgLoaded(true)} style={{ opacity: mainImgLoaded ? 1 : 0, transition: "opacity 0.4s ease" }} />
                 </div>
-                <div className="modal-info"><div style={{ display: "flex", justifyContent: "space-between", marginBottom: 24 }}><button className="hbtn" style={{ background: "#1a1208" }} onClick={() => sharePhoto(selected)} title="Share"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg></button><button className="modal-close" onClick={() => setSelected(null)}>×</button></div><div style={{ display: "flex", flexDirection: "column", gap: 12, flexShrink: 0 }}><button className={`primary-btn ${isPinned(selected) ? "pinned-state" : ""}`} onClick={() => isPinned(selected) ? null : savePin(selected)}>{isPinned(selected) ? "Saved" : "Save to Archive"}</button>{selected.link && <a href={selected.link} target="_blank" rel="noopener noreferrer"><button className="outline-btn">View Original ↗</button></a>}</div></div>
+                <div className="modal-info"><div style={{ display: "flex", justifyContent: "space-between", marginBottom: 24 }}><button className="hbtn" style={{ background: "#1a1208" }} onClick={() => sharePhoto(selected)} title="Share"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg></button><button className="modal-close" onClick={() => setSelected(null)}>✕</button></div><div style={{ display: "flex", flexDirection: "column", gap: 12, flexShrink: 0 }}><button className={`primary-btn ${isPinned(selected) ? "pinned-state" : ""}`} onClick={() => isPinned(selected) ? null : savePin(selected)}>{isPinned(selected) ? "Saved" : "Save to Archive"}</button>{selected.link && <a href={selected.link} target="_blank" rel="noopener noreferrer"><button className="outline-btn">View Original ↗</button></a>}</div></div>
               </div>
               <div className="modal-bottom">
                 <h3 style={{ fontSize: 12, fontWeight: 700, color: "#8a6a4a", textTransform: "uppercase", letterSpacing: 2, marginBottom: 4, display: "flex", alignItems: "center", gap: 10 }}>Curated Matches</h3>
@@ -372,7 +390,9 @@ export default function Home() {
         )}
 
         {showSaveToBoard && (<div className="modal-backdrop" onClick={() => setShowSaveToBoard(null)}><div onClick={e => e.stopPropagation()} style={{ background: "#080604", border: "1px solid #1a1208", borderRadius: 8, padding: 32, maxWidth: 400, width: "100%", display: "flex", flexDirection: "column", gap: 16 }}><button className="primary-btn" onClick={() => savePin(showSaveToBoard)}>Save directly</button><button className="ghost-btn" onClick={() => { setShowNewBoard(true); setShowSaveToBoard(null); }}>+ Create new board</button></div></div>)}
-        {toastMsg && (toastMsg.includes('synthesizing') ? <div className="cinematic-loader"><div className="cinematic-sphere" /></div> : <div className="toast-container">{toastMsg.replace('✨ ', '')}</div>)}
+        
+        {isAILoading && <div className="mini-ai-loader"><div className="mini-ai-core" /></div>}
+        {toastMsg && <div className="toast-container">{toastMsg}</div>}
       </main>
     </>
   );

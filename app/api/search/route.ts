@@ -1,8 +1,8 @@
 ﻿import { NextResponse } from "next/server";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 
 export const dynamic = "force-dynamic";
 
-// Оставляем фильтр плохих доменов, чтобы в эстетику не пролез водяной знак Shutterstock
 const BAD_DOMAINS = [
     "pixabay.com", "picsum.photos", "fbsbx.com", "shutterstock.com", 
     "istockphoto.com", "adobestock.com", "adobe.com", "gettyimages.com", 
@@ -51,19 +51,59 @@ export const sanitizeQuery = (q: string | null) => {
 };
 
 // ==========================================
-// НОВЫЙ ХАКЕРСКИЙ ПАРСЕР DUCKDUCKGO
+// ИИ-ОПТИМИЗАТОР ЗАПРОСОВ (Убивает Among Us)
+// ==========================================
+async function enhanceSearchQuery(rawQuery: string) {
+    const keys = [
+        process.env.GEMINI_API_KEY,
+        process.env.GEMINI_API_KEY_2,
+        process.env.GEMINI_API_KEY_3
+    ].filter(Boolean) as string[];
+
+    if (keys.length === 0) return rawQuery;
+
+    try {
+        const randomKey = keys[Math.floor(Math.random() * keys.length)];
+        const genAI = new GoogleGenerativeAI(randomKey);
+        const model = genAI.getGenerativeModel({ model: "gemini-3.6-flash" });
+        
+        const prompt = `You are a search query optimizer for an image search engine. 
+        User query: "${rawQuery}"
+        Task:
+        1. Translate to English if it's in another language.
+        2. If it's a character, historical figure, or ambiguous term (e.g., "амон гет"), disambiguate it by adding context (e.g., "Amon Goeth Schindler's List").
+        3. Return ONLY the final optimized English search string. No quotes, no extra text.`;
+        
+        const result = await model.generateContent(prompt);
+        const optimized = result.response.text().replace(/["']/g, "").trim();
+        return optimized || rawQuery;
+    } catch (e) {
+        return rawQuery;
+    }
+}
+
+// ==========================================
+// ПАРСЕР DUCKDUCKGO
 // ==========================================
 export async function fetchFromDuckDuckGo(rawQuery: string | null, page: number = 1) {
     const query = rawQuery || "aesthetic pinterest high quality photography";
     const cacheKey = `${query}-page-${page}`;
+    const smartQueryKey = `smart-${query}`;
     
     if (memoryCache.has(cacheKey)) {
         return memoryCache.get(cacheKey); 
     }
 
     try {
-        // ШАГ 1: Притворяемся браузером и забираем секретный токен vqd
-        const htmlResp = await fetch(`https://duckduckgo.com/?q=${encodeURIComponent(query)}&ia=images&iax=images`, {
+        // Проверяем, переводили ли мы уже этот запрос (чтобы не дергать ИИ при скролле вниз)
+        let smartQuery = memoryCache.get(smartQueryKey);
+        if (!smartQuery) {
+            smartQuery = await enhanceSearchQuery(query);
+            memoryCache.set(smartQueryKey, smartQuery);
+            setTimeout(() => memoryCache.delete(smartQueryKey), 15 * 60 * 1000); // чистим через 15 минут
+        }
+
+        const htmlResp = await fetch(`https://duckduckgo.com/?q=${encodeURIComponent(smartQuery)}&ia=images&iax=images`, {
             headers: {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
                 "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
@@ -72,19 +112,12 @@ export async function fetchFromDuckDuckGo(rawQuery: string | null, page: number 
         });
         
         const html = await htmlResp.text();
-        
-        // Регулярка для вытаскивания токена из сырого HTML
         const vqdMatch = html.match(/vqd=["']?([^"'\s&]+)["']?/);
-        if (!vqdMatch) {
-            console.error("[DDG Parser Error] Token vqd not found! IP might be flagged or DDG changed their HTML.");
-            return [];
-        }
+        if (!vqdMatch) return [];
         const vqd = vqdMatch[1];
         
-        // ШАГ 2: Бьем прямо в скрытый API картинок
-        // s - это offset (сдвиг). DDG отдает пачками примерно по 100 штук
         const offset = (page - 1) * 100;
-        const apiUrl = `https://duckduckgo.com/i.js?l=us-en&o=json&q=${encodeURIComponent(query)}&vqd=${vqd}&f=,,,&p=1&s=${offset}`;
+        const apiUrl = `https://duckduckgo.com/i.js?l=us-en&o=json&q=${encodeURIComponent(smartQuery)}&vqd=${vqd}&f=,,,&p=1&s=${offset}`;
         
         const imgResp = await fetch(apiUrl, {
             headers: {
@@ -94,10 +127,7 @@ export async function fetchFromDuckDuckGo(rawQuery: string | null, page: number 
             }
         });
 
-        if (!imgResp.ok) {
-            console.error(`[DDG API Error] Status: ${imgResp.status}`);
-            return [];
-        }
+        if (!imgResp.ok) return [];
 
         const data = await imgResp.json();
         
@@ -116,19 +146,16 @@ export async function fetchFromDuckDuckGo(rawQuery: string | null, page: number 
                 author: img.source || "Web"
             }));
 
-        // Убираем дубликаты
         const uniqueImages = Array.from(new Map(cleanImages.map((item: any) => [item.image_url, item])).values());
         
         if (uniqueImages.length > 0) {
             memoryCache.set(cacheKey, uniqueImages);
-            // Кэшируем на 5 минут, чтобы не спамить DDG одними и теми же запросами
             setTimeout(() => memoryCache.delete(cacheKey), 5 * 60 * 1000); 
         }
         
-        // Возвращаем первые 40 картинок, как и было у Serper, чтобы не перегружать интерфейс
         return uniqueImages.slice(0, 40); 
     } catch (e) {
-        console.error("DuckDuckGo Parsing Error:", e);
+        console.error("Search Error:", e);
         return [];
     }
 }
@@ -137,7 +164,6 @@ export async function GET(req: Request) {
     const { searchParams } = new URL(req.url);
     const query = sanitizeQuery(searchParams.get("query") || searchParams.get("q") || searchParams.get("search"));
     const fallbackCategory = sanitizeQuery(searchParams.get("category"));
-    
     const finalQuery = query || fallbackCategory || "aesthetic";
     const page = parseInt(searchParams.get("page") || "1", 10) || 1;
     
@@ -150,7 +176,6 @@ export async function POST(req: Request) {
         const body = await req.json();
         const query = sanitizeQuery(body.query || body.q || body.search);
         const fallbackCategory = sanitizeQuery(body.category);
-        
         const finalQuery = query || fallbackCategory || "aesthetic";
         const page = parseInt(body.page || "1", 10) || 1;
         

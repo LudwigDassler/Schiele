@@ -2,7 +2,7 @@
 
 export const dynamic = "force-dynamic";
 
-// Блокируем мертвые CDN, стоки с вотермарками и сайты с защитой от хотлинкинга
+// Оставляем фильтр плохих доменов, чтобы в эстетику не пролез водяной знак Shutterstock
 const BAD_DOMAINS = [
     "pixabay.com", "picsum.photos", "fbsbx.com", "shutterstock.com", 
     "istockphoto.com", "adobestock.com", "adobe.com", "gettyimages.com", 
@@ -13,7 +13,6 @@ function isValidImage(url: string) {
     if (!url) return false;
     try {
         const p = new URL(url);
-        // Пропускаем только нормальные http/https ссылки (никаких base64 или локальных путей)
         if (p.protocol !== "http:" && p.protocol !== "https:") return false;
         if (BAD_DOMAINS.some(domain => p.hostname.includes(domain))) return false;
         
@@ -27,8 +26,6 @@ function isValidImage(url: string) {
     }
 }
 
-// Детерминированный генератор ID. 
-// Спасает React от ошибки 'Duplicate keys', жестко привязывая ID к номеру страницы.
 const generateSafeId = (url: string, page: number) => {
     const str = url + "-page-" + page;
     let hash = 0;
@@ -40,14 +37,12 @@ const generateSafeId = (url: string, page: number) => {
 
 const memoryCache = new Map();
 
-// Жесткий запрет на кэширование браузером (убивает призрачные баги при переходах назад-вперед)
 export const noCacheHeaders = {
     "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
     "Pragma": "no-cache",
     "Expires": "0",
 };
 
-// Зачистка фронтенд-мусора
 export const sanitizeQuery = (q: string | null) => {
     if (!q || q === "null" || q === "undefined" || q === "All" || q.trim() === "") {
         return null;
@@ -55,9 +50,10 @@ export const sanitizeQuery = (q: string | null) => {
     return q.trim();
 };
 
-export async function fetchFromGoogle(rawQuery: string | null, page: number = 1) {
-    if (!process.env.SERPER_API_KEY) return [];
-
+// ==========================================
+// НОВЫЙ ХАКЕРСКИЙ ПАРСЕР DUCKDUCKGO
+// ==========================================
+export async function fetchFromDuckDuckGo(rawQuery: string | null, page: number = 1) {
     const query = rawQuery || "aesthetic pinterest high quality photography";
     const cacheKey = `${query}-page-${page}`;
     
@@ -66,67 +62,86 @@ export async function fetchFromGoogle(rawQuery: string | null, page: number = 1)
     }
 
     try {
-        const response = await fetch("https://google.serper.dev/images", {
-            method: "POST",
+        // ШАГ 1: Притворяемся браузером и забираем секретный токен vqd
+        const htmlResp = await fetch(`https://duckduckgo.com/?q=${encodeURIComponent(query)}&ia=images&iax=images`, {
             headers: {
-                "X-API-KEY": process.env.SERPER_API_KEY,
-                "Content-Type": "application/json"
-            },
-            body: JSON.stringify({ q: query, num: 40, page: page }),
-            cache: "no-store"
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+                "Accept-Language": "en-US,en;q=0.5"
+            }
+        });
+        
+        const html = await htmlResp.text();
+        
+        // Регулярка для вытаскивания токена из сырого HTML
+        const vqdMatch = html.match(/vqd=["']?([^"'\s&]+)["']?/);
+        if (!vqdMatch) {
+            console.error("[DDG Parser Error] Token vqd not found! IP might be flagged or DDG changed their HTML.");
+            return [];
+        }
+        const vqd = vqdMatch[1];
+        
+        // ШАГ 2: Бьем прямо в скрытый API картинок
+        // s - это offset (сдвиг). DDG отдает пачками примерно по 100 штук
+        const offset = (page - 1) * 100;
+        const apiUrl = `https://duckduckgo.com/i.js?l=us-en&o=json&q=${encodeURIComponent(query)}&vqd=${vqd}&f=,,,&p=1&s=${offset}`;
+        
+        const imgResp = await fetch(apiUrl, {
+            headers: {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Accept": "application/json, text/javascript, */*; q=0.01",
+                "Referer": "https://duckduckgo.com/"
+            }
         });
 
-        if (!response.ok) {
-            const errText = await response.text();
-            console.error(`[Serper API Error] Status: ${response.status} | Details: ${errText}`);
+        if (!imgResp.ok) {
+            console.error(`[DDG API Error] Status: ${imgResp.status}`);
             return [];
         }
 
-        const data = await response.json();
+        const data = await imgResp.json();
         
-        const cleanImages = (data.images || [])
-            .filter((img: any) => isValidImage(img.imageUrl))
+        const cleanImages = (data.results || [])
+            .filter((img: any) => isValidImage(img.image))
             .map((img: any) => ({
-                id: generateSafeId(img.imageUrl, page),
+                id: generateSafeId(img.image, page),
                 title: img.title || query,
-                image_url: img.imageUrl,
-                url: img.imageUrl,
-                src: img.imageUrl,
-                thumb: img.thumbnailUrl || img.imageUrl,
-                width: img.imageWidth || 600,
-                height: img.imageHeight || 800,
-                source: "google",
+                image_url: img.image,
+                url: img.url,
+                src: img.image,
+                thumb: img.thumbnail || img.image,
+                width: img.width || 600,
+                height: img.height || 800,
+                source: "duckduckgo",
                 author: img.source || "Web"
             }));
 
+        // Убираем дубликаты
         const uniqueImages = Array.from(new Map(cleanImages.map((item: any) => [item.image_url, item])).values());
         
         if (uniqueImages.length > 0) {
             memoryCache.set(cacheKey, uniqueImages);
-            // Храним в кэше 5 минут, чтобы не перегружать сервер
-            setTimeout(() => memoryCache.delete(cacheKey), 5 * 60 * 1000);
+            // Кэшируем на 5 минут, чтобы не спамить DDG одними и теми же запросами
+            setTimeout(() => memoryCache.delete(cacheKey), 5 * 60 * 1000); 
         }
         
-        return uniqueImages;
+        // Возвращаем первые 40 картинок, как и было у Serper, чтобы не перегружать интерфейс
+        return uniqueImages.slice(0, 40); 
     } catch (e) {
-        console.error("Google Parsing Error:", e);
+        console.error("DuckDuckGo Parsing Error:", e);
         return [];
     }
 }
-// ==========================================
-// РОУТЫ ПОИСКА (ВОЗВРАЩАЮТ МАССИВ)
-// ПРАВИЛО: ПОИСКОВЫЙ ЗАПРОС ИМЕЕТ АБСОЛЮТНЫЙ ПРИОРИТЕТ
-// ==========================================
+
 export async function GET(req: Request) {
     const { searchParams } = new URL(req.url);
     const query = sanitizeQuery(searchParams.get("query") || searchParams.get("q") || searchParams.get("search"));
     const fallbackCategory = sanitizeQuery(searchParams.get("category"));
     
-    // Если есть поиск - используем его. Игнорируем категорию.
     const finalQuery = query || fallbackCategory || "aesthetic";
     const page = parseInt(searchParams.get("page") || "1", 10) || 1;
     
-    const images = await fetchFromGoogle(finalQuery, page);
+    const images = await fetchFromDuckDuckGo(finalQuery, page);
     return NextResponse.json(images, { headers: noCacheHeaders });
 }
 
@@ -139,7 +154,7 @@ export async function POST(req: Request) {
         const finalQuery = query || fallbackCategory || "aesthetic";
         const page = parseInt(body.page || "1", 10) || 1;
         
-        const images = await fetchFromGoogle(finalQuery, page);
+        const images = await fetchFromDuckDuckGo(finalQuery, page);
         return NextResponse.json(images, { headers: noCacheHeaders });
     } catch {
         return NextResponse.json([], { headers: noCacheHeaders });

@@ -70,31 +70,48 @@ export default function Home() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [search]);
 
+  // НАДЕЖНАЯ ИНИЦИАЛИЗАЦИЯ (Без бесконечных циклов)
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => { setUser(data.session?.user ?? null); if (data.session?.user) fetchUserData(data.session.user.id); });
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_, session) => { setUser(session?.user ?? null); if (session?.user) fetchUserData(session.user.id); });
+    let mounted = true;
+    
+    supabase.auth.getSession().then(({ data }) => { 
+        if(mounted) {
+            setUser(data.session?.user ?? null); 
+            if (data.session?.user) fetchUserData(data.session.user.id); 
+        }
+    });
+    
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_, session) => { 
+        if(mounted) {
+            setUser(session?.user ?? null); 
+            if (session?.user) fetchUserData(session.user.id); 
+        }
+    });
     
     let initialQuery = "Aesthetic";
     try { 
         const savedTags = localStorage.getItem("gelbet_user_tags"); 
-        if (savedTags) { 
+        if (savedTags) {
             const parsed = JSON.parse(savedTags);
-            setUserTags(parsed); 
-            if (parsed.length > 0) initialQuery = parsed[0]; // Берем последний поиск юзера!
-        } 
+            setUserTags(parsed);
+            if (parsed.length > 0) initialQuery = parsed[0];
+        }
         const allowedNsfw = localStorage.getItem("gelbet_nsfw_18plus"); 
         if (allowedNsfw === "true") setNsfwAllowed(true); 
     } catch (e) {}
-    
-    setSearchQuery(initialQuery);
-    setSearch(initialQuery);
-    fetchPhotos(initialQuery, 1, true);
 
-    return () => subscription.unsubscribe();
-  }, [fetchPhotos]);
+    if(mounted) {
+        setSearchQuery(initialQuery);
+        setSearch(initialQuery);
+        setPage(1); setHasMore(true); setPhotos([]);
+        fetchPhotos(initialQuery, 1, true);
+    }
 
-  // Убираем старый useEffect, который дублировал загрузку
-  // 
+    return () => {
+        mounted = false;
+        subscription.unsubscribe();
+    };
+  }, []); 
 
   useEffect(() => { if (selected) setMainImgLoaded(false); }, [selected?.id]);
 
@@ -169,8 +186,6 @@ export default function Home() {
     } catch (e: any) { } finally { setRelatedLoading(false); }
   }, [searchQuery]);
 
-  
-
   useEffect(() => {
     if (!bottomRef.current) return;
     observerRef.current?.disconnect();
@@ -198,30 +213,44 @@ export default function Home() {
   function saveUserTag(tag: string) { const formattedTag = tag.trim().charAt(0).toUpperCase() + tag.trim().slice(1); setUserTags(prev => { const updated = [formattedTag, ...prev.filter(t => t.toLowerCase() !== formattedTag.toLowerCase())].slice(0, 8); localStorage.setItem("gelbet_user_tags", JSON.stringify(updated)); return updated; }); }
   function removeUserTag(tagToRemove: string, e?: React.MouseEvent) { if (e) e.stopPropagation(); setUserTags(prev => { const updated = prev.filter(t => t !== tagToRemove); localStorage.setItem("gelbet_user_tags", JSON.stringify(updated)); return updated; }); }
   function clearAllTags(e?: React.MouseEvent) { if (e) e.stopPropagation(); setUserTags([]); localStorage.removeItem("gelbet_user_tags"); }
-  function handleSearch(e: React.FormEvent) { e.preventDefault(); if (!search.trim()) return; setSearchQuery(search.trim()); saveUserTag(search.trim()); setIsMobileSearchOpen(false); setIsSearchFocused(false); closeAllPanels(); }
-  function handleTagClick(tag: string) { setSearch(tag); setSearchQuery(tag); saveUserTag(tag); setIsSearchFocused(false); setIsMobileSearchOpen(false); closeAllPanels(); }
-  function clearSearch() { setSearch(""); setSearchQuery("Aesthetic"); setIsMobileSearchOpen(false); closeAllPanels(); }
+  
+  function handleSearch(e: React.FormEvent) { 
+    e.preventDefault(); 
+    if (!search.trim()) return; 
+    const query = search.trim();
+    setSearchQuery(query); saveUserTag(query); setIsMobileSearchOpen(false); setIsSearchFocused(false); closeAllPanels(); 
+    setPage(1); setHasMore(true); setPhotos([]); fetchPhotos(query, 1, true);
+  }
+  function handleTagClick(tag: string) { 
+    setSearch(tag); setSearchQuery(tag); saveUserTag(tag); setIsSearchFocused(false); setIsMobileSearchOpen(false); closeAllPanels(); 
+    setPage(1); setHasMore(true); setPhotos([]); fetchPhotos(tag, 1, true);
+  }
+  function clearSearch() { 
+    setSearch(""); setSearchQuery("Aesthetic"); setIsMobileSearchOpen(false); closeAllPanels(); 
+    setPage(1); setHasMore(true); setPhotos([]); fetchPhotos("Aesthetic", 1, true);
+  }
 
   async function handleAIGenerate() {
     if (!aiPrompt.trim()) return;
     setShowAIModal(false); 
     setIsAILoading(true);
     
+    let finalQuery = aiPrompt.trim();
     try {
-      const aiRes = await fetch("/api/ai", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "enhance_prompt", payload: aiPrompt.trim() }) });
-      let query = aiPrompt.trim();
+      const aiRes = await fetch("/api/ai", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "enhance_prompt", payload: finalQuery }) });
       if (aiRes.ok) { 
           const data = await aiRes.json(); 
-          if (data.result) query = data.result; 
+          if (data.result) finalQuery = data.result; 
       } else { 
           showToast("AI Engine unreachable."); 
-          if (!/[а-яА-ЯёЁ]/.test(query) && !query.toLowerCase().includes('aesthetic')) query += " aesthetic"; 
+          if (!/[а-яА-ЯёЁ]/.test(finalQuery) && !finalQuery.toLowerCase().includes('aesthetic')) finalQuery += " aesthetic"; 
       }
-      setSearch(query); setSearchQuery(query); saveUserTag(query); setAiPrompt(""); setIsMobileSearchOpen(false); setIsSearchFocused(false);
     } catch (e) { 
         showToast("AI network error."); 
     } finally {
         setIsAILoading(false);
+        setSearch(finalQuery); setSearchQuery(finalQuery); saveUserTag(finalQuery); setAiPrompt(""); setIsMobileSearchOpen(false); setIsSearchFocused(false);
+        setPage(1); setHasMore(true); setPhotos([]); fetchPhotos(finalQuery, 1, true);
     }
   }
 
@@ -239,7 +268,7 @@ export default function Home() {
 
   return (
     <>
-      <style jsx global>{`
+      <style dangerouslySetInnerHTML={{ __html: `
         @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Crimson+Text:ital,wght@0,400;0,600;1,400&display=swap');
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
         
@@ -296,7 +325,7 @@ export default function Home() {
         @keyframes floatOrb { 0%, 100% { transform: translateX(-50%) translateY(0); } 50% { transform: translateX(-50%) translateY(-5px); } }
         @keyframes corePulse { 0% { transform: scale(0.8); opacity: 0.7; box-shadow: 0 0 5px rgba(192,82,26,0.5); } 100% { transform: scale(1.3); opacity: 1; box-shadow: 0 0 15px rgba(227,179,120,1); } }
         @keyframes coreRipple { 0% { width: 12px; height: 12px; opacity: 1; } 100% { width: 44px; height: 44px; opacity: 0; } }
-      `}</style>
+      `}} />
 
       <main style={{ minHeight: "100vh" }}>
         <header className="header">

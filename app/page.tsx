@@ -73,9 +73,28 @@ export default function Home() {
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => { setUser(data.session?.user ?? null); if (data.session?.user) fetchUserData(data.session.user.id); });
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_, session) => { setUser(session?.user ?? null); if (session?.user) fetchUserData(session.user.id); });
-    try { const savedTags = localStorage.getItem("gelbet_user_tags"); if (savedTags) setUserTags(JSON.parse(savedTags)); const allowedNsfw = localStorage.getItem("gelbet_nsfw_18plus"); if (allowedNsfw === "true") setNsfwAllowed(true); } catch (e) {}
+    
+    let initialQuery = "Aesthetic";
+    try { 
+        const savedTags = localStorage.getItem("gelbet_user_tags"); 
+        if (savedTags) { 
+            const parsed = JSON.parse(savedTags);
+            setUserTags(parsed); 
+            if (parsed.length > 0) initialQuery = parsed[0]; // Берем последний поиск юзера!
+        } 
+        const allowedNsfw = localStorage.getItem("gelbet_nsfw_18plus"); 
+        if (allowedNsfw === "true") setNsfwAllowed(true); 
+    } catch (e) {}
+    
+    setSearchQuery(initialQuery);
+    setSearch(initialQuery);
+    fetchPhotos(initialQuery, 1, true);
+
     return () => subscription.unsubscribe();
-  }, []);
+  }, [fetchPhotos]);
+
+  // Убираем старый useEffect, который дублировал загрузку
+  // 
 
   useEffect(() => { if (selected) setMainImgLoaded(false); }, [selected?.id]);
 
@@ -150,7 +169,7 @@ export default function Home() {
     } catch (e: any) { } finally { setRelatedLoading(false); }
   }, [searchQuery]);
 
-  useEffect(() => { setPage(1); setHasMore(true); setPhotos([]); fetchPhotos(searchQuery, 1, true); }, [searchQuery, fetchPhotos]);
+  
 
   useEffect(() => {
     if (!bottomRef.current) return;

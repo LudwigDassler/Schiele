@@ -51,9 +51,15 @@ export const sanitizeQuery = (q: string | null) => {
 };
 
 // ==========================================
-// ИИ-ОПТИМИЗАТОР ЗАПРОСОВ (Убивает Among Us)
+// ИИ-ОПТИМИЗАТОР (ТЕПЕРЬ УМНЫЙ И БЫСТРЫЙ)
 // ==========================================
 async function enhanceSearchQuery(rawQuery: string) {
+    // БАЙПАС ДЛЯ СКОРОСТИ: Если это простые английские слова (до 4 слов), пропускаем ИИ. 
+    // Это заставит главную страницу грузиться мгновенно.
+    if (/^[a-zA-Z0-9\s\-]+$/.test(rawQuery) && rawQuery.split(/\s+/).length <= 4) {
+        return rawQuery;
+    }
+
     const keys = [
         process.env.GEMINI_API_KEY,
         process.env.GEMINI_API_KEY_2,
@@ -65,28 +71,30 @@ async function enhanceSearchQuery(rawQuery: string) {
     try {
         const randomKey = keys[Math.floor(Math.random() * keys.length)];
         const genAI = new GoogleGenerativeAI(randomKey);
+        
+        // ВЕРНУЛ ТВОЮ 3.6 ВЕРСИЮ, КАК ПРОСИЛ!
         const model = genAI.getGenerativeModel({ model: "gemini-3.6-flash" });
         
-        const prompt = `You are a search query optimizer for an image search engine. 
+        const prompt = `You are a search query optimizer. 
         User query: "${rawQuery}"
-        Task:
-        1. Translate to English if it's in another language.
-        2. If it's a character, historical figure, or ambiguous term (e.g., "амон гет"), disambiguate it by adding context (e.g., "Amon Goeth Schindler's List").
-        3. Return ONLY the final optimized English search string. No quotes, no extra text.`;
+        1. Translate to English if needed.
+        2. Disambiguate context (e.g., "Луна 2112" -> "Moon 2009 sci-fi movie").
+        3. Return ONLY the English search string. No quotes, no extra text.`;
         
         const result = await model.generateContent(prompt);
-        const optimized = result.response.text().replace(/["']/g, "").trim();
+        const optimized = result.response.text().replace(/["'\n]/g, " ").trim();
         return optimized || rawQuery;
     } catch (e) {
+        console.error("[AI Optimizer Error]:", e);
         return rawQuery;
     }
 }
 
 // ==========================================
-// ПАРСЕР DUCKDUCKGO
+// ПАРСЕР DUCKDUCKGO (СТАБИЛЬНЫЙ)
 // ==========================================
 export async function fetchFromDuckDuckGo(rawQuery: string | null, page: number = 1) {
-    const query = rawQuery || "aesthetic pinterest high quality photography";
+    const query = rawQuery || "aesthetic";
     const cacheKey = `${query}-page-${page}`;
     const smartQueryKey = `smart-${query}`;
     
@@ -95,33 +103,41 @@ export async function fetchFromDuckDuckGo(rawQuery: string | null, page: number 
     }
 
     try {
-        // Проверяем, переводили ли мы уже этот запрос (чтобы не дергать ИИ при скролле вниз)
         let smartQuery = memoryCache.get(smartQueryKey);
         if (!smartQuery) {
             smartQuery = await enhanceSearchQuery(query);
             memoryCache.set(smartQueryKey, smartQuery);
-            setTimeout(() => memoryCache.delete(smartQueryKey), 15 * 60 * 1000); // чистим через 15 минут
+            setTimeout(() => memoryCache.delete(smartQueryKey), 15 * 60 * 1000); 
         }
+
+        // ЖЕСТКО фиксируем ОДИН User-Agent на оба запроса, чтобы DDG не банил за подозрительность
+        const ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
 
         const htmlResp = await fetch(`https://duckduckgo.com/?q=${encodeURIComponent(smartQuery)}&ia=images&iax=images`, {
             headers: {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+                "User-Agent": ua,
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
                 "Accept-Language": "en-US,en;q=0.5"
             }
         });
         
         const html = await htmlResp.text();
         const vqdMatch = html.match(/vqd=["']?([^"'\s&]+)["']?/);
-        if (!vqdMatch) return [];
-        const vqd = vqdMatch[1];
         
+        if (!vqdMatch) {
+            console.error("[DDG Parser] vqd not found.");
+            return [];
+        }
+        
+        const vqd = vqdMatch[1];
         const offset = (page - 1) * 100;
-        const apiUrl = `https://duckduckgo.com/i.js?l=us-en&o=json&q=${encodeURIComponent(smartQuery)}&vqd=${vqd}&f=,,,&p=1&s=${offset}`;
+        
+        // ВЕРНУЛ l=us-en. Мы переводим запросы на англ, так что американская выдача идеальна и не ломает API.
+        const apiUrl = `https://duckduckgo.com/i.js?l=us-en&o=json&q=${encodeURIComponent(smartQuery)}&vqd=${vqd}&f=,,,&p=-1&s=${offset}`;
         
         const imgResp = await fetch(apiUrl, {
             headers: {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "User-Agent": ua,
                 "Accept": "application/json, text/javascript, */*; q=0.01",
                 "Referer": "https://duckduckgo.com/"
             }
@@ -130,7 +146,6 @@ export async function fetchFromDuckDuckGo(rawQuery: string | null, page: number 
         if (!imgResp.ok) return [];
 
         const data = await imgResp.json();
-        
         const cleanImages = (data.results || [])
             .filter((img: any) => isValidImage(img.image))
             .map((img: any) => ({
@@ -147,12 +162,10 @@ export async function fetchFromDuckDuckGo(rawQuery: string | null, page: number 
             }));
 
         const uniqueImages = Array.from(new Map(cleanImages.map((item: any) => [item.image_url, item])).values());
-        
         if (uniqueImages.length > 0) {
             memoryCache.set(cacheKey, uniqueImages);
             setTimeout(() => memoryCache.delete(cacheKey), 5 * 60 * 1000); 
         }
-        
         return uniqueImages.slice(0, 40); 
     } catch (e) {
         console.error("Search Error:", e);

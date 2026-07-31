@@ -76,7 +76,11 @@ export async function fetchFromGoogle(rawQuery: string | null, page: number = 1)
             cache: "no-store"
         });
 
-        if (!response.ok) return [];
+        if (!response.ok) {
+            const errText = await response.text();
+            console.error(`[Serper API Error] Status: ${response.status} | Details: ${errText}`);
+            return [];
+        }
 
         const data = await response.json();
         

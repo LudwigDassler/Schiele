@@ -43,25 +43,29 @@ const fetchWithTimeout = async (url: string, options: any, timeout = 4000) => {
     }
 };
 
-export async function fetchFromEngines(rawQuery: string | null, page: number = 1, userId: string | null = null) {
+export async function fetchFromEngines(rawQuery: string | null, page: number = 1, userId: string | null = null, mode: string = "classic") {
     const query = rawQuery || "aesthetic";
     
-    // Кэш теперь персональный, чтобы не смешивать выдачу разных людей!
-    const cacheKey = `${query}-page-${page}-user-${userId || 'anon'}`;
+    // Кэш теперь учитывает и юзера, и режим!
+    const cacheKey = `${query}-page-${page}-mode-${mode}-user-${userId || 'anon'}`;
     
     if (memoryCache.has(cacheKey)) return memoryCache.get(cacheKey); 
 
-    const smartQuery = await kashmir.processQuery(query, userId);
+    // ТУМБЛЕР: Включаем нейронку только если mode === "kashmir"
+    let finalQuery = query;
+    if (mode === "kashmir") {
+        finalQuery = await kashmir.processQuery(query, userId);
+    }
     
     const ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
     const searchDDG = async () => {
-        const htmlResp = await fetchWithTimeout(`https://duckduckgo.com/?q=${encodeURIComponent(smartQuery)}&ia=images&iax=images`, { headers: { "User-Agent": ua } });
+        const htmlResp = await fetchWithTimeout(`https://duckduckgo.com/?q=${encodeURIComponent(finalQuery)}&ia=images&iax=images`, { headers: { "User-Agent": ua } });
         const html = await htmlResp.text();
         const vqdMatch = html.match(/vqd=["']?([^"'\s&]+)["']?/);
         if (!vqdMatch) throw new Error("DDG VQD Error");
         
-        const apiUrl = `https://duckduckgo.com/i.js?l=us-en&o=json&q=${encodeURIComponent(smartQuery)}&vqd=${vqdMatch[1]}&f=,,,&p=1&s=${(page - 1) * 50}`;
+        const apiUrl = `https://duckduckgo.com/i.js?l=us-en&o=json&q=${encodeURIComponent(finalQuery)}&vqd=${vqdMatch[1]}&f=,,,&p=1&s=${(page - 1) * 50}`;
         const imgResp = await fetchWithTimeout(apiUrl, { headers: { "User-Agent": ua, "Referer": "https://duckduckgo.com/" } });
         const data = await imgResp.json();
         
@@ -90,12 +94,12 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const query = sanitizeQuery(searchParams.get("query") || searchParams.get("q"));
     const page = parseInt(searchParams.get("page") || "1", 10) || 1;
+    const mode = searchParams.get("mode") || "classic"; 
     
-    // Пытаемся достать токен авторизации
     const token = await getToken({ req, secret: process.env.AUTH_SECRET });
     const userId = token?.sub || searchParams.get("userId") || null;
 
-    const images = await fetchFromEngines(query, page, userId);
+    const images = await fetchFromEngines(query, page, userId, mode);
     return NextResponse.json(images, { headers: noCacheHeaders });
 }
 
@@ -104,12 +108,12 @@ export async function POST(req: NextRequest) {
         const body = await req.json();
         const query = sanitizeQuery(body.query || body.q);
         const page = parseInt(body.page || "1", 10) || 1;
+        const mode = body.mode || "classic"; 
 
-        // Пытаемся достать токен авторизации
         const token = await getToken({ req, secret: process.env.AUTH_SECRET });
         const userId = token?.sub || body.userId || null;
 
-        const images = await fetchFromEngines(query, page, userId);
+        const images = await fetchFromEngines(query, page, userId, mode);
         return NextResponse.json(images, { headers: noCacheHeaders });
     } catch { return NextResponse.json([], { headers: noCacheHeaders }); }
 }

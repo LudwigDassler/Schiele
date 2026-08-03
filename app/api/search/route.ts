@@ -1,4 +1,5 @@
-﻿import { NextResponse } from "next/server";
+﻿import { NextRequest, NextResponse } from "next/server";
+import { getToken } from "next-auth/jwt";
 import { kashmir } from "../../../lib/kashmir";
 
 export const dynamic = "force-dynamic";
@@ -42,13 +43,15 @@ const fetchWithTimeout = async (url: string, options: any, timeout = 4000) => {
     }
 };
 
-export async function fetchFromEngines(rawQuery: string | null, page: number = 1) {
+export async function fetchFromEngines(rawQuery: string | null, page: number = 1, userId: string | null = null) {
     const query = rawQuery || "aesthetic";
-    const cacheKey = `${query}-page-${page}`;
+    
+    // Кэш теперь персональный, чтобы не смешивать выдачу разных людей!
+    const cacheKey = `${query}-page-${page}-user-${userId || 'anon'}`;
     
     if (memoryCache.has(cacheKey)) return memoryCache.get(cacheKey); 
 
-    const smartQuery = await kashmir.processQuery(query);
+    const smartQuery = await kashmir.processQuery(query, userId);
     
     const ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
@@ -83,20 +86,30 @@ export async function fetchFromEngines(rawQuery: string | null, page: number = 1
     }
 }
 
-export async function GET(req: Request) {
+export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const query = sanitizeQuery(searchParams.get("query") || searchParams.get("q"));
     const page = parseInt(searchParams.get("page") || "1", 10) || 1;
-    const images = await fetchFromEngines(query, page);
+    
+    // Пытаемся достать токен авторизации
+    const token = await getToken({ req, secret: process.env.AUTH_SECRET });
+    const userId = token?.sub || searchParams.get("userId") || null;
+
+    const images = await fetchFromEngines(query, page, userId);
     return NextResponse.json(images, { headers: noCacheHeaders });
 }
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
     try {
         const body = await req.json();
         const query = sanitizeQuery(body.query || body.q);
         const page = parseInt(body.page || "1", 10) || 1;
-        const images = await fetchFromEngines(query, page);
+
+        // Пытаемся достать токен авторизации
+        const token = await getToken({ req, secret: process.env.AUTH_SECRET });
+        const userId = token?.sub || body.userId || null;
+
+        const images = await fetchFromEngines(query, page, userId);
         return NextResponse.json(images, { headers: noCacheHeaders });
     } catch { return NextResponse.json([], { headers: noCacheHeaders }); }
 }

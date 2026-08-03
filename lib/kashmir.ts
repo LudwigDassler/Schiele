@@ -11,16 +11,23 @@ export class KashmirEngine {
         this.apiKey = process.env.GROQ_API_KEY;
     }
 
-    private async getVibeContext(): Promise<string> {
+    private async getVibeContext(userId?: string | null): Promise<string> {
         if (!supabase) {
             console.warn("[Kashmir] Supabase not configured. Memory offline.");
             return "";
         }
 
         try {
-            const { data, error } = await supabase
+            let query = supabase
                 .from('ai_image_cache')
-                .select('ai_tags')
+                .select('ai_tags');
+
+            // КЛЮЧЕВОЙ МОМЕНТ: Берем теги только конкретного юзера!
+            if (userId) {
+                query = query.eq('user_id', userId);
+            }
+
+            const { data, error } = await query
                 .order('created_at', { ascending: false })
                 .limit(5);
 
@@ -31,14 +38,14 @@ export class KashmirEngine {
                 .filter(Boolean)
                 .join(" | ");
 
-            return `\n\nCRITICAL VIBE CONTEXT: To understand the specific aesthetic the user prefers, here are their 5 most recent successful generations from the database: [ ${recentTags} ]. Match this level of artistic depth, irony, or vintage mood if the user's prompt is ambiguous.`;
+            return `\n\nCRITICAL VIBE CONTEXT: To understand the specific aesthetic the user prefers, here are their most recent successful generations from the database: [ ${recentTags} ]. Match this level of artistic depth, irony, or vintage mood.`;
         } catch (e) {
             console.warn("[Kashmir] Memory retrieval failed:", e);
             return "";
         }
     }
 
-    public async processQuery(rawQuery: string): Promise<string> {
+    public async processQuery(rawQuery: string, userId?: string | null): Promise<string> {
         const query = rawQuery.trim();
         if (!query) return "aesthetic";
 
@@ -47,7 +54,7 @@ export class KashmirEngine {
             return `${query} aesthetic`.trim();
         }
 
-        const memoryContext = await this.getVibeContext();
+        const memoryContext = await this.getVibeContext(userId);
 
         try {
             const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
@@ -85,7 +92,7 @@ RULES:
             let kashmirResponse = data.choices[0].message.content.trim();
             kashmirResponse = kashmirResponse.replace(/["']/g, "");
             
-            console.log(`[Kashmir] Synthesized with Memory: "${query}" -> "${kashmirResponse}"`);
+            console.log(`[Kashmir] Synthesized for user ${userId || 'anon'}: "${query}" -> "${kashmirResponse}"`);
             return kashmirResponse;
 
         } catch (error) {

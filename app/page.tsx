@@ -101,7 +101,7 @@ export default function Home() {
 
     if(mounted) {
         setSearchQuery(initialQuery);
-        setSearch(initialQuery);
+        // setSearch(initialQuery); // Вырезано
         setPage(1); setHasMore(true); setPhotos([]);
         fetchPhotos(initialQuery, 1, true);
     }

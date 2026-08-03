@@ -4,6 +4,13 @@ import { kashmir } from "../../../lib/kashmir";
 
 export const dynamic = "force-dynamic";
 
+const FALLBACK_IMAGES = [
+    { id: "fb-1", title: "Aesthetic Archive 01", image_url: "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=1000&auto=format&fit=crop", url: "https://unsplash.com", src: "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=1000&auto=format&fit=crop", thumb: "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=400&auto=format&fit=crop", width: 800, height: 1000, source: "fallback", author: "Unsplash" },
+    { id: "fb-2", title: "Dark Academia Vibe", image_url: "https://images.unsplash.com/photo-1513519245088-0e12902e5a38?q=80&w=1000&auto=format&fit=crop", url: "https://unsplash.com", src: "https://images.unsplash.com/photo-1513519245088-0e12902e5a38?q=80&w=1000&auto=format&fit=crop", thumb: "https://images.unsplash.com/photo-1513519245088-0e12902e5a38?q=80&w=400&auto=format&fit=crop", width: 800, height: 1000, source: "fallback", author: "Unsplash" },
+    { id: "fb-3", title: "Minimalist Space", image_url: "https://images.unsplash.com/photo-1507089947368-19c1da9775ae?q=80&w=1000&auto=format&fit=crop", url: "https://unsplash.com", src: "https://images.unsplash.com/photo-1507089947368-19c1da9775ae?q=80&w=1000&auto=format&fit=crop", thumb: "https://images.unsplash.com/photo-1507089947368-19c1da9775ae?q=80&w=400&auto=format&fit=crop", width: 800, height: 1000, source: "fallback", author: "Unsplash" },
+    { id: "fb-4", title: "Cyberpunk Glow", image_url: "https://images.unsplash.com/photo-1509198397868-475647b2a1e5?q=80&w=1000&auto=format&fit=crop", url: "https://unsplash.com", src: "https://images.unsplash.com/photo-1509198397868-475647b2a1e5?q=80&w=1000&auto=format&fit=crop", thumb: "https://images.unsplash.com/photo-1509198397868-475647b2a1e5?q=80&w=400&auto=format&fit=crop", width: 800, height: 1000, source: "fallback", author: "Unsplash" }
+];
+
 function isValidImage(url: string) {
     if (!url || typeof url !== 'string') return false;
     if (!url.startsWith('http')) return false;
@@ -45,16 +52,15 @@ const fetchWithTimeout = async (url: string, options: any, timeout = 4000) => {
 
 export async function fetchFromEngines(rawQuery: string | null, page: number = 1, userId: string | null = null, mode: string = "classic") {
     const query = rawQuery || "aesthetic";
-    
-    // Кэш теперь учитывает и юзера, и режим!
     const cacheKey = `${query}-page-${page}-mode-${mode}-user-${userId || 'anon'}`;
     
     if (memoryCache.has(cacheKey)) return memoryCache.get(cacheKey); 
 
-    // ТУМБЛЕР: Включаем нейронку только если mode === "kashmir"
     let finalQuery = query;
     if (mode === "kashmir") {
-        finalQuery = await kashmir.processQuery(query, userId);
+        try {
+            finalQuery = await kashmir.processQuery(query, userId);
+        } catch (e) {}
     }
     
     const ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
@@ -83,10 +89,11 @@ export async function fetchFromEngines(rawQuery: string | null, page: number = 1
         if (uniqueImages.length > 0) {
             memoryCache.set(cacheKey, uniqueImages);
             setTimeout(() => memoryCache.delete(cacheKey), 5 * 60 * 1000); 
+            return uniqueImages.slice(0, 40);
         }
-        return uniqueImages.slice(0, 40); 
+        throw new Error("No unique images");
     } catch (e) {
-        return [];
+        return FALLBACK_IMAGES;
     }
 }
 
@@ -115,5 +122,5 @@ export async function POST(req: NextRequest) {
 
         const images = await fetchFromEngines(query, page, userId, mode);
         return NextResponse.json(images, { headers: noCacheHeaders });
-    } catch { return NextResponse.json([], { headers: noCacheHeaders }); }
+    } catch { return NextResponse.json(FALLBACK_IMAGES, { headers: noCacheHeaders }); }
 }

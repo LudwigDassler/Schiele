@@ -12,11 +12,11 @@ const SYNTH_USERS = [
     { id: "synth-007-noir", name: "Vincent", query: "detective", color: "#a9a9a9", desc: "Cinematic Noir" },
     { id: "synth-008-textile-art", name: "Iris", query: "fabric", color: "#d2b48c", desc: "Textile & Embroidery" },
     { id: "synth-009-blueprint", name: "Arthur", query: "structure", color: "#4682b4", desc: "Technical Blueprints" },
-    { id: "synth-010-terminal", name: "Ctrl", query: "server", color: "#39ff14", desc: "Terminal & CLI" },
-    { id: "synth-011-zoso", name: "Jimmy", query: "guitar", color: "#5c3a21", desc: "Occult Psychedelia" },
-    { id: "synth-012-golden-god", name: "Robert", query: "forest", color: "#e3b378", desc: "Celtic Myth & Fantasy" },
-    { id: "synth-013-maestro", name: "Jonesy", query: "studio", color: "#3e4a59", desc: "Studio Elegance" },
-    { id: "synth-014-bonzo", name: "Bonzo", query: "engine", color: "#8a1c1c", desc: "Thunderous Power" }
+    { id: "synth-010-terminal", name: "Elliot", query: "server", color: "#39ff14", desc: "Paranoid Sysadmin" },
+    { id: "synth-011-zoso", name: "Jimmy", query: "guitar", color: "#5c3a21", desc: "Occult Alchemist" },
+    { id: "synth-012-golden-god", name: "Robert", query: "forest", color: "#e3b378", desc: "Celtic Mystic" },
+    { id: "synth-013-maestro", name: "Jonesy", query: "studio", color: "#3e4a59", desc: "Structural Genius" },
+    { id: "synth-014-bonzo", name: "Bonzo", query: "engine", color: "#8a1c1c", desc: "Kinetic Juggernaut" }
 ];
 
 export default function KashmirDevMenu() {

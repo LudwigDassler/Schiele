@@ -6,6 +6,17 @@ const SYNTH_USERS = [
     { id: "synth-001-dark-academia", name: "Victoria", query: "library", color: "#8b5a2b", desc: "Dark Academia" },
     { id: "synth-002-cyberpunk", name: "Max", query: "neon city", color: "#00ffcc", desc: "Cyberpunk" },
     { id: "synth-003-minimalist", name: "Elena", query: "white room", color: "#f5f5dc", desc: "Minimalism" },
+    { id: "synth-004-cottagecore", name: "Oliver", query: "cottage", color: "#7ba05b", desc: "Cottagecore" },
+    { id: "synth-005-vaporwave", name: "Luna", query: "mall", color: "#ff71ce", desc: "Vaporwave & Y2K" },
+    { id: "synth-006-dark-fantasy", name: "Raven", query: "castle", color: "#4a0e4e", desc: "Dark Fantasy" },
+    { id: "synth-007-noir", name: "Vincent", query: "detective", color: "#a9a9a9", desc: "Cinematic Noir" },
+    { id: "synth-008-textile-art", name: "Iris", query: "fabric", color: "#d2b48c", desc: "Textile & Embroidery" },
+    { id: "synth-009-blueprint", name: "Arthur", query: "structure", color: "#4682b4", desc: "Technical Blueprints" },
+    { id: "synth-010-terminal", name: "Ctrl", query: "server", color: "#39ff14", desc: "Terminal & CLI" },
+    { id: "synth-011-zoso", name: "Jimmy", query: "guitar", color: "#5c3a21", desc: "Occult Psychedelia" },
+    { id: "synth-012-golden-god", name: "Robert", query: "forest", color: "#e3b378", desc: "Celtic Myth & Fantasy" },
+    { id: "synth-013-maestro", name: "Jonesy", query: "studio", color: "#3e4a59", desc: "Studio Elegance" },
+    { id: "synth-014-bonzo", name: "Bonzo", query: "engine", color: "#8a1c1c", desc: "Thunderous Power" }
 ];
 
 export default function KashmirDevMenu() {
@@ -26,12 +37,10 @@ export default function KashmirDevMenu() {
     }, []);
 
     const switchUser = (user: typeof SYNTH_USERS[0]) => {
-        // Записываем в Cookie и LocalStorage для бэкенда
         document.cookie = `kashmir_synth_user=${user.id}; path=/; max-age=31536000`;
         localStorage.setItem("kashmir_synth_user", user.id);
         
         const mode = user.id ? "kashmir" : "classic";
-        // Жесткий редирект с уникальным таймером _cb для обхода кэша Next.js
         window.location.href = `/?q=${encodeURIComponent(user.query)}&mode=${mode}&userId=${user.id}&_cb=${Date.now()}`;
     };
 
@@ -53,11 +62,18 @@ export default function KashmirDevMenu() {
                 .kashmir-sphere:hover { transform: scale(1.1); }
                 @keyframes ambientFlow { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }
                 @keyframes pulseSphereDark { 0% { box-shadow: 0 0 10px rgba(0,0,0, 0.9), inset -5px -5px 15px rgba(0,0,0,0.9); } 100% { box-shadow: 0 0 25px rgba(192, 82, 26, 0.25), inset -2px -2px 10px rgba(0,0,0,0.8); } }
+                
                 .kashmir-menu {
                     position: absolute; bottom: 70px; right: 0; background: rgba(8, 6, 4, 0.95); backdrop-filter: blur(16px);
-                    border: 1px solid #1a1208; border-radius: 12px; width: 240px; padding: 8px;
+                    border: 1px solid #1a1208; border-radius: 12px; width: 260px; padding: 8px;
                     transform-origin: bottom right; transition: all 0.4s; opacity: 0; transform: scale(0.8) translateY(20px); pointer-events: none;
+                    max-height: 60vh; overflow-y: auto;
                 }
+                .kashmir-menu::-webkit-scrollbar { width: 4px; }
+                .kashmir-menu::-webkit-scrollbar-track { background: transparent; }
+                .kashmir-menu::-webkit-scrollbar-thumb { background: #2a1f0e; border-radius: 4px; }
+                .kashmir-menu::-webkit-scrollbar-thumb:hover { background: #c0521a; }
+                
                 .kashmir-menu.open { opacity: 1; transform: scale(1) translateY(0); pointer-events: auto; }
                 .kashmir-user-row { display: flex; align-items: center; gap: 16px; padding: 10px 14px; border-radius: 8px; cursor: pointer; transition: all 0.2s; border: 1px solid transparent; }
                 .kashmir-user-row:hover { background: rgba(192, 82, 26, 0.05); }
@@ -70,7 +86,7 @@ export default function KashmirDevMenu() {
                     <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
                         {SYNTH_USERS.map(user => (
                             <div key={user.id} className={`kashmir-user-row ${synthUser === user.id ? "active" : ""}`} onClick={() => switchUser(user)}>
-                                <div style={{ display: "flex", flexDirection: "column" }}>
+                                <div style={{ display: "flex", flexDirection: "column", borderLeft: synthUser === user.id ? `2px solid ${user.color}` : "2px solid transparent", paddingLeft: "10px", transition: "border-color 0.2s" }}>
                                     <span style={{ color: synthUser === user.id ? "#d4b896" : "#8a6a4a", fontSize: "13px", fontWeight: 500 }}>{user.name}</span>
                                     <span style={{ color: "#5a4a3a", fontSize: "10px", fontStyle: "italic" }}>{user.desc}</span>
                                 </div>
@@ -78,7 +94,7 @@ export default function KashmirDevMenu() {
                         ))}
                     </div>
                 </div>
-                <div className="kashmir-sphere" onClick={() => setIsOpen(!isOpen)}></div>
+                <div className="kashmir-sphere" onClick={() => setIsOpen(!isOpen)} title={`Active: ${activeData.name}`}></div>
             </div>
         </div>
     );

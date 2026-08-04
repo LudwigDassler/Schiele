@@ -19,30 +19,50 @@ export default function KashmirDevMenu() {
         const savedUser = localStorage.getItem("kashmir_synth_user") || "";
         setSynthUser(savedUser);
 
+        // ЯДЕРНЫЙ ПЕРЕХВАТЧИК СЕТИ (Ловит Request, URL и строки)
         const originalFetch = window.fetch;
         window.fetch = async function(...args) {
-            let [resource, config] = args;
-            if (typeof resource === "string" && resource.includes("/api/search")) {
+            let resource = args[0];
+            let config = args[1] || {};
+
+            let urlStr = "";
+            let isRequestObj = false;
+
+            if (resource instanceof Request) {
+                urlStr = resource.url;
+                isRequestObj = true;
+            } else if (resource instanceof URL) {
+                urlStr = resource.toString();
+            } else if (typeof resource === "string") {
+                urlStr = resource;
+            }
+
+            if (urlStr && urlStr.includes("/api/search")) {
                 const devUser = localStorage.getItem("kashmir_synth_user");
                 if (devUser) {
-                    const url = new URL(resource, window.location.origin);
-                    url.searchParams.set("userId", devUser);
+                    const urlObj = new URL(urlStr, window.location.origin);
+                    urlObj.searchParams.set("userId", devUser);
                     
                     const activeData = SYNTH_USERS.find(u => u.id === devUser);
                     if (activeData && activeData.query) {
-                        const currentQ = url.searchParams.get("query") || url.searchParams.get("q") || "";
-                        if (!currentQ || currentQ === "aesthetic" || currentQ.trim() === "") {
-                            url.searchParams.set("q", activeData.query);
-                            url.searchParams.set("query", activeData.query);
+                        const currentQ = urlObj.searchParams.get("query") || urlObj.searchParams.get("q") || "";
+                        if (!currentQ || currentQ === "aesthetic" || currentQ === "null" || currentQ.trim() === "") {
+                            urlObj.searchParams.set("q", activeData.query);
+                            urlObj.searchParams.set("query", activeData.query);
                         }
-                        url.searchParams.set("mode", "kashmir");
+                        urlObj.searchParams.set("mode", "kashmir");
                     }
-                    // CACHE BUSTER: Добавляем уникальную метку времени к API-запросу
-                    url.searchParams.set("_cb", Date.now().toString());
-                    resource = url.toString();
+                    urlObj.searchParams.set("_cb", Date.now().toString());
+
+                    // Перепаковываем запрос обратно в нужный формат
+                    if (isRequestObj) {
+                        args[0] = new Request(urlObj.toString(), resource as Request);
+                    } else {
+                        args[0] = urlObj.toString();
+                    }
                 }
             }
-            return originalFetch(resource, config);
+            return originalFetch(...args);
         };
 
         const handleClickOutside = (e: MouseEvent) => {
@@ -53,13 +73,15 @@ export default function KashmirDevMenu() {
     }, []);
 
     const switchUser = (user: typeof SYNTH_USERS[0]) => {
+        // Пробиваем сервер через Cookie
+        document.cookie = `kashmir_synth_user=${user.id}; path=/; max-age=31536000`;
         localStorage.setItem("kashmir_synth_user", user.id);
         setSynthUser(user.id);
         setIsOpen(false);
         
+        // Жесткий редирект с явной передачей параметров
         if (user.id && user.query) {
-            // CACHE BUSTER: Добавляем метку времени к URL страницы
-            window.location.href = `/?q=${encodeURIComponent(user.query)}&mode=kashmir&_cb=${Date.now()}`;
+            window.location.href = `/?q=${encodeURIComponent(user.query)}&mode=kashmir&userId=${user.id}&_cb=${Date.now()}`;
         } else {
             window.location.href = `/?_cb=${Date.now()}`;
         }

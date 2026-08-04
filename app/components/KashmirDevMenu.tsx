@@ -38,15 +38,12 @@ export default function KashmirDevMenu() {
         const forceQuery = sessionStorage.getItem("kashmir_force_query");
         if (forceQuery) {
             setTimeout(() => {
-                // Ищем инпут по типу или плейсхолдеру
                 const input = document.querySelector('input[type="search"], input[placeholder*="Search"]') as HTMLInputElement;
                 if (input) {
-                    // Пробиваем внутреннее состояние React
                     const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
                     nativeInputValueSetter?.call(input, forceQuery);
                     input.dispatchEvent(new Event('input', { bubbles: true }));
                     
-                    // Эмулируем Enter или отправку формы
                     const form = input.closest('form');
                     if (form) {
                         form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
@@ -55,7 +52,7 @@ export default function KashmirDevMenu() {
                     }
                     sessionStorage.removeItem("kashmir_force_query");
                 }
-            }, 800); // Небольшая задержка, чтобы страница точно отрендерилась
+            }, 800);
         }
 
         const handleClickOutside = (e: MouseEvent) => {

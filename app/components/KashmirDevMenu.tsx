@@ -19,6 +19,7 @@ export default function KashmirDevMenu() {
         const savedUser = localStorage.getItem("kashmir_synth_user") || "";
         setSynthUser(savedUser);
 
+        // API Interceptor
         const originalFetch = window.fetch;
         window.fetch = async function(...args) {
             let [resource, config] = args;
@@ -33,6 +34,30 @@ export default function KashmirDevMenu() {
             return originalFetch(resource, config);
         };
 
+        // Ghost Typer: Заставляем строку поиска обновиться и отправиться
+        const forceQuery = sessionStorage.getItem("kashmir_force_query");
+        if (forceQuery) {
+            setTimeout(() => {
+                // Ищем инпут по типу или плейсхолдеру
+                const input = document.querySelector('input[type="search"], input[placeholder*="Search"]') as HTMLInputElement;
+                if (input) {
+                    // Пробиваем внутреннее состояние React
+                    const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
+                    nativeInputValueSetter?.call(input, forceQuery);
+                    input.dispatchEvent(new Event('input', { bubbles: true }));
+                    
+                    // Эмулируем Enter или отправку формы
+                    const form = input.closest('form');
+                    if (form) {
+                        form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+                    } else {
+                        input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));
+                    }
+                    sessionStorage.removeItem("kashmir_force_query");
+                }
+            }, 800); // Небольшая задержка, чтобы страница точно отрендерилась
+        }
+
         const handleClickOutside = (e: MouseEvent) => {
             if (menuRef.current && !menuRef.current.contains(e.target as Node)) setIsOpen(false);
         };
@@ -46,9 +71,10 @@ export default function KashmirDevMenu() {
         setIsOpen(false);
         
         if (user.id && user.query) {
-            const searchUrl = `/?q=${encodeURIComponent(user.query)}&mode=kashmir`;
-            window.location.href = searchUrl;
+            sessionStorage.setItem("kashmir_force_query", user.query);
+            window.location.href = `/?q=${encodeURIComponent(user.query)}&mode=kashmir`;
         } else {
+            sessionStorage.removeItem("kashmir_force_query");
             window.location.href = "/";
         }
     };
@@ -71,38 +97,31 @@ export default function KashmirDevMenu() {
             <style dangerouslySetInnerHTML={{ __html: `
                 .kashmir-core-container { position: relative; display: flex; align-items: center; justify-content: center; }
                 
-                /* Darker animated sphere */
+                /* Ambient Fluid Sphere */
                 .kashmir-sphere {
                     width: 50px; height: 50px;
                     border-radius: 50%;
-                    background: radial-gradient(circle at 30% 30%, #4a2511, #1a0f08, #000000);
-                    box-shadow: 0 0 15px rgba(0, 0, 0, 0.8), inset -5px -5px 15px rgba(0,0,0,0.9);
+                    background: linear-gradient(270deg, #0a0604, #3a1508, #a04010, #0a0604);
+                    background-size: 600% 600%;
+                    box-shadow: 0 0 15px rgba(0, 0, 0, 0.9), inset -5px -5px 15px rgba(0,0,0,0.9);
                     cursor: pointer;
-                    animation: pulseSphereDark 4s infinite alternate;
+                    animation: ambientFlow 6s ease infinite, pulseSphereDark 4s infinite alternate;
                     transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
                     position: relative;
                     z-index: 10;
-                    display: flex; align-items: center; justify-content: center;
-                    border: 1px solid rgba(227, 179, 120, 0.1);
+                    border: 1px solid rgba(227, 179, 120, 0.05);
                 }
-                .kashmir-sphere:hover { transform: scale(1.1); box-shadow: 0 0 25px rgba(192, 82, 26, 0.3); }
+                .kashmir-sphere:hover { transform: scale(1.1); box-shadow: 0 0 25px rgba(192, 82, 26, 0.4); }
                 .kashmir-sphere:active { transform: scale(0.95); }
                 
-                .kashmir-pupil-dark {
-                    width: 6px; height: 6px;
-                    background: #c0521a;
-                    border-radius: 50%;
-                    box-shadow: 0 0 10px #c0521a, 0 0 20px #e3b378;
-                    animation: blinkPupilDark 3s infinite;
+                @keyframes ambientFlow {
+                    0% { background-position: 0% 50%; }
+                    50% { background-position: 100% 50%; }
+                    100% { background-position: 0% 50%; }
                 }
-
                 @keyframes pulseSphereDark {
                     0% { box-shadow: 0 0 10px rgba(0,0,0, 0.9), inset -5px -5px 15px rgba(0,0,0,0.9); }
-                    100% { box-shadow: 0 0 20px rgba(192, 82, 26, 0.2), inset -2px -2px 10px rgba(0,0,0,0.8); filter: brightness(1.1); }
-                }
-                @keyframes blinkPupilDark {
-                    0%, 90%, 100% { transform: scale(1); opacity: 0.8; }
-                    95% { transform: scale(0.2); opacity: 0.2; }
+                    100% { box-shadow: 0 0 25px rgba(192, 82, 26, 0.25), inset -2px -2px 10px rgba(0,0,0,0.8); }
                 }
 
                 /* Dropdown menu */
@@ -191,9 +210,7 @@ export default function KashmirDevMenu() {
                     </div>
                 </div>
 
-                <div className="kashmir-sphere" onClick={() => setIsOpen(!isOpen)} title={`Current: ${activeData.name}`}>
-                    <div className="kashmir-pupil-dark"></div>
-                </div>
+                <div className="kashmir-sphere" onClick={() => setIsOpen(!isOpen)} title={`Current: ${activeData.name}`}></div>
             </div>
         </div>
     );

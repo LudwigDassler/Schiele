@@ -60,7 +60,10 @@ export async function fetchFromEngines(rawQuery: string | null, page: number = 1
     if (mode === "kashmir") {
         try {
             finalQuery = await kashmir.processQuery(query, userId);
-        } catch (e) {}
+            console.log(`[KASHMIR CORE] Transformed: "${query}" -> "${finalQuery}" for ${userId}`);
+        } catch (e) {
+            console.error(`[KASHMIR ERROR]:`, e);
+        }
     }
     
     const ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
@@ -93,6 +96,7 @@ export async function fetchFromEngines(rawQuery: string | null, page: number = 1
         }
         throw new Error("No unique images");
     } catch (e) {
+        console.error(`[DDG FALLBACK] Error fetching images:`, e);
         return FALLBACK_IMAGES;
     }
 }
@@ -104,7 +108,13 @@ export async function GET(req: NextRequest) {
     const mode = searchParams.get("mode") || "classic"; 
     
     const token = await getToken({ req, secret: process.env.AUTH_SECRET });
-    const userId = token?.sub || searchParams.get("userId") || null;
+    
+    // ХИРУРГИЧЕСКАЯ ПРАВКА: Синтетический юзер (Kashmir) имеет приоритет над реальным токеном
+    let userId = token?.sub || null;
+    const requestedUserId = searchParams.get("userId");
+    if (requestedUserId && (mode === "kashmir" || requestedUserId.startsWith("synth-"))) {
+        userId = requestedUserId; 
+    }
 
     const images = await fetchFromEngines(query, page, userId, mode);
     return NextResponse.json(images, { headers: noCacheHeaders });
@@ -118,7 +128,13 @@ export async function POST(req: NextRequest) {
         const mode = body.mode || "classic"; 
 
         const token = await getToken({ req, secret: process.env.AUTH_SECRET });
-        const userId = token?.sub || body.userId || null;
+        
+        // ХИРУРГИЧЕСКАЯ ПРАВКА: Синтетический юзер (Kashmir) имеет приоритет над реальным токеном
+        let userId = token?.sub || null;
+        const requestedUserId = body.userId;
+        if (requestedUserId && (mode === "kashmir" || requestedUserId.startsWith("synth-"))) {
+            userId = requestedUserId;
+        }
 
         const images = await fetchFromEngines(query, page, userId, mode);
         return NextResponse.json(images, { headers: noCacheHeaders });

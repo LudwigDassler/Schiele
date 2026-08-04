@@ -50,6 +50,8 @@ export default function Home() {
   const [showAgeGate, setShowAgeGate] = useState(false);
   const [activeVibe, setActiveVibe] = useState("");
   const [mainImgLoaded, setMainImgLoaded] = useState(false);
+  const [activeMode, setActiveMode] = useState("classic");
+  const [activeUserId, setActiveUserId] = useState<string | null>(null);
 
   const observerRef = useRef<IntersectionObserver | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -88,6 +90,8 @@ export default function Home() {
     });
     
     let initialQuery = "Aesthetic";
+    let urlMode = "classic";
+    let urlUserId: string | null = null;
     try { 
         const savedTags = localStorage.getItem("gelbet_user_tags"); 
         if (savedTags) {
@@ -97,13 +101,24 @@ export default function Home() {
         }
         const allowedNsfw = localStorage.getItem("gelbet_nsfw_18plus"); 
         if (allowedNsfw === "true") setNsfwAllowed(true); 
+
+        // Читаем ?q=&mode=&userId=, которые пишет KashmirDevMenu при переключении юзера
+        const urlParams = new URLSearchParams(window.location.search);
+        const qFromUrl = urlParams.get("q");
+        const modeFromUrl = urlParams.get("mode");
+        const userIdFromUrl = urlParams.get("userId");
+        if (qFromUrl) initialQuery = qFromUrl;
+        if (modeFromUrl) urlMode = modeFromUrl;
+        if (userIdFromUrl) urlUserId = userIdFromUrl;
+        setActiveMode(urlMode);
+        setActiveUserId(urlUserId);
     } catch (e) {}
 
     if(mounted) {
         setSearchQuery(initialQuery);
         // setSearch(initialQuery); // Вырезано
         setPage(1); setHasMore(true); setPhotos([]);
-        fetchPhotos(initialQuery, 1, true);
+        fetchPhotos(initialQuery, 1, true, urlMode, urlUserId);
     }
 
     return () => {
@@ -122,13 +137,17 @@ export default function Home() {
     } catch (e) {}
   }
 
-  const fetchPhotos = useCallback(async (query: string, pageNum: number, reset: boolean) => {
+  const fetchPhotos = useCallback(async (query: string, pageNum: number, reset: boolean, modeOverride?: string, userIdOverride?: string | null) => {
     if (!reset && loadingRef.current) return;
     loadingRef.current = true; setLoading(true);
     if (reset) { if (abortControllerRef.current) abortControllerRef.current.abort(); abortControllerRef.current = new AbortController(); }
     try {
+      const effectiveMode = modeOverride ?? activeMode;
+      const effectiveUserId = userIdOverride !== undefined ? userIdOverride : activeUserId;
       const params = new URLSearchParams({ page: String(pageNum) });
       if (query) params.set("query", query);
+      if (effectiveMode) params.set("mode", effectiveMode);
+      if (effectiveUserId) params.set("userId", effectiveUserId);
       const res = await fetch(`/api/search?${params}`, { signal: abortControllerRef.current?.signal });
       if (!res.ok) throw new Error("Fetch failed");
       const data = await res.json();
@@ -138,7 +157,7 @@ export default function Home() {
       setPhotos(prev => { const combined = reset ? fetched : [...prev, ...fetched]; const map = new Map(); combined.forEach(p => map.set(p.id, p)); return Array.from(map.values()); });
       setHasMore(fetched.length > 0);
     } catch (e: any) { } finally { if (!(reset && abortControllerRef.current?.signal.aborted)) { setLoading(false); loadingRef.current = false; } }
-  }, []);
+  }, [activeMode, activeUserId]);
 
   const fetchRelatedPhotos = useCallback(async (basePhoto: Photo, pageNum: number, reset: boolean) => {
     setRelatedLoading(true);

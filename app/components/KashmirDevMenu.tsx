@@ -19,7 +19,7 @@ export default function KashmirDevMenu() {
         const savedUser = localStorage.getItem("kashmir_synth_user") || "";
         setSynthUser(savedUser);
 
-        // API Interceptor
+        // АБСОЛЮТНЫЙ ПЕРЕХВАТЧИК СЕТИ
         const originalFetch = window.fetch;
         window.fetch = async function(...args) {
             let [resource, config] = args;
@@ -28,32 +28,23 @@ export default function KashmirDevMenu() {
                 if (devUser) {
                     const url = new URL(resource, window.location.origin);
                     url.searchParams.set("userId", devUser);
+                    
+                    const activeData = SYNTH_USERS.find(u => u.id === devUser);
+                    if (activeData && activeData.query) {
+                        // Если фронтенд отправляет пустой запрос или дефолтный "aesthetic", жестко подменяем его
+                        const currentQ = url.searchParams.get("query") || url.searchParams.get("q") || "";
+                        if (!currentQ || currentQ === "aesthetic" || currentQ.trim() === "") {
+                            url.searchParams.set("q", activeData.query);
+                            url.searchParams.set("query", activeData.query);
+                        }
+                        // Принудительно включаем режим ИИ
+                        url.searchParams.set("mode", "kashmir");
+                    }
                     resource = url.toString();
                 }
             }
             return originalFetch(resource, config);
         };
-
-        // Ghost Typer: Заставляем строку поиска обновиться и отправиться
-        const forceQuery = sessionStorage.getItem("kashmir_force_query");
-        if (forceQuery) {
-            setTimeout(() => {
-                const input = document.querySelector('input[type="search"], input[placeholder*="Search"]') as HTMLInputElement;
-                if (input) {
-                    const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
-                    nativeInputValueSetter?.call(input, forceQuery);
-                    input.dispatchEvent(new Event('input', { bubbles: true }));
-                    
-                    const form = input.closest('form');
-                    if (form) {
-                        form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-                    } else {
-                        input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));
-                    }
-                    sessionStorage.removeItem("kashmir_force_query");
-                }
-            }, 800);
-        }
 
         const handleClickOutside = (e: MouseEvent) => {
             if (menuRef.current && !menuRef.current.contains(e.target as Node)) setIsOpen(false);
@@ -67,11 +58,10 @@ export default function KashmirDevMenu() {
         setSynthUser(user.id);
         setIsOpen(false);
         
+        // Просто перезагружаем страницу с нужным URL, чтобы триггернуть начальный fetch
         if (user.id && user.query) {
-            sessionStorage.setItem("kashmir_force_query", user.query);
             window.location.href = `/?q=${encodeURIComponent(user.query)}&mode=kashmir`;
         } else {
-            sessionStorage.removeItem("kashmir_force_query");
             window.location.href = "/";
         }
     };

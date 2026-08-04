@@ -19,7 +19,6 @@ export default function KashmirDevMenu() {
         const savedUser = localStorage.getItem("kashmir_synth_user") || "";
         setSynthUser(savedUser);
 
-        // АБСОЛЮТНЫЙ ПЕРЕХВАТЧИК СЕТИ
         const originalFetch = window.fetch;
         window.fetch = async function(...args) {
             let [resource, config] = args;
@@ -31,15 +30,15 @@ export default function KashmirDevMenu() {
                     
                     const activeData = SYNTH_USERS.find(u => u.id === devUser);
                     if (activeData && activeData.query) {
-                        // Если фронтенд отправляет пустой запрос или дефолтный "aesthetic", жестко подменяем его
                         const currentQ = url.searchParams.get("query") || url.searchParams.get("q") || "";
                         if (!currentQ || currentQ === "aesthetic" || currentQ.trim() === "") {
                             url.searchParams.set("q", activeData.query);
                             url.searchParams.set("query", activeData.query);
                         }
-                        // Принудительно включаем режим ИИ
                         url.searchParams.set("mode", "kashmir");
                     }
+                    // CACHE BUSTER: Добавляем уникальную метку времени к API-запросу
+                    url.searchParams.set("_cb", Date.now().toString());
                     resource = url.toString();
                 }
             }
@@ -58,11 +57,11 @@ export default function KashmirDevMenu() {
         setSynthUser(user.id);
         setIsOpen(false);
         
-        // Просто перезагружаем страницу с нужным URL, чтобы триггернуть начальный fetch
         if (user.id && user.query) {
-            window.location.href = `/?q=${encodeURIComponent(user.query)}&mode=kashmir`;
+            // CACHE BUSTER: Добавляем метку времени к URL страницы
+            window.location.href = `/?q=${encodeURIComponent(user.query)}&mode=kashmir&_cb=${Date.now()}`;
         } else {
-            window.location.href = "/";
+            window.location.href = `/?_cb=${Date.now()}`;
         }
     };
 
@@ -84,7 +83,6 @@ export default function KashmirDevMenu() {
             <style dangerouslySetInnerHTML={{ __html: `
                 .kashmir-core-container { position: relative; display: flex; align-items: center; justify-content: center; }
                 
-                /* Ambient Fluid Sphere */
                 .kashmir-sphere {
                     width: 50px; height: 50px;
                     border-radius: 50%;
@@ -111,7 +109,6 @@ export default function KashmirDevMenu() {
                     100% { box-shadow: 0 0 25px rgba(192, 82, 26, 0.25), inset -2px -2px 10px rgba(0,0,0,0.8); }
                 }
 
-                /* Dropdown menu */
                 .kashmir-menu {
                     position: absolute;
                     bottom: 70px; right: 0;
@@ -151,7 +148,6 @@ export default function KashmirDevMenu() {
                     border-bottom: 1px solid #150f08; padding-bottom: 12px;
                 }
 
-                /* Wave Icon Styles */
                 .wave-icon {
                     display: flex;
                     align-items: center;

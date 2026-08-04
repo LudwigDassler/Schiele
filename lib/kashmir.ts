@@ -1,105 +1,77 @@
-﻿import { createClient } from '@supabase/supabase-js';
+﻿import { supabase } from "./supabase";
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
-const supabase = supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null;
-
-export class KashmirEngine {
-    private apiKey: string | undefined;
-
-    constructor() {
-        this.apiKey = process.env.GROQ_API_KEY;
-    }
-
-    private async getVibeContext(userId?: string | null): Promise<string> {
-        if (!supabase) {
-            console.warn("[Kashmir] Supabase not configured. Memory offline.");
-            return "";
-        }
-
+export const kashmir = {
+    async processQuery(baseQuery: string, userId: string | null) {
+        if (!userId) return baseQuery;
+        
         try {
-            let query = supabase
-                .from('ai_image_cache')
-                .select('ai_tags');
-
-            // КЛЮЧЕВОЙ МОМЕНТ: Берем теги только конкретного юзера!
-            if (userId) {
-                query = query.eq('user_id', userId);
+            console.log(`[KASHMIR CORE] Запрашиваем профиль юзера: ${userId}`);
+            
+            // 1. Достаем профиль персоны из нашей новой таблицы
+            const { data: persona, error } = await supabase
+                .from("synth_users")
+                .select("*")
+                .eq("id", userId)
+                .single();
+                
+            if (error || !persona) {
+                console.warn(`[KASHMIR CORE] Профиль ${userId} не найден. Откат к базовому запросу.`);
+                return baseQuery;
             }
 
-            const { data, error } = await query
-                .order('created_at', { ascending: false })
-                .limit(5);
+            console.log(`[KASHMIR CORE] Личность активирована: ${persona.name} (${persona.role})`);
 
-            if (error || !data || data.length === 0) return "";
+            // 2. Формируем мощный промпт для Llama 3 с учетом всех модификаторов
+            const posMods = persona.positive_modifiers ? persona.positive_modifiers.join(", ") : "";
+            const negMods = persona.negative_modifiers ? persona.negative_modifiers.join(", ") : "";
 
-            const recentTags = data
-                .map(row => row.ai_tags)
-                .filter(Boolean)
-                .join(" | ");
+            const systemPrompt = `
+            ${persona.persona_prompt}
+            
+            Core Vibe: ${persona.core_vibe}
+            Mandatory Visual Elements to Include: ${posMods}
+            Elements to Strictly Avoid: ${negMods}
+            
+            The user is searching for a base concept: "${baseQuery}".
+            Transform this search query into a highly descriptive, comma-separated list of keywords for an image search engine. 
+            Ensure the final query heavily reflects your persona's aesthetic and core vibe.
+            Reply ONLY with the final search query. Do not add conversational text, prefixes, or quotes.
+            `;
 
-            return `\n\nCRITICAL VIBE CONTEXT: To understand the specific aesthetic the user prefers, here are their most recent successful generations from the database: [ ${recentTags} ]. Match this level of artistic depth, irony, or vintage mood.`;
-        } catch (e) {
-            console.warn("[Kashmir] Memory retrieval failed:", e);
-            return "";
-        }
-    }
-
-    public async processQuery(rawQuery: string, userId?: string | null): Promise<string> {
-        const query = rawQuery.trim();
-        if (!query) return "aesthetic";
-
-        if (!this.apiKey) {
-            console.warn("[Kashmir] GROQ_API_KEY is missing. Using fallback.");
-            return `${query} aesthetic`.trim();
-        }
-
-        const memoryContext = await this.getVibeContext(userId);
-
-        try {
-            const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+            // 3. Стучимся в Groq (Llama 3)
+            const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
                 method: "POST",
-                headers: {
-                    "Authorization": `Bearer ${this.apiKey}`,
-                    "Content-Type": "application/json"
+                headers: { 
+                    "Authorization": `Bearer ${process.env.GROQ_API_KEY}`, 
+                    "Content-Type": "application/json" 
                 },
                 body: JSON.stringify({
                     model: "llama3-8b-8192",
-                    temperature: 0.4,
                     messages: [
-                        {
-                            role: "system",
-                            content: `You are Kashmir, an elite aesthetic visual archivist engine.
-Your ONLY purpose is to take a user's raw search query and transform it into a highly optimized English query for an image search engine.
-
-RULES:
-1. NO CONVERSATION. Output ONLY the final search string.
-2. CULTURAL CONTEXT: Identify specific bands or phenomena (e.g., "ГрОб", "КиШ"). Do NOT translate them literally. Append "band aesthetic vintage".
-3. GENERAL: Translate Russian concepts beautifully to English and append "aesthetic high quality".
-4. STOP WORDS: Ignore "хочу", "покажи", "картинка".${memoryContext}`
-                        },
-                        {
-                            role: "user",
-                            content: query
-                        }
-                    ]
+                        { role: "system", content: systemPrompt },
+                        { role: "user", content: baseQuery }
+                    ],
+                    temperature: 0.7,
+                    max_tokens: 80
                 })
             });
 
-            if (!response.ok) return `${query} aesthetic`;
-
-            const data = await response.json();
-            let kashmirResponse = data.choices[0].message.content.trim();
-            kashmirResponse = kashmirResponse.replace(/["']/g, "");
+            if (!res.ok) throw new Error(`Ошибка API Groq: ${res.statusText}`);
             
-            console.log(`[Kashmir] Synthesized for user ${userId || 'anon'}: "${query}" -> "${kashmirResponse}"`);
-            return kashmirResponse;
+            const json = await res.json();
+            let aiGeneratedQuery = json.choices?.[0]?.message?.content?.trim();
+            
+            if (aiGeneratedQuery) {
+                // Предохранитель: срезаем случайные кавычки, которые ИИ иногда оставляет в начале или конце
+                aiGeneratedQuery = aiGeneratedQuery.replace(/^["']|["']$/g, '');
+            }
+            
+            console.log(`[KASHMIR CORE] Llama 3 сгенерировала запрос: "${aiGeneratedQuery}"`);
+            return aiGeneratedQuery || baseQuery;
 
-        } catch (error) {
-            console.error("[Kashmir] Engine failure:", error);
-            return `${query} aesthetic`;
+        } catch (e) {
+            console.error("[KASHMIR CORE FATAL ERROR]:", e);
+            return baseQuery; // При падении всегда возвращаем то, что было
         }
     }
 }
-
-export const kashmir = new KashmirEngine();

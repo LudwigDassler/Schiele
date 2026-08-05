@@ -168,7 +168,7 @@ export default function Home() {
       const effectiveUserId = userIdOverride !== undefined ? userIdOverride : activeUserId;
       
       const params = new URLSearchParams({ page: String(pageNum) });
-      if (queryParam) params.set("q", queryParam); // ИСПРАВЛЕНО: передаем q вместо query
+      if (queryParam) params.set("query", queryParam); // ИСПРАВЛЕНО: передаем q вместо query
       if (effectiveMode) params.set("mode", effectiveMode);
       if (effectiveUserId) params.set("userId", effectiveUserId);
       
@@ -245,7 +245,7 @@ export default function Home() {
       }
 
       // ИСПРАВЛЕНО: передаем q вместо query
-      const params = new URLSearchParams({ page: String(pageNum), q: aiQuery });
+      const params = new URLSearchParams({ page: String(pageNum), query: aiQuery });
       const res = await fetch(`/api/search?${params}`, { signal: relatedAbortRef.current?.signal });
       const data = await res.json();
       const rawArray = Array.isArray(data) ? data : (data.data || data.photos || data.items || data.results || []);

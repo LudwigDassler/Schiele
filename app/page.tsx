@@ -6,6 +6,7 @@ import { checkNsfw } from "../lib/nsfw";
 import PinCard from "../components/PinCard";
 import { useTasteProfile } from "./hooks/useTasteProfile";
 import { getAnonId } from "../lib/identity";
+import SonicOracleVisualizer from "../components/SonicOracleVisualizer";
 
 const defaultTags = ["Aesthetic", "Dark Academia", "Cyberpunk", "Minimalism", "Architecture", "Street Photography", "Vintage", "Interior"];
 
@@ -53,6 +54,16 @@ export default function Home() {
   const [mainImgLoaded, setMainImgLoaded] = useState(false);
   const [activeMode, setActiveMode] = useState("classic");
   const [activeUserId, setActiveUserId] = useState<string | null>(null);
+  
+  // Sonic Oracle States
+  const [oracleMode, setOracleMode] = useState(false);
+  const [oracleData, setOracleData] = useState({
+    isIdle: true,
+    trackName: "Awaiting sonic input...",
+    bpmSpeed: 16,
+    amplitude: 0.05,
+    isErratic: false
+  });
 
   const observerRef = useRef<IntersectionObserver | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -165,7 +176,12 @@ export default function Home() {
       const rawArray = Array.isArray(data) ? data : (data.data || data.photos || data.items || []);
       const isNsfwQuery = checkNsfw(query);
       const fetched = rawArray.filter((p: any) => p.src && p.src.startsWith("http")).map((p: any) => ({ ...p, isNsfw: isNsfwQuery || checkNsfw(p.title || "") }));
-      setPhotos(prev => { const combined = reset ? fetched : [...prev, ...fetched]; const map = new Map(); combined.forEach(p => map.set(p.id, p)); return Array.from(map.values()); });
+      setPhotos(prev => { 
+        const combined = reset ? fetched : [...prev, ...fetched]; 
+        const map = new Map(); 
+        combined.forEach(p => map.set(p.src, p)); 
+        return Array.from(map.values()); 
+      });
       setHasMore(fetched.length > 0);
     } catch (e: any) { } finally { if (!(reset && abortControllerRef.current?.signal.aborted)) { setLoading(false); loadingRef.current = false; } }
   }, [activeMode, activeUserId]);
@@ -243,18 +259,65 @@ export default function Home() {
   function removeUserTag(tagToRemove: string, e?: React.MouseEvent) { if (e) e.stopPropagation(); setUserTags(prev => { const updated = prev.filter(t => t !== tagToRemove); localStorage.setItem("gelbet_user_tags", JSON.stringify(updated)); return updated; }); }
   function clearAllTags(e?: React.MouseEvent) { if (e) e.stopPropagation(); setUserTags([]); localStorage.removeItem("gelbet_user_tags"); }
   
-  function handleSearch(e: React.FormEvent) { 
+  async function handleSearch(e: React.FormEvent) { 
     e.preventDefault(); 
     if (!search.trim()) return; 
+
+    // Если Оракул включен, перехватываем поиск и отдаем его ИИ
+    if (oracleMode) {
+      setIsAILoading(true);
+      setIsMobileSearchOpen(false); 
+      setIsSearchFocused(false); 
+      closeAllPanels();
+      
+      setOracleData({ isIdle: false, trackName: "Analyzing signal...", bpmSpeed: 4, amplitude: 0.2, isErratic: false });
+
+      try {
+        const res = await fetch("/api/oracle", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ trackInput: search.trim() })
+        });
+        
+        if (!res.ok) throw new Error("Oracle API Error");
+        const data = await res.json();
+        
+        setOracleData({
+          isIdle: false,
+          trackName: data.track_name || search.trim(),
+          bpmSpeed: data.bpm_speed || 3,
+          amplitude: data.amplitude || 0.6,
+          isErratic: data.is_erratic || false
+        });
+
+        // Не показываем юзеру скрытый промпт в строке поиска, оставляем название трека
+        const hiddenQuery = data.visual_query;
+        setSearchQuery(hiddenQuery);
+        setPage(1); setHasMore(true); setPhotos([]);
+        await fetchPhotos(hiddenQuery, 1, true);
+
+      } catch (err) {
+        showToast("Oracle Connection Failed");
+        setOracleData(prev => ({ ...prev, isIdle: true, trackName: "Signal lost..." }));
+      } finally {
+        setIsAILoading(false);
+      }
+      return;
+    }
+
+    // Обычный поиск
     const query = search.trim();
     setSearchQuery(query); saveUserTag(query); setIsMobileSearchOpen(false); setIsSearchFocused(false); closeAllPanels(); 
     setPage(1); setHasMore(true); setPhotos([]); fetchPhotos(query, 1, true);
   }
+  
   function handleTagClick(tag: string) { 
+    if(oracleMode) { setOracleMode(false); setOracleData(prev => ({ ...prev, isIdle: true, trackName: "Awaiting sonic input..." })); }
     setSearch(tag); setSearchQuery(tag); saveUserTag(tag); setIsSearchFocused(false); setIsMobileSearchOpen(false); closeAllPanels(); 
     setPage(1); setHasMore(true); setPhotos([]); fetchPhotos(tag, 1, true);
   }
   function clearSearch() { 
+    if(oracleMode) { setOracleMode(false); setOracleData(prev => ({ ...prev, isIdle: true, trackName: "Awaiting sonic input..." })); }
     setSearch(""); setSearchQuery("Aesthetic"); setIsMobileSearchOpen(false); closeAllPanels(); 
     setPage(1); setHasMore(true); setPhotos([]); fetchPhotos("Aesthetic", 1, true);
   }
@@ -278,6 +341,7 @@ export default function Home() {
         showToast("AI network error."); 
     } finally {
         setIsAILoading(false);
+        if(oracleMode) { setOracleMode(false); setOracleData(prev => ({ ...prev, isIdle: true })); }
         setSearch(finalQuery); setSearchQuery(finalQuery); saveUserTag(finalQuery); setAiPrompt(""); setIsMobileSearchOpen(false); setIsSearchFocused(false);
         setPage(1); setHasMore(true); setPhotos([]); fetchPhotos(finalQuery, 1, true);
     }
@@ -292,12 +356,9 @@ export default function Home() {
     setSelected(null);
     setIsAILoading(true);
     
-    setSearch(concept); 
-    setSearchQuery(concept); 
-    saveUserTag(concept);
-    setPage(1); 
-    setHasMore(true); 
-    setPhotos([]);
+    if(oracleMode) { setOracleMode(false); setOracleData(prev => ({ ...prev, isIdle: true })); }
+    setSearch(concept); setSearchQuery(concept); saveUserTag(concept);
+    setPage(1); setHasMore(true); setPhotos([]);
     
     await fetchPhotos(concept, 1, true);
     setIsAILoading(false);
@@ -315,17 +376,6 @@ export default function Home() {
   const displayPhotos = showSaved ? pins.map(p => ({ id: p.id, src: p.image_url, thumb: p.image_url, title: p.title || "", link: p.source_url || "", isNsfw: checkNsfw(p.title || "") })) : photos;
   const userAvatar = user?.user_metadata?.avatar_url || ""; const userName = user?.user_metadata?.full_name || user?.email || "";
 
-  const CurrentsLoader = () => (
-    <div className="currents-wrapper">
-      <svg viewBox="0 0 100 40" className="currents-svg">
-        <path d="M 0 20 C 30 20, 35 4, 50 4 C 65 4, 70 20, 100 20" fill="none" stroke="#e3b378" strokeWidth="2" className="wave-path wave-top" />
-        <path d="M 0 20 C 30 20, 35 36, 50 36 C 65 36, 70 20, 100 20" fill="none" stroke="#c0521a" strokeWidth="2" className="wave-path wave-bot" />
-        <path d="M 0 20 L 30 20 M 70 20 L 100 20" fill="none" stroke="#e3b378" strokeWidth="1.5" opacity="0.3" />
-        <circle cx="50" cy="20" r="4" fill="#c0521a" className="wave-core" />
-      </svg>
-    </div>
-  );
-
   return (
     <>
       <style dangerouslySetInnerHTML={{ __html: `
@@ -335,17 +385,53 @@ export default function Home() {
         ::-webkit-scrollbar { width: 6px; height: 6px; } ::-webkit-scrollbar-track { background: #0d0a06; } ::-webkit-scrollbar-thumb { background: #2a1f0e; border-radius: 10px; } ::-webkit-scrollbar-thumb:hover { background: #c0521a; } * { scrollbar-width: thin; scrollbar-color: #2a1f0e #0d0a06; }
         .header { position: sticky; top: 0; z-index: 100; background: rgba(5, 4, 3, 0.85); backdrop-filter: blur(12px); border-bottom: 1px solid #1a1208; padding: 10px 16px; display: flex; align-items: center; gap: 10px; }
         .logo { font-family: 'Cinzel', Georgia, serif; font-size: 16px; font-weight: 700; color: #c0521a; letter-spacing: 4px; text-transform: uppercase; flex-shrink: 0; cursor: pointer; user-select: none; text-shadow: 0 0 20px rgba(192,82,26,0.2); }
+        
         .search-form { flex: 1; display: flex; min-width: 0; justify-content: flex-end; } .search-container { position: relative; flex: 1; display: flex; justify-content: flex-end; min-width: 0; }
-        .search-wrap { flex: 1; display: flex; background: #0d0a06; border-radius: 24px; overflow: hidden; border: 1px solid #1a1208; transition: all 0.2s; min-width: 0; } .search-wrap:focus-within { border-color: #4a3520; }
-        .search-input { width: 100%; padding: 9px 14px; background: transparent; border: none; color: #d4b896; font-size: 14px; outline: none; } .search-input::placeholder { color: #4a3520; }
-        .search-btn { width: 40px; height: 100%; padding: 0; background: transparent; border: none; color: #4a3520; cursor: pointer; transition: color 0.2s; display: flex; align-items: center; justify-content: center; flex-shrink: 0; } .search-btn:hover { color: #8a6a4a; }
+        .search-wrap { flex: 1; display: flex; background: #0d0a06; border-radius: 24px; overflow: hidden; border: 1px solid #1a1208; transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1); min-width: 0; } 
+        .search-wrap:focus-within { border-color: #4a3520; }
+        
+        /* Oracle styling for search bar */
+        .search-wrap.oracle-active { border-color: #8a6a4a; box-shadow: 0 0 15px rgba(138, 106, 74, 0.1); }
+        .search-wrap.oracle-active:focus-within { border-color: #c0521a; box-shadow: 0 0 20px rgba(192, 82, 26, 0.2); }
+        .search-wrap.oracle-active .search-input { color: #e3b378; font-family: 'Crimson Text', serif; font-style: italic; font-size: 16px; }
+        
+        .search-input { width: 100%; padding: 9px 14px; background: transparent; border: none; color: #d4b896; font-size: 14px; outline: none; transition: all 0.3s ease; } .search-input::placeholder { color: #4a3520; font-style: normal; font-family: -apple-system, sans-serif; }
+        
+        .search-btn, .oracle-trigger-btn { width: 40px; height: 100%; padding: 0; background: transparent; border: none; color: #4a3520; cursor: pointer; transition: color 0.2s; display: flex; align-items: center; justify-content: center; flex-shrink: 0; } 
+        .search-btn:hover { color: #8a6a4a; }
+        .oracle-trigger-btn:hover, .oracle-trigger-btn.active { color: #c0521a; }
+        
         .search-dropdown { position: absolute; top: calc(100% + 8px); right: 0; width: 100%; max-width: 440px; background: rgba(8,6,4,0.98); border: 1px solid #1a1208; border-radius: 16px; box-shadow: 0 10px 40px rgba(0,0,0,0.8); backdrop-filter: blur(12px); z-index: 300; padding: 8px 0; animation: slideUp 0.2s ease; overflow: hidden; }
         .search-dropdown-header { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px 8px; font-size: 10px; font-weight: 700; color: #4a3520; text-transform: uppercase; letter-spacing: 1.5px; }
         .search-dropdown-clear-all { background: none; border: none; color: #8a6a4a; cursor: pointer; font-size: 10px; font-weight: 700; text-transform: uppercase; transition: color 0.2s; } .search-dropdown-clear-all:hover { color: #e53e3e; }
         .search-dropdown-item { display: flex; align-items: center; padding: 10px 16px; cursor: pointer; transition: background 0.15s; gap: 12px; color: #d4b896; font-size: 14px; } .search-dropdown-item:hover { background: #1a1208; }
         .search-dropdown-icon { font-size: 14px; color: #4a3520; } .search-dropdown-text { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
         .search-dropdown-remove { background: none; border: none; color: #4a3520; cursor: pointer; width: 26px; height: 26px; border-radius: 50%; display: flex; align-items: center; justify-content: center; transition: all 0.2s; } .search-dropdown-remove:hover { color: #e53e3e; background: rgba(229,62,62,0.1); }
-        @media (max-width: 640px) { .search-form { flex: none; } .search-container { flex: none; } .search-wrap { width: 38px; height: 38px; flex: none; border-radius: 50%; background: transparent; border: none; cursor: pointer; } .search-input { display: none; } .search-btn { width: 38px; height: 38px; border-radius: 50%; pointer-events: none; } .search-form.mobile-active { position: absolute; left: 16px; right: 16px; top: 10px; z-index: 200; flex: 1; } .search-form.mobile-active .search-container { flex: 1; } .search-form.mobile-active .search-wrap { width: 100%; height: 42px; border-radius: 24px; background: #0d0a06; border: 1px solid #4a3520; flex: 1; display: flex; cursor: text; box-shadow: 0 10px 30px rgba(0,0,0,0.9); } .search-form.mobile-active .search-input { display: block; flex: 1; } .search-form.mobile-active .search-btn { border-radius: 0; width: 40px; pointer-events: auto; } .search-dropdown { max-width: 100%; } }
+        
+        /* Oracle Dropdown Stage */
+        .oracle-stage-wrapper {
+          width: 100%; padding: 0 16px; height: 0; opacity: 0; overflow: hidden; transition: all 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        .oracle-stage-wrapper.open {
+          height: 240px; opacity: 1; margin: 16px 0 24px;
+        }
+        .oracle-meta-header {
+          display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%;
+        }
+        .oracle-meta-title {
+          font-family: 'Cinzel', serif; font-size: 9px; letter-spacing: 4px; color: #4a3520; text-transform: uppercase; display: flex; align-items: center; gap: 8px; transition: color 1s ease;
+        }
+        .oracle-meta-title.active { color: #8a6a4a; }
+        .pulse-dot { width: 4px; height: 4px; background: #4a3520; border-radius: 50%; transition: all 1s ease; }
+        .pulse-dot.active { background: #c0521a; box-shadow: 0 0 8px #c0521a; animation: pulseBlink 2s ease-in-out infinite alternate; }
+        .pulse-dot.erratic { animation: pulseStrobe 0.1s infinite alternate; background: #ff3300; box-shadow: 0 0 15px #ff3300; }
+        .oracle-track-name { font-family: 'Crimson Text', serif; font-size: 16px; color: #4a3520; font-style: italic; margin-top: 6px; letter-spacing: 1px; transition: all 1s ease; text-align: center; max-width: 400px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .oracle-track-name.active { color: #d4b896; font-weight: 600; }
+        
+        @keyframes pulseBlink { 0% { opacity: 0.4; filter: drop-shadow(0 0 2px #c0521a); } 100% { opacity: 1; filter: drop-shadow(0 0 10px #c0521a); } }
+        @keyframes pulseStrobe { 0% { opacity: 0.2; } 100% { opacity: 1; } }
+
+        @media (max-width: 640px) { .search-form { flex: none; } .search-container { flex: none; } .search-wrap { width: 38px; height: 38px; flex: none; border-radius: 50%; background: transparent; border: none; cursor: pointer; } .search-input { display: none; } .search-btn, .oracle-trigger-btn { width: 38px; height: 38px; border-radius: 50%; pointer-events: none; } .search-form.mobile-active { position: absolute; left: 16px; right: 16px; top: 10px; z-index: 200; flex: 1; } .search-form.mobile-active .search-container { flex: 1; } .search-form.mobile-active .search-wrap { width: 100%; height: 42px; border-radius: 24px; background: #0d0a06; border: 1px solid #4a3520; flex: 1; display: flex; cursor: text; box-shadow: 0 10px 30px rgba(0,0,0,0.9); } .search-form.mobile-active .search-input { display: block; flex: 1; } .search-form.mobile-active .search-btn, .search-form.mobile-active .oracle-trigger-btn { border-radius: 0; width: 40px; pointer-events: auto; } .search-dropdown { max-width: 100%; } }
         .hbtn { background: transparent; border: none; width: 38px; height: 38px; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; color: #6a4a2a; flex-shrink: 0; transition: all 0.2s; position: relative; } .hbtn:hover { background: #1a1208; color: #d4b896; } .hbtn.active { background: #1a1208; color: #c0521a; }
         .badge { position: absolute; top: 2px; right: 2px; background: #c0521a; color: #0d0a06; border-radius: 10px; padding: 1px 5px; font-size: 9px; font-weight: 700; border: 2px solid #0d0a06; }
         .avatar { width: 32px; height: 32px; border-radius: 50%; cursor: pointer; border: 2px solid #1a1208; flex-shrink: 0; object-fit: cover; } .avatar-placeholder { width: 32px; height: 32px; border-radius: 50%; cursor: pointer; border: 2px solid #1a1208; flex-shrink: 0; background: #1a1208; display: flex; align-items: center; justify-content: center; color: #8a6a4a; font-size: 13px; font-weight: 700; }
@@ -367,17 +453,10 @@ export default function Home() {
         .field { width: 100%; padding: 12px 16px; border-radius: 4px; border: 1px solid #1a1208; background: #0d0a06; color: #d4b896; font-size: 14px; outline: none; transition: border-color 0.2s; } .field:focus { border-color: #2a1f0e; }
         .mutate-btn { background: linear-gradient(45deg, #c0521a, #8a1c1c); color: #fff; border: none; border-radius: 4px; padding: 12px 24px; cursor: pointer; font-weight: 700; font-size: 13px; width: 100%; transition: all 0.3s; text-transform: uppercase; letter-spacing: 2px; text-shadow: 0 1px 2px rgba(0,0,0,0.5); box-shadow: 0 4px 15px rgba(192,82,26,0.3); }
         .mutate-btn:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(192,82,26,0.5); filter: brightness(1.2); }
-        .currents-wrapper { width: 44px; height: 26px; display: flex; align-items: center; justify-content: center; margin: 0 auto; position: relative; }
-        .currents-svg { width: 100%; height: 100%; overflow: visible; }
-        .wave-core { animation: pulseCore 1.5s infinite alternate; }
-        .wave-path { stroke-dasharray: 105; stroke-dashoffset: 105; animation: flowWave 1.4s ease-in-out infinite; }
-        .wave-bot { animation-delay: -0.7s; }
-        @keyframes flowWave { 0% { stroke-dashoffset: 105; opacity: 0; } 20% { opacity: 1; } 80% { opacity: 1; } 100% { stroke-dashoffset: -105; opacity: 0; } }
-        @keyframes pulseCore { 0% { r: 3; fill: #c0521a; filter: drop-shadow(0 0 2px rgba(192,82,26,0.6)); } 100% { r: 4.5; fill: #e3b378; filter: drop-shadow(0 0 8px rgba(227,179,120,1)); } }
         .spinner { width: 28px; height: 28px; border: 2px solid #1a1208; border-top-color: #8a6a4a; border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto; } @keyframes spin { to { transform: rotate(360deg); } }
         .empty { text-align: center; padding: 100px 20px; color: #4a3520; font-size: 16px; font-family: 'Crimson Text', serif; font-style: italic; } .modal-close { background: none; border: none; color: #4a3520; cursor: pointer; font-size: 20px; width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; transition: all 0.2s; } .modal-close:hover { background: #1a1208; color: #8a6a4a; }
         .toast-container { position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); background: #150f08; border: 1px solid #2a1f0e; color: #d4b896; padding: 14px 28px; border-radius: 8px; font-size: 13px; font-weight: 600; letter-spacing: 2px; text-transform: uppercase; z-index: 9999; animation: slideUp 0.3s ease; box-shadow: 0 10px 40px rgba(0,0,0,0.9); display: flex; align-items: center; justify-content: center; transition: all 0.3s ease; }
-        .ai-global-loader { position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); z-index: 9999; width: 56px; height: 40px; border-radius: 20px; background: #080604; border: 1px solid #2a1f0e; box-shadow: 0 10px 30px rgba(0,0,0,0.9), 0 0 20px rgba(192,82,26,0.1); animation: slideUp 0.3s ease, floatOrb 3s infinite ease-in-out; display: flex; align-items: center; justify-content: center; }
+        .ai-global-loader { position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); z-index: 9999; width: 70px; height: 50px; border-radius: 12px; background: #080604; border: 1px solid #2a1f0e; box-shadow: 0 10px 30px rgba(0,0,0,0.9), 0 0 20px rgba(192,82,26,0.1); animation: slideUp 0.3s ease, floatOrb 3s infinite ease-in-out; display: flex; align-items: center; justify-content: center; padding: 10px; }
         @keyframes floatOrb { 0%, 100% { transform: translateX(-50%) translateY(0); } 50% { transform: translateX(-50%) translateY(-5px); } }
       `}} />
 
@@ -385,14 +464,37 @@ export default function Home() {
         <header className="header">
           <button className="hbtn" onClick={() => setShowMenu(true)}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>
           <span className="logo" onClick={clearSearch}>GELBET</span>
+          
           <form className={`search-form ${isMobileSearchOpen ? 'mobile-active' : ''}`} onSubmit={handleSearch}>
             <div className="search-container" ref={searchContainerRef}>
-              <div className="search-wrap" onClick={() => { if (!isMobileSearchOpen) { setIsMobileSearchOpen(true); setTimeout(() => searchInputRef.current?.focus(), 50); } }}>
-                <input ref={searchInputRef} className="search-input" placeholder="Search visual archives..." value={search} onChange={e => setSearch(e.target.value)} onFocus={() => setIsSearchFocused(true)} />
+              <div className={`search-wrap ${oracleMode ? 'oracle-active' : ''}`} onClick={() => { if (!isMobileSearchOpen) { setIsMobileSearchOpen(true); setTimeout(() => searchInputRef.current?.focus(), 50); } }}>
+                <input 
+                  ref={searchInputRef} 
+                  className="search-input" 
+                  placeholder={oracleMode ? "Enter track or artist to synthesize..." : "Search visual archives..."} 
+                  value={search} 
+                  onChange={e => setSearch(e.target.value)} 
+                  onFocus={() => setIsSearchFocused(true)} 
+                />
+                
                 {search && isMobileSearchOpen && <button type="button" onClick={() => { setSearch(""); setIsMobileSearchOpen(false); setIsSearchFocused(false); }} className="search-btn" style={{ fontSize: 16 }}>✕</button>}
-                <button type="submit" className="search-btn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></button>
+                
+                {/* Обычный поиск */}
+                {!oracleMode && <button type="submit" className="search-btn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></button>}
+                
+                {/* Оракул Тоггл */}
+                <button 
+                  type="button" 
+                  className={`oracle-trigger-btn ${oracleMode ? 'active' : ''}`} 
+                  onClick={(e) => { e.stopPropagation(); setOracleMode(!oracleMode); }}
+                  title="Sonic Oracle"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg>
+                </button>
+
               </div>
-              {isSearchFocused && (
+              
+              {isSearchFocused && !oracleMode && (
                 <div className="search-dropdown">
                   {userTags.length > 0 && (<><div className="search-dropdown-header"><span>Recent Searches</span><button type="button" onClick={clearAllTags} className="search-dropdown-clear-all">Clear All</button></div>{userTags.map(tag => (<div key={tag} className="search-dropdown-item" onClick={() => handleTagClick(tag)}><span className="search-dropdown-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></span><span className="search-dropdown-text">{tag}</span><button type="button" className="search-dropdown-remove" onClick={(e) => removeUserTag(tag, e)}>✕</button></div>))} <div style={{ height: 1, background: "#1a1208", margin: "4px 16px 8px" }} /></>)}
                   <div className="search-dropdown-header"><span>Trending Vibes</span></div>
@@ -401,11 +503,32 @@ export default function Home() {
               )}
             </div>
           </form>
+
           <button className="hbtn" title="AI Vibe Assistant" onClick={() => setShowAIModal(true)}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3l1.912 5.813a2 2 0 001.275 1.275L21 12l-5.813 1.912a2 2 0 00-1.275 1.275L12 21l-1.912-5.813a2 2 0 00-1.275-1.275L3 12l5.813-1.912a2 2 0 001.275-1.275L12 3z"/></svg></button>
           <button className={`hbtn ${showBoards ? "active" : ""}`} onClick={() => { setShowBoards(!showBoards); setShowSaved(false); }}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg></button>
           <button className={`hbtn ${showSaved ? "active" : ""}`} onClick={() => { setShowSaved(!showSaved); setShowBoards(false); }}><svg width="17" height="17" viewBox="0 0 24 24" fill={showSaved ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>{pins.length > 0 && <span className="badge">{pins.length}</span>}</button>
           {user ? (<a href="/profile">{userAvatar ? <img src={userAvatar} className="avatar" alt="avatar" /> : <div className="avatar-placeholder">{(userName[0] || "U").toUpperCase()}</div>}</a>) : (<a href="/auth" className="sign-btn">Enter</a>)}
         </header>
+
+        {/* ORACLE STAGE (Выезжает под хедером, когда включен микрофон) */}
+        <div className={`oracle-stage-wrapper ${oracleMode ? 'open' : ''}`}>
+          <div className="oracle-meta-header">
+            <div className={`oracle-meta-title ${!oracleData.isIdle ? 'active' : ''}`}>
+               <span className={`pulse-dot ${!oracleData.isIdle ? 'active' : ''} ${oracleData.isErratic && !oracleData.isIdle ? 'erratic' : ''}`}></span> 
+               <span>{!oracleData.isIdle ? 'Signal Detected' : 'Oracle Idle'}</span>
+            </div>
+            <div className={`oracle-track-name ${!oracleData.isIdle ? 'active' : ''}`}>
+              {oracleData.trackName}
+            </div>
+          </div>
+          
+          <SonicOracleVisualizer 
+            bpmSpeed={oracleData.bpmSpeed} 
+            amplitude={oracleData.amplitude} 
+            isErratic={oracleData.isErratic} 
+            isIdle={oracleData.isIdle} 
+          />
+        </div>
 
         {(showSaved || showBoards) && (<div style={{ padding: "12px 20px", fontSize: 13, color: "#8a6a4a", borderBottom: "1px solid #1a1208", display: "flex", alignItems: "center", gap: 12 }}>{showSaved && <span>Saved Collection (<span style={{ color: "#d4b896" }}>{pins.length}</span>)</span>}{showBoards && <span>My Boards (<span style={{ color: "#d4b896" }}>{boards.length}</span>)</span>}</div>)}
 
@@ -441,7 +564,6 @@ export default function Home() {
         {showAgeGate && (
           <div className="modal-backdrop" style={{ zIndex: 99999 }} onClick={() => setShowAgeGate(false)}>
             <div onClick={e => e.stopPropagation()} style={{ background: "#050403", border: "1px solid #1a1208", borderRadius: 4, padding: "40px", maxWidth: 440, width: "100%", display: "flex", flexDirection: "column", alignItems: "center", gap: 24, animation: "slideUp 0.3s ease", boxShadow: "0 20px 60px rgba(0,0,0,0.9)" }}>
-              <CurrentsLoader />
               <div style={{ textAlign: "center" }}>
                 <h2 style={{ fontSize: 18, fontWeight: 600, color: "#d4b896", fontFamily: "Cinzel, serif", letterSpacing: 4, margin: "0 0 12px 0" }}>RESTRICTED ARCHIVE</h2>
                 <p style={{ color: "#8a6a4a", fontSize: 14, lineHeight: 1.6, fontFamily: "'Crimson Text', serif", fontStyle: "italic", margin: 0 }}>This sector contains sensitive visual material.<br/>Confirmation of maturity is required to proceed.</p>
@@ -461,7 +583,7 @@ export default function Home() {
                 <div className="modal-img-wrap" style={{ position: "relative" }}>
                   {!mainImgLoaded && (
                     <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                       <CurrentsLoader />
+                       <div className="spinner"></div>
                     </div>
                   )}
                   <img src={selected.src} alt="" className="modal-img" onLoad={() => setMainImgLoaded(true)} style={{ opacity: mainImgLoaded ? 1 : 0, transition: "opacity 0.4s ease" }} />
@@ -491,7 +613,7 @@ export default function Home() {
                 <div ref={modalBottomRef} style={{ textAlign: "center" }}>
                   {relatedLoading && (
                     <div style={{ padding: "40px 0" }}>
-                      <CurrentsLoader />
+                      <div className="spinner"></div>
                     </div>
                   )}
                 </div>
@@ -502,7 +624,7 @@ export default function Home() {
 
         {showSaveToBoard && (<div className="modal-backdrop" onClick={() => setShowSaveToBoard(null)}><div onClick={e => e.stopPropagation()} style={{ background: "#080604", border: "1px solid #1a1208", borderRadius: 8, padding: 32, maxWidth: 400, width: "100%", display: "flex", flexDirection: "column", gap: 16 }}><button className="primary-btn" onClick={() => savePin(showSaveToBoard)}>Save directly</button><button className="ghost-btn" onClick={() => { setShowNewBoard(true); setShowSaveToBoard(null); }}>+ Create new board</button></div></div>)}
         
-        {isAILoading && <div className="ai-global-loader"><CurrentsLoader /></div>}
+        {isAILoading && <div className="ai-global-loader"><div className="spinner" style={{ width: 20, height: 20, borderWidth: 2 }} /></div>}
         {toastMsg && <div className="toast-container">{toastMsg}</div>}
       </main>
     </>

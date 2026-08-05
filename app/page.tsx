@@ -159,23 +159,41 @@ export default function Home() {
     } catch (e) {}
   }
 
-  const fetchPhotos = useCallback(async (query: string, pageNum: number, reset: boolean, modeOverride?: string, userIdOverride?: string | null) => {
+  const fetchPhotos = useCallback(async (queryParam: string, pageNum: number, reset: boolean, modeOverride?: string, userIdOverride?: string | null) => {
     if (!reset && loadingRef.current) return;
     loadingRef.current = true; setLoading(true);
     if (reset) { if (abortControllerRef.current) abortControllerRef.current.abort(); abortControllerRef.current = new AbortController(); }
     try {
       const effectiveMode = modeOverride ?? activeMode;
       const effectiveUserId = userIdOverride !== undefined ? userIdOverride : activeUserId;
+      
       const params = new URLSearchParams({ page: String(pageNum) });
-      if (query) params.set("query", query);
+      if (queryParam) params.set("q", queryParam); // ИСПРАВЛЕНО: передаем q вместо query
       if (effectiveMode) params.set("mode", effectiveMode);
       if (effectiveUserId) params.set("userId", effectiveUserId);
+      
       const res = await fetch(`/api/search?${params}`, { signal: abortControllerRef.current?.signal });
       if (!res.ok) throw new Error("Fetch failed");
+      
       const data = await res.json();
-      const rawArray = Array.isArray(data) ? data : (data.data || data.photos || data.items || []);
-      const isNsfwQuery = checkNsfw(query);
-      const fetched = rawArray.filter((p: any) => p.src && p.src.startsWith("http")).map((p: any) => ({ ...p, isNsfw: isNsfwQuery || checkNsfw(p.title || "") }));
+      const rawArray = Array.isArray(data) ? data : (data.data || data.photos || data.items || data.results || []);
+      const isNsfwQuery = checkNsfw(queryParam);
+      
+      // ИСПРАВЛЕНО: универсальный маппинг для DuckDuckGo и других парсеров
+      const fetched = rawArray
+        .map((p: any) => {
+          const mappedSrc = p.src || p.image || p.image_url || p.url;
+          return {
+            ...p,
+            id: p.id || mappedSrc, 
+            src: mappedSrc,
+            thumb: p.thumb || p.thumbnail || p.image || mappedSrc,
+            link: p.link || p.url || p.source_url || mappedSrc,
+            isNsfw: isNsfwQuery || checkNsfw(p.title || "")
+          };
+        })
+        .filter((p: any) => p.src && p.src.startsWith("http"));
+
       setPhotos(prev => { 
         const combined = reset ? fetched : [...prev, ...fetched]; 
         const map = new Map(); 
@@ -183,7 +201,14 @@ export default function Home() {
         return Array.from(map.values()); 
       });
       setHasMore(fetched.length > 0);
-    } catch (e: any) { } finally { if (!(reset && abortControllerRef.current?.signal.aborted)) { setLoading(false); loadingRef.current = false; } }
+    } catch (e: any) { 
+        console.error("Search fetch error:", e);
+    } finally { 
+        if (!(reset && abortControllerRef.current?.signal.aborted)) { 
+            setLoading(false); 
+            loadingRef.current = false; 
+        } 
+    }
   }, [activeMode, activeUserId]);
 
   const fetchRelatedPhotos = useCallback(async (basePhoto: Photo, pageNum: number, reset: boolean) => {
@@ -219,14 +244,33 @@ export default function Home() {
         setActiveVibe(aiQuery);
       }
 
-      const params = new URLSearchParams({ page: String(pageNum), query: aiQuery });
+      // ИСПРАВЛЕНО: передаем q вместо query
+      const params = new URLSearchParams({ page: String(pageNum), q: aiQuery });
       const res = await fetch(`/api/search?${params}`, { signal: relatedAbortRef.current?.signal });
       const data = await res.json();
-      const rawArray = Array.isArray(data) ? data : (data.data || data.photos || data.items || []);
+      const rawArray = Array.isArray(data) ? data : (data.data || data.photos || data.items || data.results || []);
       const isNsfwQuery = checkNsfw(aiQuery);
-      const fetched = rawArray.filter((p: any) => p.src && p.src.startsWith("http") && p.src !== basePhoto.src && p.id !== basePhoto.id).map((p: any) => ({ ...p, isNsfw: isNsfwQuery || checkNsfw(p.title || "") }));
+      
+      const fetched = rawArray
+        .map((p: any) => {
+          const mappedSrc = p.src || p.image || p.image_url || p.url;
+          return {
+            ...p,
+            id: p.id || mappedSrc, 
+            src: mappedSrc,
+            thumb: p.thumb || p.thumbnail || p.image || mappedSrc,
+            link: p.link || p.url || p.source_url || mappedSrc,
+            isNsfw: isNsfwQuery || checkNsfw(p.title || "")
+          };
+        })
+        .filter((p: any) => p.src && p.src.startsWith("http") && p.src !== basePhoto.src && p.id !== basePhoto.id);
 
-      setRelatedPhotos(prev => { const combined = reset ? fetched : [...prev, ...fetched]; const map = new Map(); combined.forEach(p => map.set(p.src, p)); return Array.from(map.values()); });
+      setRelatedPhotos(prev => { 
+          const combined = reset ? fetched : [...prev, ...fetched]; 
+          const map = new Map(); 
+          combined.forEach(p => map.set(p.src, p)); 
+          return Array.from(map.values()); 
+      });
       setRelatedHasMore(fetched.length > 0);
     } catch (e: any) { } finally { setRelatedLoading(false); }
   }, [searchQuery, activeUserId]);
@@ -263,7 +307,7 @@ export default function Home() {
     e.preventDefault(); 
     if (!search.trim()) return; 
 
-    // Если Оракул включен, перехватываем поиск и отдаем его ИИ
+    // Логика Оракула
     if (oracleMode) {
       setIsAILoading(true);
       setIsMobileSearchOpen(false); 
@@ -290,7 +334,6 @@ export default function Home() {
           isErratic: data.is_erratic || false
         });
 
-        // Не показываем юзеру скрытый промпт в строке поиска, оставляем название трека
         const hiddenQuery = data.visual_query;
         setSearchQuery(hiddenQuery);
         setPage(1); setHasMore(true); setPhotos([]);
@@ -390,7 +433,6 @@ export default function Home() {
         .search-wrap { flex: 1; display: flex; background: #0d0a06; border-radius: 24px; overflow: hidden; border: 1px solid #1a1208; transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1); min-width: 0; } 
         .search-wrap:focus-within { border-color: #4a3520; }
         
-        /* Oracle styling for search bar */
         .search-wrap.oracle-active { border-color: #8a6a4a; box-shadow: 0 0 15px rgba(138, 106, 74, 0.1); }
         .search-wrap.oracle-active:focus-within { border-color: #c0521a; box-shadow: 0 0 20px rgba(192, 82, 26, 0.2); }
         .search-wrap.oracle-active .search-input { color: #e3b378; font-family: 'Crimson Text', serif; font-style: italic; font-size: 16px; }
@@ -408,19 +450,10 @@ export default function Home() {
         .search-dropdown-icon { font-size: 14px; color: #4a3520; } .search-dropdown-text { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
         .search-dropdown-remove { background: none; border: none; color: #4a3520; cursor: pointer; width: 26px; height: 26px; border-radius: 50%; display: flex; align-items: center; justify-content: center; transition: all 0.2s; } .search-dropdown-remove:hover { color: #e53e3e; background: rgba(229,62,62,0.1); }
         
-        /* Oracle Dropdown Stage */
-        .oracle-stage-wrapper {
-          width: 100%; padding: 0 16px; height: 0; opacity: 0; overflow: hidden; transition: all 0.6s cubic-bezier(0.16, 1, 0.3, 1);
-        }
-        .oracle-stage-wrapper.open {
-          height: 240px; opacity: 1; margin: 16px 0 24px;
-        }
-        .oracle-meta-header {
-          display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%;
-        }
-        .oracle-meta-title {
-          font-family: 'Cinzel', serif; font-size: 9px; letter-spacing: 4px; color: #4a3520; text-transform: uppercase; display: flex; align-items: center; gap: 8px; transition: color 1s ease;
-        }
+        .oracle-stage-wrapper { width: 100%; padding: 0 16px; height: 0; opacity: 0; overflow: hidden; transition: all 0.6s cubic-bezier(0.16, 1, 0.3, 1); }
+        .oracle-stage-wrapper.open { height: 240px; opacity: 1; margin: 16px 0 24px; }
+        .oracle-meta-header { display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%; }
+        .oracle-meta-title { font-family: 'Cinzel', serif; font-size: 9px; letter-spacing: 4px; color: #4a3520; text-transform: uppercase; display: flex; align-items: center; gap: 8px; transition: color 1s ease; }
         .oracle-meta-title.active { color: #8a6a4a; }
         .pulse-dot { width: 4px; height: 4px; background: #4a3520; border-radius: 50%; transition: all 1s ease; }
         .pulse-dot.active { background: #c0521a; box-shadow: 0 0 8px #c0521a; animation: pulseBlink 2s ease-in-out infinite alternate; }
@@ -479,10 +512,8 @@ export default function Home() {
                 
                 {search && isMobileSearchOpen && <button type="button" onClick={() => { setSearch(""); setIsMobileSearchOpen(false); setIsSearchFocused(false); }} className="search-btn" style={{ fontSize: 16 }}>✕</button>}
                 
-                {/* Обычный поиск */}
                 {!oracleMode && <button type="submit" className="search-btn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></button>}
                 
-                {/* Оракул Тоггл */}
                 <button 
                   type="button" 
                   className={`oracle-trigger-btn ${oracleMode ? 'active' : ''}`} 
@@ -510,7 +541,6 @@ export default function Home() {
           {user ? (<a href="/profile">{userAvatar ? <img src={userAvatar} className="avatar" alt="avatar" /> : <div className="avatar-placeholder">{(userName[0] || "U").toUpperCase()}</div>}</a>) : (<a href="/auth" className="sign-btn">Enter</a>)}
         </header>
 
-        {/* ORACLE STAGE (Выезжает под хедером, когда включен микрофон) */}
         <div className={`oracle-stage-wrapper ${oracleMode ? 'open' : ''}`}>
           <div className="oracle-meta-header">
             <div className={`oracle-meta-title ${!oracleData.isIdle ? 'active' : ''}`}>

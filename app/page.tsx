@@ -5,6 +5,7 @@ import type { User } from "@supabase/supabase-js";
 import { checkNsfw } from "../lib/nsfw";
 import PinCard from "../components/PinCard";
 import { useTasteProfile } from "./hooks/useTasteProfile";
+import { getAnonId } from "../lib/identity";
 
 const defaultTags = ["Aesthetic", "Dark Academia", "Cyberpunk", "Minimalism", "Architecture", "Street Photography", "Vintage", "Interior"];
 
@@ -60,6 +61,7 @@ export default function Home() {
   const relatedAbortRef = useRef<AbortController | null>(null);
   const loadingRef = useRef(false);
   const currentRelatedQueryRef = useRef("");
+  const isSynthSessionRef = useRef(false);
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -78,14 +80,20 @@ export default function Home() {
     supabase.auth.getSession().then(({ data }) => { 
         if(mounted) {
             setUser(data.session?.user ?? null); 
-            if (data.session?.user) fetchUserData(data.session.user.id); 
+            if (data.session?.user) {
+                fetchUserData(data.session.user.id);
+                if (!isSynthSessionRef.current) setActiveUserId(data.session.user.id);
+            }
         }
     });
     
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_, session) => { 
         if(mounted) {
             setUser(session?.user ?? null); 
-            if (session?.user) fetchUserData(session.user.id); 
+            if (session?.user) {
+                fetchUserData(session.user.id);
+                if (!isSynthSessionRef.current) setActiveUserId(session.user.id);
+            }
         }
     });
     
@@ -102,21 +110,24 @@ export default function Home() {
         const allowedNsfw = localStorage.getItem("gelbet_nsfw_18plus"); 
         if (allowedNsfw === "true") setNsfwAllowed(true); 
 
-        // Читаем ?q=&mode=&userId=, которые пишет KashmirDevMenu при переключении юзера
         const urlParams = new URLSearchParams(window.location.search);
         const qFromUrl = urlParams.get("q");
         const modeFromUrl = urlParams.get("mode");
         const userIdFromUrl = urlParams.get("userId");
         if (qFromUrl) initialQuery = qFromUrl;
         if (modeFromUrl) urlMode = modeFromUrl;
-        if (userIdFromUrl) urlUserId = userIdFromUrl;
+        if (userIdFromUrl) {
+            urlUserId = userIdFromUrl;
+            isSynthSessionRef.current = true;
+        } else {
+            urlUserId = getAnonId();
+        }
         setActiveMode(urlMode);
         setActiveUserId(urlUserId);
     } catch (e) {}
 
     if(mounted) {
         setSearchQuery(initialQuery);
-        // setSearch(initialQuery); // Вырезано
         setPage(1); setHasMore(true); setPhotos([]);
         fetchPhotos(initialQuery, 1, true, urlMode, urlUserId);
     }
@@ -173,7 +184,7 @@ export default function Home() {
       
       if (reset && !aiQuery) {
         try {
-          const aiRes = await fetch("/api/ai", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "analyze_image", payload: basePhoto.src }) });
+          const aiRes = await fetch("/api/ai", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "analyze_image", payload: basePhoto.src, userId: activeUserId }) });
           if (aiRes.ok) {
             const aiData = await aiRes.json();
             if (aiData.result) aiQuery = aiData.result;
@@ -202,7 +213,7 @@ export default function Home() {
       setRelatedPhotos(prev => { const combined = reset ? fetched : [...prev, ...fetched]; const map = new Map(); combined.forEach(p => map.set(p.src, p)); return Array.from(map.values()); });
       setRelatedHasMore(fetched.length > 0);
     } catch (e: any) { } finally { setRelatedLoading(false); }
-  }, [searchQuery]);
+  }, [searchQuery, activeUserId]);
 
   useEffect(() => {
     if (!bottomRef.current) return;
@@ -272,6 +283,26 @@ export default function Home() {
     }
   }
 
+  async function handleMutate(photo: Photo) {
+    if (!photo) return;
+    let concept = (photo.title || "").replace(/\.(jpg|jpeg|png|webp|gif)/gi, '').trim();
+    if (!concept || concept.length < 3) concept = "aesthetic artifact";
+    
+    showToast("Vibe Bleed Initiated...");
+    setSelected(null);
+    setIsAILoading(true);
+    
+    setSearch(concept); 
+    setSearchQuery(concept); 
+    saveUserTag(concept);
+    setPage(1); 
+    setHasMore(true); 
+    setPhotos([]);
+    
+    await fetchPhotos(concept, 1, true);
+    setIsAILoading(false);
+  }
+
   function closeAllPanels() { setShowMenu(false); setShowSaved(false); setShowBoards(false); }
   async function savePin(photo: Photo, boardId?: string) { if (!user) { window.location.href = "/auth"; return; } try { const res = await fetch("/api/pins", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ user_id: user.id, image_url: photo.src, title: photo.title, board_id: boardId || null, source_url: photo.link }) }); if (res.ok) { const data = await res.json(); if (data.pin || data.data) setPins(prev => [data.pin || data.data, ...prev]); showToast("Saved to profile"); } } catch (e) {} setShowSaveToBoard(null); setSelected(null); }
   async function deletePin(pinId: string) { try { const res = await fetch(`/api/pins?id=${pinId}`, { method: "DELETE" }); if (res.ok) { setPins(prev => prev.filter(p => p.id !== pinId)); showToast("Removed from saved"); } } catch (e) {} }
@@ -284,7 +315,6 @@ export default function Home() {
   const displayPhotos = showSaved ? pins.map(p => ({ id: p.id, src: p.image_url, thumb: p.image_url, title: p.title || "", link: p.source_url || "", isNsfw: checkNsfw(p.title || "") })) : photos;
   const userAvatar = user?.user_metadata?.avatar_url || ""; const userName = user?.user_metadata?.full_name || user?.email || "";
 
-  // КРАСОТА ЗДЕСЬ: Новый SVG-лоадер в стиле Tame Impala "Currents"
   const CurrentsLoader = () => (
     <div className="currents-wrapper">
       <svg viewBox="0 0 100 40" className="currents-svg">
@@ -301,7 +331,6 @@ export default function Home() {
       <style dangerouslySetInnerHTML={{ __html: `
         @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Crimson+Text:ital,wght@0,400;0,600;1,400&display=swap');
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-        
         body { overflow-x: hidden; background: radial-gradient(circle at 50% 50%, #150f08 0%, #050403 100%); background-attachment: fixed; font-family: -apple-system, sans-serif; }
         ::-webkit-scrollbar { width: 6px; height: 6px; } ::-webkit-scrollbar-track { background: #0d0a06; } ::-webkit-scrollbar-thumb { background: #2a1f0e; border-radius: 10px; } ::-webkit-scrollbar-thumb:hover { background: #c0521a; } * { scrollbar-width: thin; scrollbar-color: #2a1f0e #0d0a06; }
         .header { position: sticky; top: 0; z-index: 100; background: rgba(5, 4, 3, 0.85); backdrop-filter: blur(12px); border-bottom: 1px solid #1a1208; padding: 10px 16px; display: flex; align-items: center; gap: 10px; }
@@ -336,29 +365,18 @@ export default function Home() {
         .primary-btn { background: #1a1208; color: #d4b896; border: 1px solid #2a1f0e; border-radius: 4px; padding: 12px 24px; cursor: pointer; font-weight: 600; font-size: 13px; width: 100%; transition: all 0.2s; text-transform: uppercase; letter-spacing: 1px; } .primary-btn:hover { background: #2a1f0e; border-color: #4a3520; color: #fff; } .primary-btn.pinned-state { background: transparent; color: #c0521a; border: 1px solid #c0521a; }
         .ghost-btn, .outline-btn, .danger-btn { border-radius: 4px; padding: 12px 24px; cursor: pointer; font-weight: 500; font-size: 13px; transition: all 0.2s; background: transparent; text-transform: uppercase; letter-spacing: 1px; } .ghost-btn { color: #8a6a4a; border: 1px solid transparent; } .ghost-btn:hover { background: #1a1208; color: #d4b896; } .outline-btn { color: #8a6a4a; border: 1px solid #2a1f0e; width: 100%; } .outline-btn:hover { border-color: #c0521a; color: #c0521a; } .danger-btn { color: #e53e3e; border: 1px solid #e53e3e; width: 100%; } .danger-btn:hover { background: rgba(229,62,62,0.1); }
         .field { width: 100%; padding: 12px 16px; border-radius: 4px; border: 1px solid #1a1208; background: #0d0a06; color: #d4b896; font-size: 14px; outline: none; transition: border-color 0.2s; } .field:focus { border-color: #2a1f0e; }
-        
-        /* СТИЛИ ДЛЯ CURRENTS LOADER */
+        .mutate-btn { background: linear-gradient(45deg, #c0521a, #8a1c1c); color: #fff; border: none; border-radius: 4px; padding: 12px 24px; cursor: pointer; font-weight: 700; font-size: 13px; width: 100%; transition: all 0.3s; text-transform: uppercase; letter-spacing: 2px; text-shadow: 0 1px 2px rgba(0,0,0,0.5); box-shadow: 0 4px 15px rgba(192,82,26,0.3); }
+        .mutate-btn:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(192,82,26,0.5); filter: brightness(1.2); }
         .currents-wrapper { width: 44px; height: 26px; display: flex; align-items: center; justify-content: center; margin: 0 auto; position: relative; }
         .currents-svg { width: 100%; height: 100%; overflow: visible; }
         .wave-core { animation: pulseCore 1.5s infinite alternate; }
         .wave-path { stroke-dasharray: 105; stroke-dashoffset: 105; animation: flowWave 1.4s ease-in-out infinite; }
         .wave-bot { animation-delay: -0.7s; }
-        
-        @keyframes flowWave { 
-            0% { stroke-dashoffset: 105; opacity: 0; } 
-            20% { opacity: 1; } 80% { opacity: 1; } 
-            100% { stroke-dashoffset: -105; opacity: 0; } 
-        }
-        @keyframes pulseCore { 
-            0% { r: 3; fill: #c0521a; filter: drop-shadow(0 0 2px rgba(192,82,26,0.6)); } 
-            100% { r: 4.5; fill: #e3b378; filter: drop-shadow(0 0 8px rgba(227,179,120,1)); } 
-        }
-
+        @keyframes flowWave { 0% { stroke-dashoffset: 105; opacity: 0; } 20% { opacity: 1; } 80% { opacity: 1; } 100% { stroke-dashoffset: -105; opacity: 0; } }
+        @keyframes pulseCore { 0% { r: 3; fill: #c0521a; filter: drop-shadow(0 0 2px rgba(192,82,26,0.6)); } 100% { r: 4.5; fill: #e3b378; filter: drop-shadow(0 0 8px rgba(227,179,120,1)); } }
         .spinner { width: 28px; height: 28px; border: 2px solid #1a1208; border-top-color: #8a6a4a; border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto; } @keyframes spin { to { transform: rotate(360deg); } }
-        
         .empty { text-align: center; padding: 100px 20px; color: #4a3520; font-size: 16px; font-family: 'Crimson Text', serif; font-style: italic; } .modal-close { background: none; border: none; color: #4a3520; cursor: pointer; font-size: 20px; width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; transition: all 0.2s; } .modal-close:hover { background: #1a1208; color: #8a6a4a; }
         .toast-container { position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); background: #150f08; border: 1px solid #2a1f0e; color: #d4b896; padding: 14px 28px; border-radius: 8px; font-size: 13px; font-weight: 600; letter-spacing: 2px; text-transform: uppercase; z-index: 9999; animation: slideUp 0.3s ease; box-shadow: 0 10px 40px rgba(0,0,0,0.9); display: flex; align-items: center; justify-content: center; transition: all 0.3s ease; }
-        
         .ai-global-loader { position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); z-index: 9999; width: 56px; height: 40px; border-radius: 20px; background: #080604; border: 1px solid #2a1f0e; box-shadow: 0 10px 30px rgba(0,0,0,0.9), 0 0 20px rgba(192,82,26,0.1); animation: slideUp 0.3s ease, floatOrb 3s infinite ease-in-out; display: flex; align-items: center; justify-content: center; }
         @keyframes floatOrb { 0%, 100% { transform: translateX(-50%) translateY(0); } 50% { transform: translateX(-50%) translateY(-5px); } }
       `}} />
@@ -448,7 +466,17 @@ export default function Home() {
                   )}
                   <img src={selected.src} alt="" className="modal-img" onLoad={() => setMainImgLoaded(true)} style={{ opacity: mainImgLoaded ? 1 : 0, transition: "opacity 0.4s ease" }} />
                 </div>
-                <div className="modal-info"><div style={{ display: "flex", justifyContent: "space-between", marginBottom: 24 }}><button className="hbtn" style={{ background: "#1a1208" }} onClick={() => sharePhoto(selected)} title="Share"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg></button><button className="modal-close" onClick={() => setSelected(null)}>✕</button></div><div style={{ display: "flex", flexDirection: "column", gap: 12, flexShrink: 0 }}><button className={`primary-btn ${isPinned(selected) ? "pinned-state" : ""}`} onClick={() => isPinned(selected) ? null : savePin(selected)}>{isPinned(selected) ? "Saved" : "Save to Archive"}</button>{selected.link && <a href={selected.link} target="_blank" rel="noopener noreferrer"><button className="outline-btn">View Original ↗</button></a>}</div></div>
+                <div className="modal-info">
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 24 }}>
+                    <button className="hbtn" style={{ background: "#1a1208" }} onClick={() => sharePhoto(selected)} title="Share"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg></button>
+                    <button className="modal-close" onClick={() => setSelected(null)}>✕</button>
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 12, flexShrink: 0 }}>
+                    <button className={`primary-btn ${isPinned(selected) ? "pinned-state" : ""}`} onClick={() => isPinned(selected) ? null : savePin(selected)}>{isPinned(selected) ? "Saved" : "Save to Archive"}</button>
+                    <button className="mutate-btn" onClick={() => handleMutate(selected)}>Mutate 🧬</button>
+                    {selected.link && <a href={selected.link} target="_blank" rel="noopener noreferrer"><button className="outline-btn">View Original ↗</button></a>}
+                  </div>
+                </div>
               </div>
               <div className="modal-bottom">
                 <h3 style={{ fontSize: 12, fontWeight: 700, color: "#8a6a4a", textTransform: "uppercase", letterSpacing: 2, marginBottom: 4, display: "flex", alignItems: "center", gap: 10 }}>Curated Matches</h3>

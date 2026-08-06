@@ -38,7 +38,6 @@ function VibeContent() {
   const relatedAbortRef = useRef<AbortController | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  // Личность для памяти Kashmir — та же логика, что и на главной: реальный юзер или anon-id.
   useEffect(() => {
     try {
       const allowedNsfw = localStorage.getItem("gelbet_nsfw_18plus");
@@ -122,7 +121,6 @@ function VibeContent() {
     }
   }, [src, title, identity]);
 
-  // Перезапускаем подбор при смене картинки (в т.ч. при переходе с одного /vibe на другой)
   useEffect(() => {
     if (!src || identity === null) return;
     currentQueryRef.current = "";

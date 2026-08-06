@@ -1,8 +1,5 @@
 ﻿import { supabase } from "./supabase";
 
-// Базовый промпт для юзеров без кураторской персоны (обычные реальные/анонимные посетители).
-// Это тот самый "elite aesthetic archivist" движок из первой версии Kashmir — включая
-// правило про культурные отсылки (ГрОб, КиШ и т.п.), которое потерялось при переходе на synth_users.
 const GENERIC_SYSTEM_PROMPT = `You are Kashmir, an elite aesthetic visual archivist engine.
 Your ONLY purpose is to take a user's raw search query and transform it into a highly optimized English query for an image search engine.
 
@@ -12,7 +9,7 @@ RULES:
 3. GENERAL: Translate Russian concepts beautifully to English and append "aesthetic high quality".
 4. STOP WORDS: Ignore "хочу", "покажи", "картинка".`;
 
-async function callGroq(systemPrompt: string, baseQuery: string): Promise<string | null> {
+export async function callGroq(systemPrompt: string, baseQuery: string): Promise<string | null> {
     if (!process.env.GROQ_API_KEY) {
         console.warn("[KASHMIR CORE] GROQ_API_KEY отсутствует. Офлайн-режим.");
         return null;
@@ -40,17 +37,12 @@ async function callGroq(systemPrompt: string, baseQuery: string): Promise<string
     const json = await res.json();
     let aiGeneratedQuery = json.choices?.[0]?.message?.content?.trim();
 
-    if (aiGeneratedQuery) {
-        // Предохранитель: срезаем случайные кавычки, которые ИИ иногда оставляет в начале или конце
-        aiGeneratedQuery = aiGeneratedQuery.replace(/^["']|["']$/g, '');
-    }
+    if (aiGeneratedQuery) aiGeneratedQuery = aiGeneratedQuery.replace(/^["']|["']$/g, '');
 
     return aiGeneratedQuery || null;
 }
 
-// ЛИЧНАЯ память конкретного юзера (реального или анонимного) — то, что он САМ реально смотрел,
-// а не то, что придумано заранее. Растёт сама через /api/ai analyze_image при каждом просмотре фото.
-async function getPersonalVibeContext(userId: string): Promise<string> {
+export async function getPersonalVibeContext(userId: string): Promise<string> {
     try {
         const { data } = await supabase
             .from("ai_image_cache")
@@ -66,7 +58,6 @@ async function getPersonalVibeContext(userId: string): Promise<string> {
 
         return `\n\nCRITICAL VIBE CONTEXT: this specific user's most recent real browsing history: [ ${recentTags} ]. Let this quietly guide the aesthetic direction — do not literally repeat these tags back.`;
     } catch (e) {
-        console.warn("[KASHMIR CORE] Личная память недоступна:", e);
         return "";
     }
 }
@@ -78,16 +69,12 @@ export const kashmir = {
         if (!userId) return query;
 
         try {
-            // Персона (Kashmir Core / dev-меню) и личная история юзера собираются параллельно
-            // и всегда смешиваются в один prompt — персона не отменяет личную память, а дополняет её.
             const [{ data: persona }, memoryContext] = await Promise.all([
                 supabase.from("synth_users").select("*").eq("id", userId).maybeSingle(),
                 getPersonalVibeContext(userId)
             ]);
 
             if (persona) {
-                console.log(`[KASHMIR CORE] Личность активирована: ${persona.name} (${persona.role})`);
-
                 const posMods = persona.positive_modifiers ? persona.positive_modifiers.join(", ") : "";
                 const negMods = persona.negative_modifiers ? persona.negative_modifiers.join(", ") : "";
 
@@ -106,22 +93,15 @@ export const kashmir = {
                 `;
 
                 const result = await callGroq(systemPrompt, query);
-                console.log(`[KASHMIR CORE] Llama 3 (персона ${persona.name}): "${result}"`);
                 return result || query;
             }
 
-            // Персоны нет — значит это настоящий (или анонимный) юзер, а не демо-профиль.
-            // Работаем на его собственной личной памяти, без кураторского прикрытия.
-            console.log(`[KASHMIR CORE] ${userId} — без кураторской персоны, работаем по личной памяти.`);
             const systemPrompt = GENERIC_SYSTEM_PROMPT + memoryContext;
-
             const result = await callGroq(systemPrompt, query);
-            console.log(`[KASHMIR CORE] Llama 3 (личная память): "${result}"`);
             return result || `${query} aesthetic`;
 
         } catch (e) {
-            console.error("[KASHMIR CORE FATAL ERROR]:", e);
-            return `${query} aesthetic`; // При падении всегда возвращаем то, что было
+            return `${query} aesthetic`;
         }
     }
 }

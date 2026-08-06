@@ -1,4 +1,4 @@
-﻿import { NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 
 const ORACLE_SYSTEM_PROMPT = `You are an elite audio-visual synesthesia AI.
 The user gives you a song track or artist. Your job is to hallucinate its exact physical, cinematic equivalent.
@@ -46,7 +46,7 @@ export async function POST(req: Request) {
           { role: "system", content: ORACLE_SYSTEM_PROMPT },
           { role: "user", content: trackInput }
         ],
-        temperature: 0.6, // Чуть больше свободы для интересных визуальных ассоциаций
+        temperature: 0.6,
         response_format: { type: "json_object" }
       }),
     });
@@ -56,7 +56,12 @@ export async function POST(req: Request) {
     }
 
     const data = await response.json();
-    const result = JSON.parse(data.choices[0].message.content);
+    let rawContent = data.choices[0].message.content;
+    
+    // Бронебойная очистка от маркдаун-кавычек перед парсингом
+    rawContent = rawContent.replace(/```json/gi, '').replace(/```/g, '').trim();
+    
+    const result = JSON.parse(rawContent);
 
     return NextResponse.json(result);
 

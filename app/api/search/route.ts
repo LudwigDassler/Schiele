@@ -1,153 +1,79 @@
-﻿import { NextRequest, NextResponse } from "next/server";
-import { getToken } from "next-auth/jwt";
+import { NextResponse } from "next/server";
+import * as cheerio from "cheerio";
 import { kashmir } from "../../../lib/kashmir";
 
-export const dynamic = "force-dynamic";
+// Адрес твоего личного Cloudflare-щита
+const HYDRA_PROXY_URL = "https://kashmir-hydra.firsovivan2003.workers.dev";
 
-const FALLBACK_IMAGES = [
-    { id: "fb-1", title: "Aesthetic Archive 01", image_url: "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=1000&auto=format&fit=crop", url: "https://unsplash.com", src: "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=1000&auto=format&fit=crop", thumb: "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=400&auto=format&fit=crop", width: 800, height: 1000, source: "fallback", author: "Unsplash" },
-    { id: "fb-2", title: "Dark Academia Vibe", image_url: "https://images.unsplash.com/photo-1513519245088-0e12902e5a38?q=80&w=1000&auto=format&fit=crop", url: "https://unsplash.com", src: "https://images.unsplash.com/photo-1513519245088-0e12902e5a38?q=80&w=1000&auto=format&fit=crop", thumb: "https://images.unsplash.com/photo-1513519245088-0e12902e5a38?q=80&w=400&auto=format&fit=crop", width: 800, height: 1000, source: "fallback", author: "Unsplash" },
-    { id: "fb-3", title: "Minimalist Space", image_url: "https://images.unsplash.com/photo-1507089947368-19c1da9775ae?q=80&w=1000&auto=format&fit=crop", url: "https://unsplash.com", src: "https://images.unsplash.com/photo-1507089947368-19c1da9775ae?q=80&w=1000&auto=format&fit=crop", thumb: "https://images.unsplash.com/photo-1507089947368-19c1da9775ae?q=80&w=400&auto=format&fit=crop", width: 800, height: 1000, source: "fallback", author: "Unsplash" },
-    { id: "fb-4", title: "Cyberpunk Glow", image_url: "https://images.unsplash.com/photo-1509198397868-475647b2a1e5?q=80&w=1000&auto=format&fit=crop", url: "https://unsplash.com", src: "https://images.unsplash.com/photo-1509198397868-475647b2a1e5?q=80&w=1000&auto=format&fit=crop", thumb: "https://images.unsplash.com/photo-1509198397868-475647b2a1e5?q=80&w=400&auto=format&fit=crop", width: 800, height: 1000, source: "fallback", author: "Unsplash" }
-];
+export async function GET(req: Request) {
+  try {
+    const url = new URL(req.url);
+    const rawQuery = url.searchParams.get("query") || "aesthetic";
+    const userId = url.searchParams.get("userId");
 
-function isValidImage(url: string) {
-    if (!url || typeof url !== 'string') return false;
-    if (!url.startsWith('http')) return false;
-    const BAD_DOMAINS = ["pixabay.com", "picsum.photos", "fbsbx.com", "shutterstock.com", "istockphoto.com"];
-    try {
-        const p = new URL(url);
-        return !BAD_DOMAINS.some(domain => p.hostname.includes(domain));
-    } catch { return false; }
-}
+    console.log(`[SEARCH] Raw Query: "${rawQuery}", User: ${userId || "Anon"}`);
 
-const generateSafeId = (url: string, page: number) => {
-    let hash = 0; const str = url + page;
-    for (let i = 0; i < str.length; i++) hash = Math.imul(31 * hash + str.charCodeAt(i) | 0, 1);
-    return Math.abs(hash).toString();
-};
+    // 1. Прогоняем запрос через мозг Kashmir (учитываем манифест и память)
+    const optimizedQuery = await kashmir.processQuery(rawQuery, userId);
+    console.log(`[SEARCH] Kashmir Optimized Query: "${optimizedQuery}"`);
 
-const memoryCache = new Map();
+    // 2. Формируем URL для DuckDuckGo (HTML версия для парсинга)
+    const targetUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(optimizedQuery)}`;
 
-export const noCacheHeaders = {
-    "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
-    "Pragma": "no-cache",
-    "Expires": "0",
-};
+    // 3. Заворачиваем запрос в Гидру
+    const proxyUrl = `${HYDRA_PROXY_URL}/?url=${encodeURIComponent(targetUrl)}`;
 
-export const sanitizeQuery = (q: string | null) => (!q || q === "null" || q.trim() === "") ? null : q.trim();
-
-const fetchWithTimeout = async (url: string, options: any, timeout = 8000) => {
-    const controller = new AbortController();
-    const id = setTimeout(() => controller.abort(), timeout);
-    try {
-        const response = await fetch(url, { ...options, signal: controller.signal });
-        clearTimeout(id);
-        return response;
-    } catch (error) {
-        clearTimeout(id);
-        throw error;
-    }
-};
-
-export async function fetchFromEngines(rawQuery: string | null, page: number = 1, userId: string | null = null, mode: string = "classic") {
-    const query = rawQuery || "aesthetic";
-    const cacheKey = `${query}-page-${page}-mode-${mode}-user-${userId || 'anon'}`;
-
-    if (memoryCache.has(cacheKey)) return memoryCache.get(cacheKey);
-
-    let finalQuery = query;
-    if (mode === "kashmir") {
-        try {
-            finalQuery = await kashmir.processQuery(query, userId);
-            console.log(`[KASHMIR CORE] Transformed: "${query}" -> "${finalQuery}"`);
-        } catch (e) {}
+    // 4. Бьем через прокси
+    const response = await fetch(proxyUrl, { 
+      cache: "no-store",
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+      }
+    });
+    
+    if (!response.ok) {
+        throw new Error(`Hydra Proxy failed with status: ${response.status}`);
     }
 
-    // НОВЫЕ АНТИ-БАН ЗАГОЛОВКИ
-    const baseHeaders = {
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Sec-Ch-Ua": '"Google Chrome";v="125", "Chromium";v="125", "Not.A/Brand";v="24"',
-        "Sec-Ch-Ua-Mobile": "?0",
-        "Sec-Ch-Ua-Platform": '"macOS"'
-    };
+    const html = await response.text();
+    const $ = cheerio.load(html);
+    const photos: any[] = [];
 
-    const searchDDG = async () => {
-        const htmlResp = await fetchWithTimeout(`https://duckduckgo.com/?q=${encodeURIComponent(finalQuery)}&ia=images&iax=images`, { headers: baseHeaders }, 8000);
-        
-        // Надежный метод извлечения VQD из заголовков DDG
-        let vqd = htmlResp.headers.get("x-vqd-4");
-        if (!vqd) {
-            const html = await htmlResp.text();
-            const vqdMatch = html.match(/vqd=["']?([^"'\s&]+)["']?/);
-            vqd = vqdMatch ? vqdMatch[1] : null;
-        }
-        
-        if (!vqd) throw new Error("DDG VQD Error: Anti-bot triggered");
+    // 5. Парсим результаты (DuckDuckGo прячет картинки в .tile--img)
+    $(".tile--img").each((i, el) => {
+      const imgNode = $(el).find(".tile--img__img");
+      const titleNode = $(el).find(".tile--img__title");
+      const linkNode = $(el).find(".tile--img__sub");
 
-        const apiUrl = `https://duckduckgo.com/i.js?l=us-en&o=json&q=${encodeURIComponent(finalQuery)}&vqd=${vqd}&f=,,,&p=1&s=${(page - 1) * 50}`;
-        const imgResp = await fetchWithTimeout(apiUrl, { headers: { ...baseHeaders, "Referer": "https://duckduckgo.com/" } }, 8000);
-        const data = await imgResp.json();
+      let src = imgNode.attr("data-src") || imgNode.attr("src");
+      if (src && src.startsWith("//")) src = "https:" + src;
+      
+      // Расшифровываем реальный URL картинки, если DuckDuckGo его спрятал
+      if (src && src.includes("external-content.duckduckgo.com")) {
+         const realUrlMatch = src.match(/iu=\/?([^&]+)/);
+         if (realUrlMatch) src = decodeURIComponent(realUrlMatch[1]);
+      }
 
-        const imgs = (data.results || []).map((img: any) => ({
-            id: generateSafeId(img.image, page), title: img.title || query, image_url: img.image, url: img.url, src: img.image, thumb: img.thumbnail || img.image, width: img.width || 600, height: img.height || 800, source: "duckduckgo", author: img.source || "Web"
-        })).filter((img: any) => isValidImage(img.image_url));
+      const title = titleNode.text().trim();
+      let link = linkNode.attr("href") || "";
+      if (link.startsWith("//")) link = "https:" + link;
 
-        if (imgs.length === 0) throw new Error("DDG Empty");
-        return imgs;
-    };
+      if (src) {
+        photos.push({
+          id: `ddg-${Date.now()}-${i}`,
+          src,
+          thumb: src,
+          title: title || optimizedQuery,
+          link
+        });
+      }
+    });
 
-    try {
-        const images: any = await searchDDG();
-        const uniqueImages = Array.from(new Map(images.map((item: any) => [item.image_url, item])).values());
-        if (uniqueImages.length > 0) {
-            memoryCache.set(cacheKey, uniqueImages);
-            setTimeout(() => memoryCache.delete(cacheKey), 5 * 60 * 1000);
-            return uniqueImages.slice(0, 40);
-        }
-        throw new Error("No unique images");
-    } catch (e) {
-        console.error(`[DDG FALLBACK] Error fetching images:`, e);
-        return FALLBACK_IMAGES;
-    }
-}
+    console.log(`[SEARCH] Hydra returned ${photos.length} artifacts.`);
 
-export async function GET(req: NextRequest) {
-    const { searchParams } = new URL(req.url);
-    const query = sanitizeQuery(searchParams.get("query") || searchParams.get("q"));
-    const page = parseInt(searchParams.get("page") || "1", 10) || 1;
-    const mode = searchParams.get("mode") || "classic";
-
-    const token = await getToken({ req, secret: process.env.AUTH_SECRET });
-
-    let userId = token?.sub || null;
-    const requestedUserId = searchParams.get("userId");
-    if (requestedUserId && (mode === "kashmir" || requestedUserId.startsWith("synth-"))) {
-        userId = requestedUserId;
-    }
-
-    const images = await fetchFromEngines(query, page, userId, mode);
-    return NextResponse.json(images, { headers: noCacheHeaders });
-}
-
-export async function POST(req: NextRequest) {
-    try {
-        const body = await req.json();
-        const query = sanitizeQuery(body.query || body.q);
-        const page = parseInt(body.page || "1", 10) || 1;
-        const mode = body.mode || "classic";
-
-        const token = await getToken({ req, secret: process.env.AUTH_SECRET });
-
-        let userId = token?.sub || null;
-        const requestedUserId = body.userId;
-        if (requestedUserId && (mode === "kashmir" || requestedUserId.startsWith("synth-"))) {
-            userId = requestedUserId;
-        }
-
-        const images = await fetchFromEngines(query, page, userId, mode);
-        return NextResponse.json(images, { headers: noCacheHeaders });
-    } catch { return NextResponse.json(FALLBACK_IMAGES, { headers: noCacheHeaders }); }
+    return NextResponse.json({ data: photos });
+  } catch (error: any) {
+    console.error("[SEARCH API ERROR]", error.message);
+    return NextResponse.json({ error: "Hydra Search failed", data: [] }, { status: 500 });
+  }
 }

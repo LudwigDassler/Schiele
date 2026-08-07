@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
 
-// Блокируем мертвые CDN, стоки с вотермарками и сайты с защитой от хотлинкинга
+// Р‘Р»РѕРєРёСЂСѓРµРј РјРµСЂС‚РІС‹Рµ CDN, СЃС‚РѕРєРё СЃ РІРѕС‚РµСЂРјР°СЂРєР°РјРё Рё СЃР°Р№С‚С‹ СЃ Р·Р°С‰РёС‚РѕР№ РѕС‚ С…РѕС‚Р»РёРЅРєРёРЅРіР°
 const BAD_DOMAINS = [
     "pixabay.com", "picsum.photos", "fbsbx.com", "shutterstock.com", 
     "istockphoto.com", "adobestock.com", "adobe.com", "gettyimages.com", 
@@ -13,7 +13,7 @@ function isValidImage(url: string) {
     if (!url) return false;
     try {
         const p = new URL(url);
-        // Пропускаем только нормальные http/https ссылки (никаких base64 или локальных путей)
+        // РџСЂРѕРїСѓСЃРєР°РµРј С‚РѕР»СЊРєРѕ РЅРѕСЂРјР°Р»СЊРЅС‹Рµ http/https СЃСЃС‹Р»РєРё (РЅРёРєР°РєРёС… base64 РёР»Рё Р»РѕРєР°Р»СЊРЅС‹С… РїСѓС‚РµР№)
         if (p.protocol !== "http:" && p.protocol !== "https:") return false;
         if (BAD_DOMAINS.some(domain => p.hostname.includes(domain))) return false;
         
@@ -27,8 +27,8 @@ function isValidImage(url: string) {
     }
 }
 
-// Детерминированный генератор ID. 
-// Спасает React от ошибки 'Duplicate keys', жестко привязывая ID к номеру страницы.
+// Р”РµС‚РµСЂРјРёРЅРёСЂРѕРІР°РЅРЅС‹Р№ РіРµРЅРµСЂР°С‚РѕСЂ ID. 
+// РЎРїР°СЃР°РµС‚ React РѕС‚ РѕС€РёР±РєРё 'Duplicate keys', Р¶РµСЃС‚РєРѕ РїСЂРёРІСЏР·С‹РІР°СЏ ID Рє РЅРѕРјРµСЂСѓ СЃС‚СЂР°РЅРёС†С‹.
 const generateSafeId = (url: string, page: number) => {
     const str = url + "-page-" + page;
     let hash = 0;
@@ -40,14 +40,14 @@ const generateSafeId = (url: string, page: number) => {
 
 const memoryCache = new Map();
 
-// Жесткий запрет на кэширование браузером (убивает призрачные баги при переходах назад-вперед)
-export const noCacheHeaders = {
+// Р–РµСЃС‚РєРёР№ Р·Р°РїСЂРµС‚ РЅР° РєСЌС€РёСЂРѕРІР°РЅРёРµ Р±СЂР°СѓР·РµСЂРѕРј (СѓР±РёРІР°РµС‚ РїСЂРёР·СЂР°С‡РЅС‹Рµ Р±Р°РіРё РїСЂРё РїРµСЂРµС…РѕРґР°С… РЅР°Р·Р°Рґ-РІРїРµСЂРµРґ)
+const noCacheHeaders = {
     "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
     "Pragma": "no-cache",
     "Expires": "0",
 };
 
-// Зачистка фронтенд-мусора
+// Р—Р°С‡РёСЃС‚РєР° С„СЂРѕРЅС‚РµРЅРґ-РјСѓСЃРѕСЂР°
 export const sanitizeQuery = (q: string | null) => {
     if (!q || q === "null" || q === "undefined" || q === "All" || q.trim() === "") {
         return null;
@@ -99,7 +99,7 @@ async function fetchFromGoogle(rawQuery: string | null, page: number = 1) {
         
         if (uniqueImages.length > 0) {
             memoryCache.set(cacheKey, uniqueImages);
-            // Храним в кэше 5 минут, чтобы не перегружать сервер
+            // РҐСЂР°РЅРёРј РІ РєСЌС€Рµ 5 РјРёРЅСѓС‚, С‡С‚РѕР±С‹ РЅРµ РїРµСЂРµРіСЂСѓР¶Р°С‚СЊ СЃРµСЂРІРµСЂ
             setTimeout(() => memoryCache.delete(cacheKey), 5 * 60 * 1000);
         }
         
@@ -110,15 +110,15 @@ async function fetchFromGoogle(rawQuery: string | null, page: number = 1) {
     }
 }
 // ==========================================
-// РОУТЫ КАТЕГОРИЙ (ВОЗВРАЩАЮТ ОБЪЕКТ)
-// ПРАВИЛО: КАТЕГОРИЯ ИМЕЕТ АБСОЛЮТНЫЙ ПРИОРИТЕТ
+// Р РћРЈРўР« РљРђРўР•Р“РћР РР™ (Р’РћР—Р’Р РђР©РђР®Рў РћР‘РЄР•РљРў)
+// РџР РђР’РР›Рћ: РљРђРўР•Р“РћР РРЇ РРњР•Р•Рў РђР‘РЎРћР›Р®РўРќР«Р™ РџР РРћР РРўР•Рў
 // ==========================================
 export async function GET(req: Request) {
     const { searchParams } = new URL(req.url);
     const category = sanitizeQuery(searchParams.get("category"));
     const fallbackQuery = sanitizeQuery(searchParams.get("query") || searchParams.get("q") || searchParams.get("search"));
     
-    // Если есть категория - используем её. Если нет - берем остатки поиска.
+    // Р•СЃР»Рё РµСЃС‚СЊ РєР°С‚РµРіРѕСЂРёСЏ - РёСЃРїРѕР»СЊР·СѓРµРј РµС‘. Р•СЃР»Рё РЅРµС‚ - Р±РµСЂРµРј РѕСЃС‚Р°С‚РєРё РїРѕРёСЃРєР°.
     const finalQuery = category || fallbackQuery || "aesthetic";
     const page = parseInt(searchParams.get("page") || "1", 10) || 1;
     

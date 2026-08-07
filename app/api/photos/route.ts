@@ -1,4 +1,4 @@
-﻿import { NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
 
@@ -55,7 +55,7 @@ export const sanitizeQuery = (q: string | null) => {
     return q.trim();
 };
 
-export async function fetchFromGoogle(rawQuery: string | null, page: number = 1) {
+async function fetchFromGoogle(rawQuery: string | null, page: number = 1) {
     if (!process.env.SERPER_API_KEY) return [];
 
     const query = rawQuery || "aesthetic pinterest high quality photography";

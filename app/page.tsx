@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../lib/supabase";
@@ -198,7 +198,7 @@ export default function Home() {
       setPhotos(prev => { 
         const combined = reset ? fetched : [...prev, ...fetched]; 
         const map = new Map(); 
-        combined.forEach(p => map.set(p.src, p)); 
+        combined.forEach((p: any) => map.set(p.src, p)); 
         return Array.from(map.values()); 
       });
       setHasMore(fetched.length > 0);

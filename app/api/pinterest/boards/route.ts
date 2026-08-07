@@ -1,4 +1,4 @@
-﻿import { NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 
 const token = process.env.PINTEREST_ACCESS_TOKEN;
 

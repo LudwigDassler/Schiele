@@ -1,6 +1,6 @@
-﻿import { NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 
-export const dynamic = "force-dynamic";
+const dynamic = "force-dynamic";
 
 // Блокируем мертвые CDN, стоки с вотермарками и сайты с защитой от хотлинкинга
 const BAD_DOMAINS = [
@@ -41,21 +41,21 @@ const generateSafeId = (url: string, page: number) => {
 const memoryCache = new Map();
 
 // Жесткий запрет на кэширование браузером (убивает призрачные баги при переходах назад-вперед)
-export const noCacheHeaders = {
+const noCacheHeaders = {
     "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
     "Pragma": "no-cache",
     "Expires": "0",
 };
 
 // Зачистка фронтенд-мусора
-export const sanitizeQuery = (q: string | null) => {
+const sanitizeQuery = (q: string | null) => {
     if (!q || q === "null" || q === "undefined" || q === "All" || q.trim() === "") {
         return null;
     }
     return q.trim();
 };
 
-export async function fetchFromGoogle(rawQuery: string | null, page: number = 1) {
+async function fetchFromGoogle(rawQuery: string | null, page: number = 1) {
     if (!process.env.SERPER_API_KEY) return [];
 
     const query = rawQuery || "aesthetic pinterest high quality photography";

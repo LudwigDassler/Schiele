@@ -58,7 +58,7 @@ export async function POST(req: Request) {
     const data = await response.json();
     let rawContent = data.choices[0].message.content;
     
-    // Бронебойная очистка от маркдаун-кавычек перед парсингом
+    // Р‘СЂРѕРЅРµР±РѕР№РЅР°СЏ РѕС‡РёСЃС‚РєР° РѕС‚ РјР°СЂРєРґР°СѓРЅ-РєР°РІС‹С‡РµРє РїРµСЂРµРґ РїР°СЂСЃРёРЅРіРѕРј
     rawContent = rawContent.replace(/```json/gi, '').replace(/```/g, '').trim();
     
     const result = JSON.parse(rawContent);

@@ -1,7 +1,7 @@
-﻿import { NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { supabase } from "../../../lib/supabase";
 
-export const dynamic = "force-dynamic";
+const dynamic = "force-dynamic";
 
 export async function GET() {
     const fakeUsers = [

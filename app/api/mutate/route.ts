@@ -1,4 +1,4 @@
-﻿import { NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { callGroq, getPersonalVibeContext } from "../../../lib/kashmir";
 
 const MUTATE_SYSTEM_PROMPT = `You are an AI visual mutation engine, a sibling system to Kashmir.

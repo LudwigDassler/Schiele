@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import * as cheerio from "cheerio";
 import { kashmir } from "../../../lib/kashmir";
 
-// Адрес твоего личного Cloudflare-щита
+// РђРґСЂРµСЃ С‚РІРѕРµРіРѕ Р»РёС‡РЅРѕРіРѕ Cloudflare-С‰РёС‚Р°
 const HYDRA_PROXY_URL = "https://kashmir-hydra.firsovivan2003.workers.dev";
 
 export async function GET(req: Request) {
@@ -13,17 +13,17 @@ export async function GET(req: Request) {
 
     console.log(`[SEARCH] Raw Query: "${rawQuery}", User: ${userId || "Anon"}`);
 
-    // 1. Прогоняем запрос через мозг Kashmir (учитываем манифест и память)
+    // 1. РџСЂРѕРіРѕРЅСЏРµРј Р·Р°РїСЂРѕСЃ С‡РµСЂРµР· РјРѕР·Рі Kashmir (СѓС‡РёС‚С‹РІР°РµРј РјР°РЅРёС„РµСЃС‚ Рё РїР°РјСЏС‚СЊ)
     const optimizedQuery = await kashmir.processQuery(rawQuery, userId);
     console.log(`[SEARCH] Kashmir Optimized Query: "${optimizedQuery}"`);
 
-    // 2. Формируем URL для DuckDuckGo (HTML версия для парсинга)
+    // 2. Р¤РѕСЂРјРёСЂСѓРµРј URL РґР»СЏ DuckDuckGo (HTML РІРµСЂСЃРёСЏ РґР»СЏ РїР°СЂСЃРёРЅРіР°)
     const targetUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(optimizedQuery)}`;
 
-    // 3. Заворачиваем запрос в Гидру
+    // 3. Р—Р°РІРѕСЂР°С‡РёРІР°РµРј Р·Р°РїСЂРѕСЃ РІ Р“РёРґСЂСѓ
     const proxyUrl = `${HYDRA_PROXY_URL}/?url=${encodeURIComponent(targetUrl)}`;
 
-    // 4. Бьем через прокси
+    // 4. Р‘СЊРµРј С‡РµСЂРµР· РїСЂРѕРєСЃРё
     const response = await fetch(proxyUrl, { 
       cache: "no-store",
       headers: {
@@ -39,7 +39,7 @@ export async function GET(req: Request) {
     const $ = cheerio.load(html);
     const photos: any[] = [];
 
-    // 5. Парсим результаты (DuckDuckGo прячет картинки в .tile--img)
+    // 5. РџР°СЂСЃРёРј СЂРµР·СѓР»СЊС‚Р°С‚С‹ (DuckDuckGo РїСЂСЏС‡РµС‚ РєР°СЂС‚РёРЅРєРё РІ .tile--img)
     $(".tile--img").each((i, el) => {
       const imgNode = $(el).find(".tile--img__img");
       const titleNode = $(el).find(".tile--img__title");
@@ -48,7 +48,7 @@ export async function GET(req: Request) {
       let src = imgNode.attr("data-src") || imgNode.attr("src");
       if (src && src.startsWith("//")) src = "https:" + src;
       
-      // Расшифровываем реальный URL картинки, если DuckDuckGo его спрятал
+      // Р Р°СЃС€РёС„СЂРѕРІС‹РІР°РµРј СЂРµР°Р»СЊРЅС‹Р№ URL РєР°СЂС‚РёРЅРєРё, РµСЃР»Рё DuckDuckGo РµРіРѕ СЃРїСЂСЏС‚Р°Р»
       if (src && src.includes("external-content.duckduckgo.com")) {
          const realUrlMatch = src.match(/iu=\/?([^&]+)/);
          if (realUrlMatch) src = decodeURIComponent(realUrlMatch[1]);

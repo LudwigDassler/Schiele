@@ -2,34 +2,66 @@ import { NextResponse } from "next/server";
 import * as cheerio from "cheerio";
 import { kashmir } from "../../../lib/kashmir";
 
-// Адрес твоего личного Cloudflare-щита
 const HYDRA_PROXY_URL = "https://kashmir-hydra.firsovivan2003.workers.dev";
+
+// Вспомогательная функция БЕЗ export, чтобы Next.js не сошел с ума
+const safelyParseJson = (str: string) => {
+  try {
+    return JSON.parse(str);
+  } catch {
+    return null;
+  }
+};
 
 export async function GET(req: Request) {
   try {
     const url = new URL(req.url);
     const rawQuery = url.searchParams.get("query") || "aesthetic";
-    const userId = url.searchParams.get("userId");
+    const userId = url.searchParams.get("userId") || "anon";
 
-    console.log(`[KASHMIR] Intercepted raw visual request: "${rawQuery}"`);
+    console.log(`[KASHMIR] Intercepted raw visual request: "${rawQuery}", User: ${userId}`);
 
-    // 1. Кашмир осмысляет запрос, пропуская через призму своей личности
-    const optimizedQuery = await kashmir.processQuery(rawQuery, userId);
+    let optimizedQuery = rawQuery;
+    
+    // Failsafe: защищаем ядро Кашмира от падений
+    try {
+      const processed = await kashmir.processQuery(rawQuery, userId);
+      if (processed && typeof processed === 'string' && processed.trim() !== "") {
+        optimizedQuery = processed.trim();
+      }
+    } catch (cortexError) {
+      console.warn(`[KASHMIR CORTEX WARNING] Personality core glitched, falling back to raw query.`);
+    }
+
     console.log(`[KASHMIR] Vibe formulated: "${optimizedQuery}"`);
 
-    // 2. Формируем запрос к архитектуре Bing
-    const targetUrl = `https://www.bing.com/images/search?q=${encodeURIComponent(optimizedQuery)}`;
+    // Жесткая привязка к en-US для отсечения регионального мусора
+    const targetUrl = `https://www.bing.com/images/search?q=${encodeURIComponent(optimizedQuery)}&setmkt=en-US&setlang=en-US&form=HDRSC2`;
     const proxyUrl = `${HYDRA_PROXY_URL}/?url=${encodeURIComponent(targetUrl)}`;
 
-    console.log(`[HYDRA] Bypassing restrictions, targeting Bing...`);
+    // Timeout-контроллер: даем Гидре ровно 15 секунд на ответ
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
 
-    // 3. Бьем через щит
-    const response = await fetch(proxyUrl, { 
-      cache: "no-store",
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    let response;
+    try {
+      response = await fetch(proxyUrl, { 
+        cache: "no-store",
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          "Accept-Language": "en-US,en;q=0.9",
+          "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8"
+        },
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+    } catch (fetchError: any) {
+      clearTimeout(timeoutId);
+      if (fetchError.name === 'AbortError') {
+        throw new Error("Hydra Proxy connection timed out (15s limit).");
       }
-    });
+      throw fetchError;
+    }
     
     if (!response.ok) {
         throw new Error(`Hydra Proxy dropped connection with status: ${response.status}`);
@@ -39,30 +71,31 @@ export async function GET(req: Request) {
     const $ = cheerio.load(html);
     const visualArtifacts: any[] = [];
 
-    // 4. Элегантная хирургия: вскрываем скрытые JSON-пейлоады в тегах a.iusc
+    // Безопасный парсинг скрытых узлов
     $("a.iusc").each((index, element) => {
       const mData = $(element).attr("m");
       if (mData) {
-        try {
-          const artifact = JSON.parse(mData);
+        const artifact = safelyParseJson(mData);
+        if (artifact && artifact.murl) {
           visualArtifacts.push({
             id: `kashmir-visual-${Date.now()}-${index}`,
-            src: artifact.murl,     // Прямая ссылка на оригинальный исходник
-            thumb: artifact.turl || artifact.murl, // Сжатое превью
-            title: artifact.t || optimizedQuery,   // Мета-заголовок
-            link: artifact.purl || ""              // Источник (страница)
+            src: artifact.murl,     
+            thumb: artifact.turl || artifact.murl,
+            title: artifact.t || optimizedQuery,   
+            link: artifact.purl || ""              
           });
-        } catch (error) {
-          // Молча пропускаем битые артефакты, чтобы не ронять весь поток
         }
       }
     });
 
-    console.log(`[KASHMIR] Successfully extracted ${visualArtifacts.length} pure visual artifacts.`);
+    // Финальная санитаризация: убираем пустышки и битые ссылки
+    const cleanArtifacts = visualArtifacts.filter(a => a.src && a.src.startsWith('http'));
 
-    return NextResponse.json({ data: visualArtifacts });
+    console.log(`[KASHMIR] Successfully extracted ${cleanArtifacts.length} pure visual artifacts.`);
+
+    return NextResponse.json({ data: cleanArtifacts });
   } catch (error: any) {
-    console.error("[KASHMIR CORTEX ERROR]", error.message);
-    return NextResponse.json({ error: "Failed to extract visual vibe", data: [] }, { status: 500 });
+    console.error("[KASHMIR FATAL ERROR]", error.message);
+    return NextResponse.json({ error: error.message || "Failed to extract visual vibe", data: [] }, { status: 500 });
   }
 }

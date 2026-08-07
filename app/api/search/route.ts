@@ -1,6 +1,7 @@
-import { NextResponse } from "next/server";
+﻿import { NextResponse } from "next/server";
 import * as cheerio from "cheerio";
 import { kashmir } from "../../../lib/kashmir";
+import { classifyIntent } from "../../../lib/intentRouter";
 
 const HYDRA_PROXY_URL = "https://kashmir-hydra.firsovivan2003.workers.dev";
 
@@ -18,19 +19,29 @@ export async function GET(req: Request) {
     const url = new URL(req.url);
     const rawQuery = url.searchParams.get("query") || "aesthetic";
     const userId = url.searchParams.get("userId") || "anon";
+    const explicitMode = url.searchParams.get("mode");
 
-    console.log(`[KASHMIR] Intercepted raw visual request: "${rawQuery}", User: ${userId}`);
+    // "classic" — это дефолт фронтенда, когда юзер сам ничего не выбрал.
+    // Он значит "реши сам", а не "никогда не буди Kashmir". Любое другое
+    // значение mode (id персоны, явный "kashmir" из Оракула и т.д.) —
+    // осознанный выбор юзера, который всегда побеждает эвристику.
+    const isExplicitOverride = !!explicitMode && explicitMode !== "classic";
+    const intent = isExplicitOverride ? "kashmir" : classifyIntent(rawQuery);
+
+    console.log(`[KASHMIR ROUTER] "${rawQuery}" -> ${intent}${isExplicitOverride ? ` (явный оверрайд: ${explicitMode})` : ""}, User: ${userId}`);
 
     let optimizedQuery = rawQuery;
-    
-    // Failsafe: защищаем ядро Кашмира от падений
-    try {
-      const processed = await kashmir.processQuery(rawQuery, userId);
-      if (processed && typeof processed === 'string' && processed.trim() !== "") {
-        optimizedQuery = processed.trim();
+
+    if (intent === "kashmir") {
+      // Failsafe: защищаем ядро Кашмира от падений
+      try {
+        const processed = await kashmir.processQuery(rawQuery, userId);
+        if (processed && typeof processed === 'string' && processed.trim() !== "") {
+          optimizedQuery = processed.trim();
+        }
+      } catch (cortexError) {
+        console.warn(`[KASHMIR CORTEX WARNING] Personality core glitched, falling back to raw query.`);
       }
-    } catch (cortexError) {
-      console.warn(`[KASHMIR CORTEX WARNING] Personality core glitched, falling back to raw query.`);
     }
 
     console.log(`[KASHMIR] Vibe formulated: "${optimizedQuery}"`);

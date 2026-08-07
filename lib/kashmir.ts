@@ -62,6 +62,26 @@ export async function getPersonalVibeContext(userId: string): Promise<string> {
     }
 }
 
+// Манифест создателя — авторские правила вкуса, общие для ВСЕХ путей
+// (и персон, и обычных юзеров). Раньше жил в отдельном, никуда не
+// подключённом lib/kashmir_brain.ts — перенесено сюда, чтобы у Kashmir
+// был один системный промпт, а не три параллельные личности.
+async function getManifesto(): Promise<string> {
+    try {
+        const { data } = await supabase
+            .from("kashmir_memory")
+            .select("content")
+            .eq("category", "manifesto");
+
+        if (!data || data.length === 0) return "";
+
+        const rules = data.map(item => `- ${item.content}`).join("\n");
+        return `\n\nCORE CREATOR MANIFESTO & IDENTITY:\n${rules}\nFollow these aesthetic values strictly.`;
+    } catch (e) {
+        return "";
+    }
+}
+
 export const kashmir = {
     async processQuery(baseQuery: string, userId: string | null): Promise<string> {
         const query = baseQuery.trim();
@@ -69,9 +89,10 @@ export const kashmir = {
         if (!userId) return query;
 
         try {
-            const [{ data: persona }, memoryContext] = await Promise.all([
+            const [{ data: persona }, memoryContext, manifesto] = await Promise.all([
                 supabase.from("synth_users").select("*").eq("id", userId).maybeSingle(),
-                getPersonalVibeContext(userId)
+                getPersonalVibeContext(userId),
+                getManifesto()
             ]);
 
             if (persona) {
@@ -85,6 +106,7 @@ export const kashmir = {
                 Mandatory Visual Elements to Include: ${posMods}
                 Elements to Strictly Avoid: ${negMods}
                 ${memoryContext}
+                ${manifesto}
 
                 The user is searching for a base concept: "${query}".
                 Transform this search query into a highly descriptive, comma-separated list of keywords for an image search engine.
@@ -96,7 +118,7 @@ export const kashmir = {
                 return result || query;
             }
 
-            const systemPrompt = GENERIC_SYSTEM_PROMPT + memoryContext;
+            const systemPrompt = GENERIC_SYSTEM_PROMPT + memoryContext + manifesto;
             const result = await callGroq(systemPrompt, query);
             return result || `${query} aesthetic`;
 

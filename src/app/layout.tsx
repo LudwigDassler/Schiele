@@ -1,5 +1,6 @@
-﻿"use client";
+"use client";
 import { SessionProvider } from "next-auth/react";
+// @ts-ignore
 import GelbetLoader from "../components/GelbetLoader";
 import { useState } from "react";
 import "./globals.css";

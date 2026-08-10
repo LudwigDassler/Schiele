@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 import { useState, useEffect, useRef, useCallback, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { supabase } from "../../lib/supabase";
@@ -31,6 +31,8 @@ function VibeContent() {
   const [relatedPage, setRelatedPage] = useState(1);
   const [relatedHasMore, setRelatedHasMore] = useState(true);
   const [relatedLoading, setRelatedLoading] = useState(true);
+  
+  // Анимация мутации и статус
   const [isMutating, setIsMutating] = useState(false);
   const [activeVibe, setActiveVibe] = useState("Scanning...");
 
@@ -195,72 +197,179 @@ function VibeContent() {
   if (!src) return <div style={{ color: "#d4b896", padding: 40, textAlign: "center", background: "#050403", minHeight: "100vh" }}>Artifact not found.</div>;
 
   return (
-    <div style={{ minHeight: "100vh", background: "#050403", color: "#d4b896", paddingBottom: 60 }}>
+    <div className="min-h-screen bg-[#030105] text-white font-sans overflow-hidden flex flex-col relative">
       <style dangerouslySetInnerHTML={{ __html: `
-        @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Crimson+Text:ital,wght@0,400;0,600;1,400&display=swap');
-        .v-header { padding: 16px 20px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #1a1208; position: sticky; top: 0; background: rgba(5,4,3,0.9); backdrop-filter: blur(12px); z-index: 10; }
-        .v-logo { font-family: 'Cinzel', serif; font-size: 16px; font-weight: 700; color: #c0521a; letter-spacing: 4px; cursor: pointer; text-decoration: none; }
-        .v-close { background: none; border: none; color: #8a6a4a; cursor: pointer; font-size: 22px; width: 38px; height: 38px; border-radius: 50%; transition: all 0.2s; }
-        .v-close:hover { background: #1a1208; color: #d4b896; }
-        .v-container { display: flex; flex-direction: column; max-width: 1200px; margin: 0 auto; padding: 24px; gap: 24px; }
-        @media(min-width: 800px) { .v-container { flex-direction: row; align-items: flex-start; } }
-        .v-imgwrap { flex: 1.5; background: #080604; border: 1px solid #1a1208; border-radius: 8px; padding: 16px; display: flex; align-items: center; justify-content: center; min-height: 200px; }
-        .v-mainimg { max-width: 100%; max-height: 75vh; object-fit: contain; border-radius: 4px; }
-        .v-actions { flex: 1; display: flex; flex-direction: column; gap: 14px; background: #080604; padding: 28px; border: 1px solid #1a1208; border-radius: 8px; position: sticky; top: 80px; }
-        .v-title { font-size: 15px; color: #8a6a4a; font-style: italic; font-family: 'Crimson Text', serif; line-height: 1.5; }
-
-        .v-btn { padding: 14px 20px; font-size: 12px; font-weight: 600; letter-spacing: 1.5px; text-transform: uppercase; cursor: pointer; border-radius: 4px; transition: all 0.25s; text-align: center; text-decoration: none; display: flex; align-items: center; justify-content: center; gap: 8px; }
-        .v-btn-primary { background: #1a1208; color: #d4b896; border: 1px solid #2a1f0e; }
-        .v-btn-primary:hover { border-color: #4a3520; color: #fff; }
-        .v-btn-saved { background: rgba(192,82,26,0.1); color: #c0521a; border: 1px solid #c0521a; cursor: default; }
-
-        .v-btn-mutate { position: relative; overflow: hidden; background: linear-gradient(135deg, #c0521a, #7a1810); color: #fff; border: none; box-shadow: 0 4px 18px rgba(192,82,26,0.35); text-shadow: 0 1px 3px rgba(0,0,0,0.5); }
-        .v-btn-mutate::before { content: ''; position: absolute; top: 0; left: -120%; width: 60%; height: 100%; background: linear-gradient(90deg, transparent, rgba(255,255,255,0.35), transparent); transform: skewX(-20deg); transition: left 0.6s ease; }
-        .v-btn-mutate:hover:not(:disabled)::before { left: 130%; }
-        .v-btn-mutate:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 8px 26px rgba(192,82,26,0.55); filter: brightness(1.08); }
-        .v-btn-mutate:active:not(:disabled) { transform: translateY(0); }
-        .v-btn-mutate:disabled { opacity: 0.65; cursor: wait; }
-        .v-btn-mutate .spin-icon { display: inline-block; animation: v-spin 0.9s linear infinite; }
-        @keyframes v-spin { to { transform: rotate(360deg); } }
-
-        .v-matches-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 20px; }
-        .v-matches-label { font-size: 11px; font-weight: 700; color: #8a6a4a; text-transform: uppercase; letter-spacing: 2px; }
-        .v-matches-vibe { font-size: 13px; color: #c0521a; font-style: italic; font-family: 'Crimson Text', serif; }
+        @import url('https://fonts.googleapis.com/css2?family=Syncopate:wght@700&family=Inter:wght@300;400;500&display=swap');
+        .font-syncopate { font-family: 'Syncopate', sans-serif; }
+        @keyframes ooze { 0% { transform: translate(0, 0) scale(1); } 100% { transform: translate(10%, -10%) scale(1.1); } }
+        @keyframes flow-lines { 0% { background-position: 0 0; } 100% { background-position: 500px 500px; } }
+        @keyframes text-pulse { 0% { opacity: 0.5; text-shadow: 0 0 20px rgba(255,255,255,0.3); } 100% { opacity: 1; text-shadow: 0 0 40px white, 0 0 80px rgba(255,0,100,0.8); } }
+        
+        /* Сохраненные стили для Masonry-сетки и лоадера */
         .v-masonry { columns: 2; gap: 12px; } @media (min-width: 640px) { .v-masonry { columns: 3; } } @media (min-width: 1024px) { .v-masonry { columns: 4; } }
         .v-spinner { width: 28px; height: 28px; border: 2px solid #1a1208; border-top-color: #c0521a; border-radius: 50%; animation: v-spin 0.8s linear infinite; margin: 30px auto; }
+        @keyframes v-spin { to { transform: rotate(360deg); } }
       `}} />
 
-      <header className="v-header">
-        <a href="/" className="v-logo">GELBET</a>
-        <button className="v-close" onClick={() => router.push("/")}>✕</button>
-      </header>
+      {/* SVG Фильтры */}
+      <svg style={{ width: 0, height: 0, position: 'absolute' }}>
+        <filter id="fluid-warp">
+          <feTurbulence type="fractalNoise" baseFrequency="0.005" numOctaves={3} result="noise" />
+          <feDisplacementMap in="SourceGraphic" in2="noise" scale="150" xChannelSelector="R" yChannelSelector="G" />
+        </filter>
+      </svg>
 
-      <div className="v-container">
-        <div className="v-imgwrap">
-          <img src={src} alt={title} className="v-mainimg" />
-        </div>
+      {/* Аналоговый шум */}
+      <div 
+        className="fixed inset-0 z-0 pointer-events-none opacity-10"
+        style={{ backgroundImage: `url('data:image/svg+xml;utf8,%3Csvg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg"%3E%3Cfilter id="noiseFilter"%3E%3CfeTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="3" stitchTiles="stitch"/%3E%3C/filter%3E%3Crect width="100%25" height="100%25" filter="url(%23noiseFilter)"/%3E%3C/svg%3E')` }}
+      ></div>
 
-        <div className="v-actions">
-          <div className="v-title">{title}</div>
+      {/* Кнопка "Назад" */}
+      <button 
+        className="absolute top-6 left-6 z-50 text-white/50 hover:text-white transition w-10 h-10 flex items-center justify-center bg-white/5 hover:bg-white/10 rounded-full backdrop-blur-md" 
+        onClick={() => router.push("/")}
+      >
+        ✕
+      </button>
 
-          {isPinned(currentPhoto) ? (
-            <button className="v-btn v-btn-saved">✓ Saved to Archive</button>
-          ) : (
-            <button className="v-btn v-btn-primary" onClick={() => savePin(currentPhoto)}>Save to Archive</button>
-          )}
+      {/* ВЕРХНЯЯ ЧАСТЬ: ГЛАВНАЯ КАРТОЧКА */}
+      <div className="flex-shrink-0 flex items-center justify-center p-4 md:p-10 pt-20">
+        <div className="w-full max-w-6xl bg-[#0a0612]/80 backdrop-blur-2xl border border-white/5 rounded-[2rem] overflow-hidden flex flex-col md:flex-row shadow-[0_0_80px_rgba(58,0,136,0.15)] relative z-10">
+          
+          {/* ЛЕВАЯ ЧАСТЬ: ИЗОБРАЖЕНИЕ */}
+          <div className="w-full md:w-1/2 p-4 md:p-6 flex items-center justify-center bg-black/40">
+            <div className="relative w-full aspect-[4/5] rounded-3xl overflow-hidden shadow-2xl group">
+              <img 
+                src={currentPhoto.src} 
+                alt={title} 
+                className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" 
+              />
+              <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+              <div className="absolute top-4 right-4 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                <button 
+                  onClick={() => sharePhoto(currentPhoto)}
+                  className="w-10 h-10 rounded-full bg-white/10 backdrop-blur-md flex items-center justify-center hover:bg-white/20 transition text-white"
+                  title="Share"
+                >
+                   <svg width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                     <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8M16 6l-4-4-4 4M12 2v13"/>
+                   </svg>
+                </button>
+              </div>
+            </div>
+          </div>
+          
+          {/* ПРАВАЯ ЧАСТЬ: МЕТАДАННЫЕ */}
+          <div className="w-full md:w-1/2 p-8 md:p-12 flex flex-col">
+            
+            <div className="relative z-20 flex-grow">
+              <div className="flex justify-between items-start mb-2">
+                <h1 className="text-3xl font-syncopate tracking-widest text-white leading-tight uppercase line-clamp-3">
+                  {title}
+                </h1>
+              </div>
 
-          <button className="v-btn v-btn-mutate" onClick={handleMutate} disabled={isMutating}>
-            {isMutating ? (<><span className="spin-icon">◈</span> Synthesizing...</>) : (<>Mutate 🧬</>)}
-          </button>
+              {/* Ссылка View Original, если она есть */}
+              {link && link !== "undefined" && (
+                <a href={link} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 mb-6 text-[10px] font-syncopate tracking-widest text-neutral-500 hover:text-white transition uppercase">
+                  ↗ Source Link
+                </a>
+              )}
+              
+              {/* Статус Мутации / Анализа */}
+              {activeVibe && (
+                <p className="text-neutral-500 text-xs font-syncopate tracking-[0.2em] uppercase mt-4">
+                  {activeVibe === "Scanning..." ? "Analyzing frequency..." : "Vibe Resonance:"} <br/>
+                  <span className="text-white/80">{activeVibe !== "Scanning..." && activeVibe}</span>
+                </p>
+              )}
+            </div>
 
-          {link && link !== "undefined" && <a href={link} target="_blank" rel="noopener noreferrer" className="v-btn v-btn-primary">View Original ↗</a>}
+            <div className="flex flex-col gap-4 mt-auto relative z-10 w-full items-center">
+              
+              {/* ИНТЕРАКТИВНЫЙ КОНТЕЙНЕР БЕЗДНЫ */}
+              <div 
+                onClick={handleMutate}
+                className={`relative w-full h-[240px] flex justify-center items-center cursor-pointer group ${isMutating ? 'is-mutating' : ''}`}
+              >
+                
+                <div 
+                  className="absolute w-[150%] h-[150%] blur-[50px] opacity-80 mix-blend-screen transition-all duration-1000"
+                  style={{ 
+                    WebkitMaskImage: 'radial-gradient(ellipse 70% 45% at 50% 50%, black 20%, transparent 90%)',
+                    maskImage: 'radial-gradient(ellipse 70% 45% at 50% 50%, black 20%, transparent 90%)',
+                    transform: isMutating ? 'scale(1.2)' : 'scale(1)',
+                    filter: isMutating ? 'blur(60px)' : 'blur(50px)'
+                  }}
+                >
+                  <div className="absolute w-[60%] h-[60%] -top-[10%] left-0 rounded-full bg-[#3a0088] animate-[ooze_15s_infinite_alternate_ease-in-out]"></div>
+                  <div className="absolute w-[50%] h-[50%] -bottom-[10%] right-0 rounded-full bg-[#ff0055] animate-[ooze_12s_infinite_alternate-reverse_ease-in-out]"></div>
+                  <div className="absolute w-[40%] h-[40%] top-[30%] left-[30%] rounded-full bg-[#ff4500] opacity-60 animate-[ooze_18s_infinite_alternate_ease-in-out]"></div>
+                </div>
+
+                <div 
+                  className="absolute -inset-[20%] opacity-50 pointer-events-none transition-opacity duration-300 group-hover:opacity-80"
+                  style={{
+                    background: 'repeating-linear-gradient(-45deg, transparent, transparent 3px, rgba(255, 255, 255, 0.15) 4px, rgba(255, 255, 255, 0.15) 5px)',
+                    filter: 'url(#fluid-warp)',
+                    WebkitMaskImage: 'radial-gradient(ellipse 70% 45% at 50% 50%, black 20%, transparent 90%)',
+                    maskImage: 'radial-gradient(ellipse 70% 45% at 50% 50%, black 20%, transparent 90%)',
+                    animation: isMutating ? 'flow-lines 10s linear infinite' : 'flow-lines 40s linear infinite'
+                  }}
+                ></div>
+
+                <div 
+                  className="absolute w-[180px] h-[180px] rounded-full z-5 transition-all duration-[1.5s] ease-[cubic-bezier(0.19,1,0.22,1)]"
+                  style={{
+                    background: 'radial-gradient(circle, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0.5) 40%, rgba(0,0,0,0) 75%)',
+                    filter: isMutating ? 'blur(25px)' : 'blur(15px)',
+                    transform: isMutating ? 'scale(2.2)' : 'scale(1)',
+                    opacity: isMutating ? 0.6 : 1
+                  }}
+                ></div>
+
+                <div 
+                  className="relative z-10 text-white uppercase ml-[0.5em] transition-all duration-[0.8s] ease-[cubic-bezier(0.19,1,0.22,1)] font-syncopate"
+                  style={{ 
+                    fontSize: '1rem',
+                    letterSpacing: isMutating ? '0.15em' : '0.5em',
+                    textShadow: isMutating ? '0 0 40px white, 0 0 80px rgba(255,0,100,0.8)' : '0 0 30px rgba(255, 255, 255, 0.4)',
+                    opacity: isMutating ? 0.8 : 0.9,
+                    animation: isMutating ? 'text-pulse 1s infinite alternate' : 'none'
+                  }}
+                >
+                  {isMutating ? 'Synthesizing...' : 'Mutate'}
+                </div>
+              </div>
+              
+              {/* КНОПКА СОХРАНЕНИЯ (С ЛОГИКОЙ) */}
+              {isPinned(currentPhoto) ? (
+                <div className="text-[9px] text-white/50 tracking-[0.2em] font-syncopate uppercase text-center w-full mt-2 cursor-default">
+                  ✓ Saved to archive
+                </div>
+              ) : (
+                <button 
+                  type="button"
+                  onClick={() => savePin(currentPhoto)}
+                  className="text-[9px] text-neutral-500 hover:text-white tracking-[0.2em] transition-colors font-syncopate uppercase text-center w-full mt-2" 
+                >
+                  Save to archive
+                </button>
+              )}
+            </div>
+            
+          </div>
         </div>
       </div>
 
-      <div style={{ maxWidth: 1200, margin: "0 auto", padding: "24px", borderTop: "1px solid #1a1208" }}>
-        <div className="v-matches-head">
-          <span className="v-matches-label">Curated Matches</span>
-          <span className="v-matches-vibe">{activeVibe.toLowerCase()}</span>
+      {/* НИЖНЯЯ ЧАСТЬ: ЛЕНТА ПОХОЖИХ КАРТИНОК */}
+      <div className="flex-grow w-full max-w-[1200px] mx-auto p-6 md:p-10 relative z-10 border-t border-white/5 mt-10">
+        <div className="flex items-baseline gap-3 mb-8">
+          <span className="text-xs font-syncopate tracking-[0.2em] text-neutral-500 uppercase">Curated Matches</span>
+          {activeVibe !== "Scanning..." && (
+            <span className="text-sm text-neutral-400 font-light italic">for {activeVibe.toLowerCase()}</span>
+          )}
         </div>
 
         <div className="v-masonry">
@@ -277,18 +386,32 @@ function VibeContent() {
           ))}
         </div>
 
-        {relatedPhotos.length === 0 && !relatedLoading && <div style={{ textAlign: "center", padding: 60, color: "#4a3520", fontStyle: "italic" }}>No matches found.</div>}
-        <div ref={bottomRef}>{relatedLoading && <div className="v-spinner" />}</div>
+        {relatedPhotos.length === 0 && !relatedLoading && (
+          <div className="text-center p-12 text-neutral-600 font-light italic">No matches found in the current frequency.</div>
+        )}
+        <div ref={bottomRef}>{relatedLoading && <div className="v-spinner border-white/10 border-t-purple-500" />}</div>
       </div>
 
-      {showAgeGate && <AgeGateModal onConfirm={() => { setNsfwAllowed(true); try { localStorage.setItem("gelbet_nsfw_18plus", "true"); } catch (e) {} const p = showAgeGate; setShowAgeGate(null); if (p) openPhoto(p); }} onCancel={() => setShowAgeGate(null)} />}
+      {/* ВОЗРАСТНОЙ ШЛЮЗ */}
+      {showAgeGate && (
+        <AgeGateModal 
+          onConfirm={() => { 
+            setNsfwAllowed(true); 
+            try { localStorage.setItem("gelbet_nsfw_18plus", "true"); } catch (e) {} 
+            const p = showAgeGate; 
+            setShowAgeGate(null); 
+            if (p) openPhoto(p); 
+          }} 
+          onCancel={() => setShowAgeGate(null)} 
+        />
+      )}
     </div>
   );
 }
 
 export default function VibePage() {
   return (
-    <Suspense fallback={<div style={{ background: "#050403", minHeight: "100vh" }}></div>}>
+    <Suspense fallback={<div style={{ background: "#030105", minHeight: "100vh" }}></div>}>
       <VibeContent />
     </Suspense>
   );

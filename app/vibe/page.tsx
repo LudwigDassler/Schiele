@@ -71,7 +71,7 @@ function VibeContent() {
       if (reset && !aiQuery) {
         setActiveVibe("Scanning...");
         try {
-          const aiRes = await fetch("/api/ai", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "analyze_image", payload: src, userId: identity }) });
+          const aiRes = await fetch("/api/ai", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "analyze_image", payload: src, userId: identity, title }) });
           if (aiRes.ok) {
             const aiData = await aiRes.json();
             if (aiData.result) aiQuery = aiData.result;
@@ -197,11 +197,12 @@ function VibeContent() {
   if (!src) return <div style={{ color: "#d4b896", padding: 40, textAlign: "center", background: "#050403", minHeight: "100vh" }}>Artifact not found.</div>;
 
   return (
-    <div className="min-h-screen bg-[#030105] text-white font-sans overflow-hidden flex flex-col relative">
+    <div className="min-h-screen bg-[#030105] text-white font-sans overflow-x-hidden overflow-y-auto flex flex-col relative">
       <style dangerouslySetInnerHTML={{ __html: `
         @import url('https://fonts.googleapis.com/css2?family=Syncopate:wght@700&family=Inter:wght@300;400;500&display=swap');
         .font-syncopate { font-family: 'Syncopate', sans-serif; }
         @keyframes ooze { 0% { transform: translate(0, 0) scale(1); } 100% { transform: translate(10%, -10%) scale(1.1); } }
+        @keyframes bg-drift { 0% { transform: translate(0, 0) scale(1.25); } 100% { transform: translate(-4%, 3%) scale(1.35); } }
         @keyframes flow-lines { 0% { background-position: 0 0; } 100% { background-position: 500px 500px; } }
         @keyframes text-pulse { 0% { opacity: 0.5; text-shadow: 0 0 20px rgba(255,255,255,0.3); } 100% { opacity: 1; text-shadow: 0 0 40px white, 0 0 80px rgba(255,0,100,0.8); } }
         
@@ -225,6 +226,21 @@ function VibeContent() {
         style={{ backgroundImage: `url('data:image/svg+xml;utf8,%3Csvg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg"%3E%3Cfilter id="noiseFilter"%3E%3CfeTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="3" stitchTiles="stitch"/%3E%3C/filter%3E%3Crect width="100%25" height="100%25" filter="url(%23noiseFilter)"/%3E%3C/svg%3E')` }}
       ></div>
 
+      {/* Фоновое "дыхание" в цвет текущей картинки. Это НЕ анализ пикселей через Canvas —
+          та же картинка просто размыта и приглушена сама по себе (как в Spotify/Apple Music),
+          потому что хотлинкнутые с DDG/Bing картинки идут без CORS-заголовков и Canvas
+          не даст прочитать их пиксели для честного color-extraction. */}
+      <div className="fixed inset-0 z-0 pointer-events-none overflow-hidden">
+        <img
+          src={currentPhoto.src}
+          alt=""
+          aria-hidden="true"
+          className="absolute -inset-[10%] w-[120%] h-[120%] object-cover blur-[90px] opacity-25 scale-125"
+          style={{ animation: 'bg-drift 30s ease-in-out infinite alternate' }}
+        />
+        <div className="absolute inset-0 bg-[#030105]/60"></div>
+      </div>
+
       {/* Кнопка "Назад" */}
       <button 
         className="absolute top-6 left-6 z-50 text-white/50 hover:text-white transition w-10 h-10 flex items-center justify-center bg-white/5 hover:bg-white/10 rounded-full backdrop-blur-md" 
@@ -238,7 +254,7 @@ function VibeContent() {
         <div className="w-full max-w-6xl bg-[#0a0612]/80 backdrop-blur-2xl border border-white/5 rounded-[2rem] overflow-hidden flex flex-col md:flex-row shadow-[0_0_80px_rgba(58,0,136,0.15)] relative z-10">
           
           {/* ЛЕВАЯ ЧАСТЬ: ИЗОБРАЖЕНИЕ */}
-          <div className="w-full md:w-1/2 p-4 md:p-6 flex items-center justify-center bg-black/40">
+          <div className="w-full md:w-1/2 min-w-0 p-4 md:p-6 flex items-center justify-center bg-black/40">
             <div className="relative w-full aspect-[4/5] rounded-3xl overflow-hidden shadow-2xl group">
               <img 
                 src={currentPhoto.src} 
@@ -261,11 +277,11 @@ function VibeContent() {
           </div>
           
           {/* ПРАВАЯ ЧАСТЬ: МЕТАДАННЫЕ */}
-          <div className="w-full md:w-1/2 p-8 md:p-12 flex flex-col">
+          <div className="w-full md:w-1/2 min-w-0 p-8 md:p-12 flex flex-col">
             
             <div className="relative z-20 flex-grow">
               <div className="flex justify-between items-start mb-2">
-                <h1 className="text-3xl font-syncopate tracking-widest text-white leading-tight uppercase line-clamp-3">
+                <h1 className="text-3xl font-syncopate tracking-widest text-white leading-tight uppercase line-clamp-3 break-words">
                   {title}
                 </h1>
               </div>
@@ -303,19 +319,22 @@ function VibeContent() {
                     filter: isMutating ? 'blur(60px)' : 'blur(50px)'
                   }}
                 >
-                  <div className="absolute w-[60%] h-[60%] -top-[10%] left-0 rounded-full bg-[#3a0088] animate-[ooze_15s_infinite_alternate_ease-in-out]"></div>
-                  <div className="absolute w-[50%] h-[50%] -bottom-[10%] right-0 rounded-full bg-[#ff0055] animate-[ooze_12s_infinite_alternate-reverse_ease-in-out]"></div>
-                  <div className="absolute w-[40%] h-[40%] top-[30%] left-[30%] rounded-full bg-[#ff4500] opacity-60 animate-[ooze_18s_infinite_alternate_ease-in-out]"></div>
+                  <div className="absolute w-[60%] h-[60%] -top-[10%] left-0 rounded-full bg-[#3a0088]" style={{ animation: 'ooze 15s infinite alternate ease-in-out', animationPlayState: isMutating ? 'running' : 'paused' }}></div>
+                  <div className="absolute w-[50%] h-[50%] -bottom-[10%] right-0 rounded-full bg-[#ff0055]" style={{ animation: 'ooze 12s infinite alternate-reverse ease-in-out', animationPlayState: isMutating ? 'running' : 'paused' }}></div>
+                  <div className="absolute w-[40%] h-[40%] top-[30%] left-[30%] rounded-full bg-[#ff4500] opacity-60" style={{ animation: 'ooze 18s infinite alternate ease-in-out', animationPlayState: isMutating ? 'running' : 'paused' }}></div>
                 </div>
 
+                {/* Дорогой feDisplacementMap-фильтр: отрисовывается один раз в покое,
+                    а не пересчитывается на GPU 40-секундным бесконечным циклом всё время,
+                    пока открыта страница — именно это раньше периодически фризило фронт. */}
                 <div 
                   className="absolute -inset-[20%] opacity-50 pointer-events-none transition-opacity duration-300 group-hover:opacity-80"
                   style={{
                     background: 'repeating-linear-gradient(-45deg, transparent, transparent 3px, rgba(255, 255, 255, 0.15) 4px, rgba(255, 255, 255, 0.15) 5px)',
-                    filter: 'url(#fluid-warp)',
+                    filter: isMutating ? 'url(#fluid-warp)' : 'none',
                     WebkitMaskImage: 'radial-gradient(ellipse 70% 45% at 50% 50%, black 20%, transparent 90%)',
                     maskImage: 'radial-gradient(ellipse 70% 45% at 50% 50%, black 20%, transparent 90%)',
-                    animation: isMutating ? 'flow-lines 10s linear infinite' : 'flow-lines 40s linear infinite'
+                    animation: isMutating ? 'flow-lines 10s linear infinite' : 'none'
                   }}
                 ></div>
 

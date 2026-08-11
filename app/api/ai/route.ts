@@ -29,7 +29,7 @@ async function callGroq(messages: any[], model: string = "llama3-8b-8192") {
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { action, payload, userId } = body;
+    const { action, payload, userId, title } = body;
 
     if (!process.env.GROQ_API_KEY) return NextResponse.json({ error: "Missing GROQ_API_KEY" }, { status: 500 });
 
@@ -66,13 +66,18 @@ export async function POST(req: Request) {
       const mimeType = imageResp.headers.get("content-type") || "image/jpeg";
       const dataUrl = `data:${mimeType};base64,${base64Image}`;
 
+      const titleContext = (title && typeof title === "string" && title.trim())
+        ? `\n\nCONTEXT: the page/site this image came from titled it: "${title.trim().slice(0, 200)}". This title is written by a human and often names the real subject (band, movie, place, product) correctly, even when it also contains unrelated clickbait words ("32+ facts", "amazing", "you won't believe"). Cross-reference it with what you actually see in the image.`
+        : "";
+
       const prompt = `You are a visual search engine for a Pinterest clone. 
       CRITICAL RULES:
       1. Identify the SPECIFIC subject of this image (e.g., "Led Zeppelin", "Rust Cohle", "Ford Mustang").
-      2. If you DO NOT recognize the exact subject, describe the LITERAL physical contents (e.g., "four men 70s rock band guitars").
-      3. Return ONLY 2 to 5 precise English keywords. 
-      4. NEVER hallucinate random concepts, abstract text, or instructions. 
-      5. DO NOT describe abstract moods. Just concrete physical nouns.`;
+      2. If the image contains overlaid text, watermarks, or captions, do NOT transcribe them literally or output fragments of them. Use them only as one clue among others to figure out the true named subject.
+      3. If you DO NOT recognize the exact subject, describe the LITERAL physical contents (e.g., "four men 70s rock band guitars").
+      4. Return ONLY 2 to 5 precise English keywords, always complete real words — never a truncated fragment.
+      5. NEVER hallucinate random concepts, abstract text, or instructions. 
+      6. DO NOT describe abstract moods. Just concrete physical nouns.${titleContext}`;
       
       const messages = [
         {

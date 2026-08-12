@@ -97,7 +97,7 @@ export default function ProfilePage() {
     if (updateError) {
       showToast(updateError.message, "error");
     } else { 
-      showToast("Aesthetic matrix updated"); 
+      showToast("Identity synchronized"); 
       setAvatarUrl(newAvatarUrl); 
       setAvatarFile(null); 
       setAvatarPreview(""); 
@@ -126,7 +126,6 @@ export default function ProfilePage() {
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
         ::-webkit-scrollbar { width: 6px; height: 6px; } ::-webkit-scrollbar-track { background: #020104; } ::-webkit-scrollbar-thumb { background: #333; border-radius: 10px; } ::-webkit-scrollbar-thumb:hover { background: #a855f7; }
         
-        @keyframes ooze { 0% { transform: translate(0, 0) scale(1); } 100% { transform: translate(10%, -10%) scale(1.1); } }
         @keyframes volvelle-spin { 100% { transform: translate(-50%, -50%) rotate(360deg); } }
         @keyframes slideUp { from { transform: translate(-50%, 20px); opacity: 0; } to { transform: translate(-50%, 0); opacity: 1; } }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
@@ -138,14 +137,14 @@ export default function ProfilePage() {
         .hbtn { background: transparent; border: none; width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; color: #888; transition: all 0.3s ease; } 
         .hbtn:hover { background: rgba(255,255,255,0.05); color: #fff; transform: translateY(-2px); box-shadow: 0 5px 15px rgba(0,0,0,0.5); } 
         
+        .prism-focus { border-radius: 12px; transition: all 0.4s cubic-bezier(0.16,1,0.3,1); background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.1); overflow: hidden; }
         .prism-focus:focus-within { box-shadow: -10px 0 30px rgba(255,0,85,0.2), 0 0 30px rgba(0,255,0,0.1), 10px 0 30px rgba(0,255,255,0.2); border-color: rgba(255,255,255,0.4); }
-        .field { width: 100%; padding: 16px 20px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); background: rgba(0,0,0,0.5); color: #fff; font-size: 14px; outline: none; transition: all 0.3s ease; font-family: 'Inter', sans-serif; box-shadow: inset 0 2px 4px rgba(0,0,0,0.5); } 
-        .field:focus { border-color: #a855f7; background: rgba(168,85,247,0.05); } 
+        .field { width: 100%; padding: 16px 20px; background: transparent; color: #fff; font-size: 14px; outline: none; transition: all 0.3s ease; font-family: 'Inter', sans-serif; } 
         .field::placeholder { color: rgba(255,255,255,0.2); }
 
         .primary-btn { background: #fff; color: #000; border: none; border-radius: 8px; padding: 16px 32px; cursor: pointer; font-weight: 700; font-size: 12px; width: 100%; transition: all 0.3s cubic-bezier(0.16,1,0.3,1); text-transform: uppercase; letter-spacing: 2px; font-family: 'Syncopate', sans-serif; box-shadow: 0 10px 20px rgba(255,255,255,0.1); } 
         .primary-btn:hover:not(:disabled) { background: #ccc; transform: translateY(-2px); box-shadow: 0 15px 30px rgba(255,255,255,0.2); } 
-        .primary-btn:disabled { opacity: 0.5; cursor: not-allowed; box-shadow: none; }
+        .primary-btn:disabled { opacity: 0.5; cursor: not-allowed; box-shadow: none; transform: none; }
         
         .danger-btn { background: transparent; color: #ef4444; border: 1px solid rgba(239,68,68,0.3); border-radius: 8px; padding: 14px 28px; cursor: pointer; font-weight: 700; font-size: 12px; width: 100%; transition: all 0.3s; font-family: 'Syncopate', sans-serif; letter-spacing: 2px; text-transform: uppercase; }
         .danger-btn:hover { background: rgba(239,68,68,0.1); border-color: #ef4444; box-shadow: 0 0 20px rgba(239,68,68,0.2); }
@@ -170,11 +169,11 @@ export default function ProfilePage() {
         .toast.error { background: rgba(5,3,8,0.95); border: 1px solid rgba(239,68,68,0.3); color: #ef4444; box-shadow: 0 20px 50px rgba(0,0,0,0.9), 0 0 20px rgba(239,68,68,0.2); }
       `}} />
 
-      {/* Cosmic + LZ III Background */}
-      <div className="fixed inset-0 z-0 pointer-events-none overflow-hidden bg-[#020104]">
+      {/* Background Volvelle (LZ III) + Void (DSOTM) */}
+      <div className="fixed inset-0 z-0 pointer-events-none overflow-hidden opacity-40">
           <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_rgba(20,10,40,0.5)_0%,_rgba(2,1,4,1)_100%)]"></div>
-          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[120vw] h-[120vw] max-w-[1200px] max-h-[1200px] border-[1px] border-white/5 rounded-full opacity-30 animate-[volvelle-spin_120s_linear_infinite]" style={{ borderStyle: 'dashed' }}></div>
-          <div className="absolute top-[-20%] left-[-10%] w-[70%] h-[70%] bg-[#a855f7]/10 rounded-full blur-[120px] animate-[ooze_15s_ease-in-out_infinite]"></div>
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[150vw] h-[150vw] max-w-[1200px] max-h-[1200px] border-[1px] border-white/5 rounded-full opacity-20 animate-[volvelle-spin_100s_linear_infinite]" style={{ borderStyle: 'dashed' }}></div>
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-[#a855f7]/10 blur-[150px] rounded-full pointer-events-none z-0"></div>
       </div>
 
       <header className="header">
@@ -208,19 +207,25 @@ export default function ProfilePage() {
               </div>
               
               <div className="flex-1 w-full space-y-6">
-                <div className="prism-focus rounded-xl transition-all duration-300">
+                <div>
                   <label className="block text-[10px] font-syncopate font-bold tracking-[0.2em] text-[#666] mb-3 uppercase pl-2">Display Name</label>
-                  <input className="field" placeholder="Enter your aesthetic name" value={name} onChange={e => setName(e.target.value)} />
+                  <div className="prism-focus">
+                    <input className="field" placeholder="Enter your aesthetic name" value={name} onChange={e => setName(e.target.value)} />
+                  </div>
                 </div>
 
-                <div className="prism-focus rounded-xl transition-all duration-300">
+                <div>
                   <label className="block text-[10px] font-syncopate font-bold tracking-[0.2em] text-[#666] mb-3 uppercase pl-2">Frequency / Bio</label>
-                  <textarea className="field" placeholder="What's your vibe? Tell us about yourself..." value={bio} onChange={e => setBio(e.target.value)} rows={3} style={{ resize: "none" }} />
+                  <div className="prism-focus">
+                    <textarea className="field" placeholder="What's your vibe? Tell us about yourself..." value={bio} onChange={e => setBio(e.target.value)} rows={3} style={{ resize: "none" }} />
+                  </div>
                 </div>
 
-                <div className="prism-focus rounded-xl transition-all duration-300">
+                <div>
                   <label className="block text-[10px] font-syncopate font-bold tracking-[0.2em] text-[#666] mb-3 uppercase pl-2">External Link</label>
-                  <input className="field" placeholder="https://yourspace.com" value={website} onChange={e => setWebsite(e.target.value)} />
+                  <div className="prism-focus">
+                    <input className="field" placeholder="https://yourspace.com" value={website} onChange={e => setWebsite(e.target.value)} />
+                  </div>
                 </div>
               </div>
             </div>

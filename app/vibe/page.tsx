@@ -57,7 +57,7 @@ function VibeContent() {
     });
   }, []);
 
-  const fetchRelated = useCallback(async (pageNum: number, reset: boolean, queryOverride?: string) => {
+  const fetchRelated = useCallback(async (pageNum: number, reset: boolean, queryOverride?: string, forceRescan: boolean = false) => {
     if (!src) return;
     setRelatedLoading(true);
     if (reset) {
@@ -68,10 +68,20 @@ function VibeContent() {
     try {
       let aiQuery = queryOverride || currentQueryRef.current;
 
-      if (reset && !aiQuery) {
+      if ((reset && !aiQuery) || forceRescan) {
         setActiveVibe("Scanning...");
         try {
-          const aiRes = await fetch("/api/ai", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "analyze_image", payload: src, userId: identity, title }) });
+          const aiRes = await fetch("/api/ai", { 
+            method: "POST", 
+            headers: { "Content-Type": "application/json" }, 
+            body: JSON.stringify({ 
+                action: "analyze_image", 
+                payload: src, 
+                userId: identity, 
+                title,
+                ignore_cache: forceRescan
+            }) 
+          });
           if (aiRes.ok) {
             const aiData = await aiRes.json();
             if (aiData.result) aiQuery = aiData.result;
@@ -166,6 +176,15 @@ function VibeContent() {
     }
   }
 
+  const handleRecalibrate = () => {
+    if (activeVibe === "Scanning...") return;
+    currentQueryRef.current = "";
+    setRelatedPhotos([]);
+    setRelatedPage(1);
+    setRelatedHasMore(true);
+    fetchRelated(1, true, undefined, true);
+  };
+
   function isPinned(photo: Photo) { return pins.some(p => p.image_url === photo.src); }
 
   async function savePin(photo: Photo) {
@@ -206,30 +225,24 @@ function VibeContent() {
         @keyframes flow-lines { 0% { background-position: 0 0; } 100% { background-position: 500px 500px; } }
         @keyframes text-pulse { 0% { opacity: 0.5; text-shadow: 0 0 20px rgba(255,255,255,0.3); } 100% { opacity: 1; text-shadow: 0 0 40px white, 0 0 80px rgba(255,0,100,0.8); } }
         
-        /* Сохраненные стили для Masonry-сетки и лоадера */
         .v-masonry { columns: 2; gap: 12px; } @media (min-width: 640px) { .v-masonry { columns: 3; } } @media (min-width: 1024px) { .v-masonry { columns: 4; } }
         .v-spinner { width: 28px; height: 28px; border: 2px solid #1a1208; border-top-color: #c0521a; border-radius: 50%; animation: v-spin 0.8s linear infinite; margin: 30px auto; }
         @keyframes v-spin { to { transform: rotate(360deg); } }
+        
+        .force-fluid-filter { -webkit-filter: url('#fluid-warp'); filter: url('#fluid-warp'); }
       `}} />
 
-      {/* SVG Фильтры */}
-      <svg style={{ width: 0, height: 0, position: 'absolute' }}>
-        <filter id="fluid-warp">
-          <feTurbulence type="fractalNoise" baseFrequency="0.005" numOctaves={3} result="noise" />
-          <feDisplacementMap in="SourceGraphic" in2="noise" scale="150" xChannelSelector="R" yChannelSelector="G" />
-        </filter>
+      {/* SVG Фильтры для плазмы и искажений */}
+      <svg style={{ width: 0, height: 0, position: 'absolute', zIndex: -1 }}>
+        <defs>
+            <filter id="fluid-warp" x="-20%" y="-20%" width="140%" height="140%">
+                <feTurbulence type="fractalNoise" baseFrequency="0.005" numOctaves={3} result="noise" />
+                <feDisplacementMap in="SourceGraphic" in2="noise" scale="150" xChannelSelector="R" yChannelSelector="G" />
+            </filter>
+        </defs>
       </svg>
 
-      {/* Аналоговый шум */}
-      <div 
-        className="fixed inset-0 z-0 pointer-events-none opacity-10"
-        style={{ backgroundImage: `url('data:image/svg+xml;utf8,%3Csvg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg"%3E%3Cfilter id="noiseFilter"%3E%3CfeTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="3" stitchTiles="stitch"/%3E%3C/filter%3E%3Crect width="100%25" height="100%25" filter="url(%23noiseFilter)"/%3E%3C/svg%3E')` }}
-      ></div>
-
-      {/* Фоновое "дыхание" в цвет текущей картинки. Это НЕ анализ пикселей через Canvas —
-          та же картинка просто размыта и приглушена сама по себе (как в Spotify/Apple Music),
-          потому что хотлинкнутые с DDG/Bing картинки идут без CORS-заголовков и Canvas
-          не даст прочитать их пиксели для честного color-extraction. */}
+      {/* Чистый эмбиентный фон без зерна */}
       <div className="fixed inset-0 z-0 pointer-events-none overflow-hidden">
         <img
           src={currentPhoto.src}
@@ -241,21 +254,21 @@ function VibeContent() {
         <div className="absolute inset-0 bg-[#030105]/60"></div>
       </div>
 
-      {/* Кнопка "Назад" */}
+      {/* Кнопка закрытия жестко зафиксирована */}
       <button 
-        className="absolute top-6 left-6 z-50 text-white/50 hover:text-white transition w-10 h-10 flex items-center justify-center bg-white/5 hover:bg-white/10 rounded-full backdrop-blur-md" 
+        className="fixed top-6 left-6 z-50 text-white/50 hover:text-white transition w-10 h-10 flex items-center justify-center bg-white/5 hover:bg-white/10 rounded-full backdrop-blur-md shadow-[0_0_15px_rgba(0,0,0,0.5)] cursor-pointer" 
         onClick={() => router.push("/")}
       >
         ✕
       </button>
 
       {/* ВЕРХНЯЯ ЧАСТЬ: ГЛАВНАЯ КАРТОЧКА */}
-      <div className="flex-shrink-0 flex items-center justify-center p-4 md:p-10 pt-20">
-        <div className="w-full max-w-6xl bg-[#0a0612]/80 backdrop-blur-2xl border border-white/5 rounded-[2rem] overflow-hidden flex flex-col md:flex-row shadow-[0_0_80px_rgba(58,0,136,0.15)] relative z-10">
+      <div className="flex-shrink-0 flex items-center justify-center p-4 md:p-10 pt-24">
+        <div className="w-full max-w-6xl bg-[#0a0612]/80 backdrop-blur-2xl border border-white/5 rounded-[2rem] overflow-hidden flex flex-col md:flex-row shadow-[0_0_80px_rgba(58,0,136,0.15)] relative z-10 md:sticky md:top-24">
           
           {/* ЛЕВАЯ ЧАСТЬ: ИЗОБРАЖЕНИЕ */}
           <div className="w-full md:w-1/2 min-w-0 p-4 md:p-6 flex items-center justify-center bg-black/40">
-            <div className="relative w-full aspect-[4/5] rounded-3xl overflow-hidden shadow-2xl group">
+            <div className="relative w-full aspect-[4/5] rounded-3xl overflow-hidden shadow-2xl group bg-[#1a1520]">
               <img 
                 src={currentPhoto.src} 
                 alt={title} 
@@ -286,30 +299,59 @@ function VibeContent() {
                 </h1>
               </div>
 
-              {/* Ссылка View Original, если она есть */}
               {link && link !== "undefined" && (
                 <a href={link} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 mb-6 text-[10px] font-syncopate tracking-widest text-neutral-500 hover:text-white transition uppercase">
                   ↗ Source Link
                 </a>
               )}
               
-              {/* Статус Мутации / Анализа */}
-              {activeVibe && (
-                <p className="text-neutral-500 text-xs font-syncopate tracking-[0.2em] uppercase mt-4">
+              <div className="mt-4 flex flex-wrap items-center gap-4 min-h-[40px]">
+                <p className="text-neutral-500 text-xs font-syncopate tracking-[0.2em] uppercase m-0 leading-tight">
                   {activeVibe === "Scanning..." ? "Analyzing frequency..." : "Vibe Resonance:"} <br/>
                   <span className="text-white/80">{activeVibe !== "Scanning..." && activeVibe}</span>
                 </p>
-              )}
+                
+                {/* НОВАЯ КНОПКА RECALIBRATE (CURRENTS VIBE) */}
+                <button
+                  onClick={handleRecalibrate}
+                  disabled={activeVibe === "Scanning..."}
+                  className={`relative overflow-hidden px-5 py-2 rounded-full text-[10px] font-syncopate uppercase tracking-[0.2em] transition-all duration-500 group ${
+                    activeVibe === "Scanning..."
+                      ? "border border-white/10 text-white/30 cursor-not-allowed bg-transparent"
+                      : "border border-white/20 text-white hover:border-white/50 cursor-pointer shadow-[0_0_15px_rgba(192,82,26,0.15)] hover:shadow-[0_0_30px_rgba(192,82,26,0.4)] bg-[#0a0612]"
+                  }`}
+                >
+                  {activeVibe !== "Scanning..." && (
+                    <>
+                      <div className="absolute inset-0 opacity-40 group-hover:opacity-80 transition-opacity duration-500 blur-[8px] mix-blend-screen">
+                          <div className="absolute w-[200%] h-[200%] -top-[50%] -left-[50%] bg-gradient-to-r from-[#3a0088] via-[#ff0055] to-[#ff4500]" style={{ animation: 'ooze 8s infinite alternate ease-in-out' }}></div>
+                      </div>
+                      <div 
+                        className="absolute inset-0 opacity-40 group-hover:opacity-80 mix-blend-screen transition-opacity duration-500 force-fluid-filter"
+                        style={{
+                          background: 'repeating-linear-gradient(-45deg, transparent, transparent 2px, rgba(255, 255, 255, 0.25) 3px, rgba(255, 255, 255, 0.25) 4px)',
+                          animation: 'flow-lines 10s linear infinite'
+                        }}
+                      ></div>
+                    </>
+                  )}
+                  
+                  <div className="absolute inset-0 bg-black/60 group-hover:bg-black/30 transition-colors duration-500"></div>
+                  
+                  <span className="relative z-10 font-bold drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)] group-hover:drop-shadow-[0_0_8px_rgba(255,255,255,0.6)] transition-all duration-500">
+                    {activeVibe === "Scanning..." ? "Purging..." : "Recalibrate"}
+                  </span>
+                </button>
+              </div>
             </div>
 
-            <div className="flex flex-col gap-4 mt-auto relative z-10 w-full items-center">
+            <div className="flex flex-col gap-4 mt-auto relative z-10 w-full items-center pt-8">
               
-              {/* ИНТЕРАКТИВНЫЙ КОНТЕЙНЕР БЕЗДНЫ */}
+              {/* ГЛАВНАЯ КНОПКА MUTATE (БЕЗДНА) */}
               <div 
                 onClick={handleMutate}
                 className={`relative w-full h-[240px] flex justify-center items-center cursor-pointer group ${isMutating ? 'is-mutating' : ''}`}
               >
-                
                 <div 
                   className="absolute w-[150%] h-[150%] blur-[50px] opacity-80 mix-blend-screen transition-all duration-1000"
                   style={{ 
@@ -324,14 +366,10 @@ function VibeContent() {
                   <div className="absolute w-[40%] h-[40%] top-[30%] left-[30%] rounded-full bg-[#ff4500] opacity-60" style={{ animation: 'ooze 18s infinite alternate ease-in-out', animationPlayState: isMutating ? 'running' : 'paused' }}></div>
                 </div>
 
-                {/* Дорогой feDisplacementMap-фильтр: отрисовывается один раз в покое,
-                    а не пересчитывается на GPU 40-секундным бесконечным циклом всё время,
-                    пока открыта страница — именно это раньше периодически фризило фронт. */}
                 <div 
-                  className="absolute -inset-[20%] opacity-50 pointer-events-none transition-opacity duration-300 group-hover:opacity-80"
+                  className="absolute -inset-[20%] opacity-50 pointer-events-none transition-opacity duration-300 group-hover:opacity-80 force-fluid-filter"
                   style={{
                     background: 'repeating-linear-gradient(-45deg, transparent, transparent 3px, rgba(255, 255, 255, 0.15) 4px, rgba(255, 255, 255, 0.15) 5px)',
-                    filter: isMutating ? 'url(#fluid-warp)' : 'none',
                     WebkitMaskImage: 'radial-gradient(ellipse 70% 45% at 50% 50%, black 20%, transparent 90%)',
                     maskImage: 'radial-gradient(ellipse 70% 45% at 50% 50%, black 20%, transparent 90%)',
                     animation: isMutating ? 'flow-lines 10s linear infinite' : 'none'
@@ -362,7 +400,6 @@ function VibeContent() {
                 </div>
               </div>
               
-              {/* КНОПКА СОХРАНЕНИЯ (С ЛОГИКОЙ) */}
               {isPinned(currentPhoto) ? (
                 <div className="text-[9px] text-white/50 tracking-[0.2em] font-syncopate uppercase text-center w-full mt-2 cursor-default">
                   ✓ Saved to archive

@@ -111,8 +111,8 @@ export default function ProfilePage() {
   }
 
   if (loading) return (
-    <div className="min-h-screen bg-[#020104] flex items-center justify-center">
-      <div className="w-10 h-10 border-2 border-white/10 border-t-[#a855f7] rounded-full animate-spin shadow-[0_0_20px_rgba(168,85,247,0.5)]"></div>
+    <div className="min-h-screen bg-[#010101] flex items-center justify-center">
+      <div className="w-8 h-8 border border-white/20 border-t-white rounded-full animate-spin"></div>
     </div>
   );
 
@@ -120,145 +120,233 @@ export default function ProfilePage() {
   const initials = (name || user?.email || "U")[0].toUpperCase();
 
   return (
-    <div className="min-h-screen bg-[#020104] text-white font-sans overflow-x-hidden relative pb-20">
+    <div className="min-h-screen bg-[#010101] text-white font-sans overflow-x-hidden relative pb-20">
       <style dangerouslySetInnerHTML={{ __html: `
-        @import url('https://fonts.googleapis.com/css2?family=Syncopate:wght@400;700&family=Inter:wght@300;400;500;600&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Syncopate:wght@400;600;700&family=Inter:wght@300;400;500&display=swap');
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-        ::-webkit-scrollbar { width: 6px; height: 6px; } ::-webkit-scrollbar-track { background: #020104; } ::-webkit-scrollbar-thumb { background: #333; border-radius: 10px; } ::-webkit-scrollbar-thumb:hover { background: #a855f7; }
+        ::-webkit-scrollbar { width: 4px; height: 4px; } 
+        ::-webkit-scrollbar-track { background: #010101; } 
+        ::-webkit-scrollbar-thumb { background: #333; border-radius: 4px; } 
+        ::-webkit-scrollbar-thumb:hover { background: #fff; }
         
-        @keyframes volvelle-spin { 100% { transform: translate(-50%, -50%) rotate(360deg); } }
+        @keyframes slow-spin { 100% { transform: translate(-50%, -50%) rotate(360deg); } }
         @keyframes slideUp { from { transform: translate(-50%, 20px); opacity: 0; } to { transform: translate(-50%, 0); opacity: 1; } }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 
-        .header { position: sticky; top: 0; z-index: 100; background: rgba(2, 1, 4, 0.8); backdrop-filter: blur(20px); border-bottom: 1px solid rgba(255,255,255,0.05); padding: 12px 24px; display: flex; align-items: center; justify-content: space-between; }
-        .logo { font-family: 'Syncopate', sans-serif; font-size: 20px; font-weight: 700; color: #fff; letter-spacing: 0.3em; cursor: pointer; user-select: none; text-shadow: 0 0 10px rgba(255,255,255,0.2); transition: all 0.3s; }
-        .logo:hover { text-shadow: -3px 0 10px rgba(255,0,85,0.5), 0 0 10px rgba(0,255,0,0.5), 3px 0 10px rgba(0,255,255,0.5); }
+        .header { 
+            position: sticky; top: 0; z-index: 100; 
+            background: rgba(1, 1, 1, 0.8); backdrop-filter: blur(20px); 
+            border-bottom: 1px solid rgba(255,255,255,0.05); 
+            padding: 16px 32px; display: flex; align-items: center; justify-content: space-between; 
+        }
         
-        .hbtn { background: transparent; border: none; width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; color: #888; transition: all 0.3s ease; } 
-        .hbtn:hover { background: rgba(255,255,255,0.05); color: #fff; transform: translateY(-2px); box-shadow: 0 5px 15px rgba(0,0,0,0.5); } 
+        .logo { 
+            font-family: 'Syncopate', sans-serif; font-size: 16px; font-weight: 700; color: #fff; 
+            letter-spacing: 0.4em; cursor: pointer; user-select: none; 
+            transition: all 0.3s ease; 
+        }
+        .logo:hover { text-shadow: 0 0 15px rgba(255,255,255,0.4); }
         
-        .prism-focus { border-radius: 12px; transition: all 0.4s cubic-bezier(0.16,1,0.3,1); background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.1); overflow: hidden; }
-        .prism-focus:focus-within { box-shadow: -10px 0 30px rgba(255,0,85,0.2), 0 0 30px rgba(0,255,0,0.1), 10px 0 30px rgba(0,255,255,0.2); border-color: rgba(255,255,255,0.4); }
-        .field { width: 100%; padding: 16px 20px; background: transparent; color: #fff; font-size: 14px; outline: none; transition: all 0.3s ease; font-family: 'Inter', sans-serif; } 
-        .field::placeholder { color: rgba(255,255,255,0.2); }
+        .hbtn { 
+            background: transparent; border: none; width: 40px; height: 40px; border-radius: 50%; 
+            display: flex; align-items: center; justify-content: center; cursor: pointer; 
+            color: #666; transition: all 0.3s ease; 
+        } 
+        .hbtn:hover { background: rgba(255,255,255,0.05); color: #fff; } 
+        
+        .minimal-input {
+            width: 100%; padding: 12px 0; background: transparent; 
+            border: none; border-bottom: 1px solid rgba(255,255,255,0.1); 
+            color: #fff; font-size: 14px; font-family: 'Inter', sans-serif; 
+            outline: none; transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1); 
+        }
+        .minimal-input:focus { 
+            border-color: rgba(255,255,255,0.8); 
+            box-shadow: 0 1px 10px -2px rgba(255,255,255,0.2); 
+        }
+        .minimal-input::placeholder { color: rgba(255,255,255,0.2); font-weight: 300; }
 
-        .primary-btn { background: #fff; color: #000; border: none; border-radius: 8px; padding: 16px 32px; cursor: pointer; font-weight: 700; font-size: 12px; width: 100%; transition: all 0.3s cubic-bezier(0.16,1,0.3,1); text-transform: uppercase; letter-spacing: 2px; font-family: 'Syncopate', sans-serif; box-shadow: 0 10px 20px rgba(255,255,255,0.1); } 
-        .primary-btn:hover:not(:disabled) { background: #ccc; transform: translateY(-2px); box-shadow: 0 15px 30px rgba(255,255,255,0.2); } 
-        .primary-btn:disabled { opacity: 0.5; cursor: not-allowed; box-shadow: none; transform: none; }
+        .ghost-button {
+            width: 100%; padding: 18px 0; background: transparent; 
+            border: 1px solid rgba(255,255,255,0.2); border-radius: 9999px; 
+            color: #fff; font-family: 'Syncopate', sans-serif; font-size: 11px; 
+            font-weight: 700; letter-spacing: 4px; text-transform: uppercase; 
+            cursor: pointer; transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        .ghost-button:hover:not(:disabled) {
+            background: #fff; color: #000; border-color: #fff;
+            box-shadow: 0 0 30px rgba(255,255,255,0.3);
+        }
+        .ghost-button:disabled { opacity: 0.4; cursor: not-allowed; }
         
-        .danger-btn { background: transparent; color: #ef4444; border: 1px solid rgba(239,68,68,0.3); border-radius: 8px; padding: 14px 28px; cursor: pointer; font-weight: 700; font-size: 12px; width: 100%; transition: all 0.3s; font-family: 'Syncopate', sans-serif; letter-spacing: 2px; text-transform: uppercase; }
-        .danger-btn:hover { background: rgba(239,68,68,0.1); border-color: #ef4444; box-shadow: 0 0 20px rgba(239,68,68,0.2); }
-
-        .tab-btn { flex: 1; padding: 16px; border: none; background: transparent; cursor: pointer; font-size: 12px; font-weight: 700; color: #666; border-bottom: 2px solid transparent; transition: all 0.3s; text-transform: uppercase; letter-spacing: 2px; font-family: 'Syncopate', sans-serif; }
-        .tab-btn.active { color: #fff; border-bottom-color: #a855f7; text-shadow: 0 0 10px rgba(255,255,255,0.5); }
+        .tab-btn { 
+            padding: 12px 24px; border: none; background: transparent; cursor: pointer; 
+            font-size: 11px; font-weight: 700; color: #555; 
+            transition: all 0.3s; text-transform: uppercase; letter-spacing: 3px; 
+            font-family: 'Syncopate', sans-serif; position: relative;
+        }
+        .tab-btn::after {
+            content: ''; position: absolute; bottom: 0; left: 50%; transform: translateX(-50%);
+            width: 0; height: 1px; background: #fff; transition: width 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+            box-shadow: 0 0 10px rgba(255,255,255,0.5);
+        }
+        .tab-btn.active { color: #fff; }
+        .tab-btn.active::after { width: 80%; }
         .tab-btn:hover:not(.active) { color: #aaa; }
 
         .pin-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
-        @media (min-width: 640px) { .pin-grid { grid-template-columns: repeat(4, 1fr); } }
-        .pin-thumb { aspect-ratio: 1; border-radius: 16px; overflow: hidden; background: #111; cursor: pointer; position: relative; border: 1px solid rgba(255,255,255,0.05); transition: all 0.4s cubic-bezier(0.16,1,0.3,1); box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
-        .pin-thumb img { width: 100%; height: 100%; object-fit: cover; transition: transform 0.5s; }
-        .pin-thumb:hover { transform: translateY(-5px); border-color: rgba(255,255,255,0.2); box-shadow: -10px 0 20px rgba(255,0,85,0.2), 0 0 20px rgba(0,255,0,0.1), 10px 0 20px rgba(0,255,255,0.2); }
-        .pin-thumb:hover img { transform: scale(1.1); filter: brightness(0.7); }
-
-        .board-item { display: flex; align-items: center; gap: 20px; padding: 20px; background: rgba(20,20,20,0.6); border-radius: 20px; border: 1px solid rgba(255,255,255,0.05); transition: all 0.4s cubic-bezier(0.16,1,0.3,1); backdrop-filter: blur(10px); }
-        .board-item:hover { border-color: rgba(255,255,255,0.2); transform: translateY(-3px); box-shadow: 0 15px 30px rgba(0,0,0,0.8), 0 0 20px rgba(168,85,247,0.1); }
-        .board-icon { width: 56px; height: 56px; border-radius: 16px; background: linear-gradient(135deg, #111, #000); display: flex; align-items: center; justify-content: center; flex-shrink: 0; border: 1px solid rgba(255,255,255,0.1); }
+        @media (min-width: 640px) { .pin-grid { grid-template-columns: repeat(4, 1fr); gap: 24px; } }
         
-        .toast { position: fixed; bottom: 40px; left: 50%; transform: translateX(-50%); padding: 16px 32px; border-radius: 9999px; font-size: 11px; font-weight: 700; z-index: 9999; animation: slideUp 0.4s cubic-bezier(0.16,1,0.3,1); box-shadow: 0 20px 50px rgba(0,0,0,0.9); font-family: 'Syncopate', sans-serif; letter-spacing: 2px; text-transform: uppercase; backdrop-filter: blur(20px); }
-        .toast.success { background: rgba(5,3,8,0.95); border: 1px solid rgba(168,85,247,0.3); color: #fff; box-shadow: 0 20px 50px rgba(0,0,0,0.9), 0 0 20px rgba(168,85,247,0.2); }
-        .toast.error { background: rgba(5,3,8,0.95); border: 1px solid rgba(239,68,68,0.3); color: #ef4444; box-shadow: 0 20px 50px rgba(0,0,0,0.9), 0 0 20px rgba(239,68,68,0.2); }
+        .pin-thumb { 
+            aspect-ratio: 1; border-radius: 4px; overflow: hidden; background: #111; 
+            cursor: pointer; position: relative; border: 1px solid transparent; 
+            transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1); 
+        }
+        .pin-thumb img { width: 100%; height: 100%; object-fit: cover; transition: transform 0.8s ease; filter: grayscale(20%); }
+        .pin-thumb:hover { border-color: rgba(255,255,255,0.2); transform: translateY(-4px); box-shadow: 0 15px 30px rgba(0,0,0,0.8); z-index: 2; }
+        .pin-thumb:hover img { transform: scale(1.05); filter: grayscale(0%); }
+
+        .board-item { 
+            display: flex; align-items: center; gap: 24px; padding: 24px 0; 
+            border-bottom: 1px solid rgba(255,255,255,0.05); transition: all 0.3s; 
+            background: transparent;
+        }
+        .board-item:hover { transform: translateX(10px); }
+        .board-item:last-child { border-bottom: none; }
+        
+        .board-icon { 
+            width: 64px; height: 64px; border-radius: 8px; background: rgba(255,255,255,0.02); 
+            display: flex; align-items: center; justify-content: center; flex-shrink: 0; 
+            border: 1px solid rgba(255,255,255,0.05); 
+        }
+        
+        .toast { 
+            position: fixed; bottom: 40px; left: 50%; transform: translateX(-50%); 
+            padding: 16px 32px; border-radius: 9999px; font-size: 10px; font-weight: 700; 
+            z-index: 9999; animation: slideUp 0.4s cubic-bezier(0.16,1,0.3,1); 
+            font-family: 'Syncopate', sans-serif; letter-spacing: 3px; text-transform: uppercase; 
+            backdrop-filter: blur(20px); border: 1px solid rgba(255,255,255,0.1);
+        }
+        .toast.success { background: rgba(1,1,1,0.9); color: #fff; box-shadow: 0 10px 40px rgba(0,0,0,0.8); }
+        .toast.error { background: rgba(1,1,1,0.9); color: #ef4444; border-color: rgba(239,68,68,0.3); }
+
+        .avatar-glow {
+            transition: all 0.5s ease;
+        }
+        .group:hover .avatar-glow {
+            box-shadow: 0 0 30px rgba(255,255,255,0.15), inset 0 0 20px rgba(0,0,0,0.8);
+            border-color: rgba(255,255,255,0.4);
+        }
       `}} />
 
-      {/* Background Volvelle (LZ III) + Void (DSOTM) */}
-      <div className="fixed inset-0 z-0 pointer-events-none overflow-hidden opacity-40">
-          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_rgba(20,10,40,0.5)_0%,_rgba(2,1,4,1)_100%)]"></div>
-          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[150vw] h-[150vw] max-w-[1200px] max-h-[1200px] border-[1px] border-white/5 rounded-full opacity-20 animate-[volvelle-spin_100s_linear_infinite]" style={{ borderStyle: 'dashed' }}></div>
-          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-[#a855f7]/10 blur-[150px] rounded-full pointer-events-none z-0"></div>
+      {/* LZ III Background Elements */}
+      <div className="fixed inset-0 z-0 pointer-events-none overflow-hidden opacity-30">
+          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_rgba(20,20,20,0.5)_0%,_rgba(1,1,1,1)_100%)]"></div>
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[150vw] h-[150vw] max-w-[1200px] max-h-[1200px] border-[1px] border-white/5 rounded-full opacity-20 animate-[slow-spin_100s_linear_infinite]" style={{ borderStyle: 'dashed' }}></div>
       </div>
 
       <header className="header">
-        <button onClick={() => router.push("/")} className="hbtn" title="Back to Explore">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+        <button onClick={() => router.push("/")} className="hbtn" title="Return to Archive">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
         </button>
-        <span className="logo">GELBET</span>
-        <button onClick={handleSignOut} className="hbtn" title="Disconnect">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
-        </button>
+        <span className="logo" onClick={() => router.push("/")}>GELBET</span>
+        <div className="w-10"></div> {/* Spacer for perfect centering */}
       </header>
 
-      <div className="w-full max-w-4xl mx-auto mt-10 px-4 md:px-8 relative z-10" style={{ animation: "fadeIn 0.5s ease" }}>
+      <div className="w-full max-w-3xl mx-auto mt-16 px-6 relative z-10" style={{ animation: "fadeIn 0.6s ease-out" }}>
 
-        {/* PROFILE EDIT CARD */}
-        <div className="bg-[#050308]/80 backdrop-blur-3xl border border-white/10 rounded-[2rem] p-8 md:p-14 mb-10 shadow-[0_30px_80px_rgba(0,0,0,0.9),_0_0_40px_rgba(168,85,247,0.1)]">
-          <h2 className="text-xl md:text-2xl font-syncopate font-bold text-white tracking-[0.3em] uppercase text-center mb-12 text-shadow-[0_0_20px_rgba(255,255,255,0.3)]">Identity</h2>
-
-          <form onSubmit={handleSave} className="flex flex-col gap-8">
-            <div className="flex flex-col md:flex-row items-center md:items-start gap-8 mb-4">
-              <div className="relative group cursor-pointer" onClick={() => fileRef.current?.click()}>
-                <div className="absolute -inset-2 border-[1px] border-[#a855f7]/30 rounded-full opacity-0 group-hover:opacity-100 animate-[volvelle-spin_10s_linear_infinite]" style={{ borderStyle: 'dashed' }}></div>
-                {displayAvatar
-                  ? <img src={displayAvatar} className="relative z-10 w-28 h-28 rounded-full object-cover border-[1px] border-white/20 group-hover:border-[#a855f7] transition-all duration-500 shadow-[0_0_20px_rgba(0,0,0,0.8)] group-hover:shadow-[0_0_30px_rgba(168,85,247,0.4)]" alt="avatar" />
-                  : <div className="relative z-10 w-28 h-28 rounded-full bg-black/50 border-[1px] border-white/20 flex items-center justify-center text-4xl font-syncopate font-bold text-[#555] group-hover:border-[#a855f7] group-hover:text-white transition-all duration-500 shadow-[0_0_20px_rgba(0,0,0,0.8)] group-hover:shadow-[0_0_30px_rgba(168,85,247,0.4)]">{initials}</div>
-                }
-                <div className="absolute bottom-0 right-0 w-8 h-8 rounded-full bg-[#0a0a0a] border border-white/20 flex items-center justify-center text-[#888] z-20 group-hover:text-white group-hover:bg-[#a855f7] transition-all">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+        {/* IDENTITY HEADER (Centered, no boxes) */}
+        <div className="flex flex-col items-center mb-20">
+            <div className="relative group cursor-pointer mb-8" onClick={() => fileRef.current?.click()}>
+                <div className="absolute -inset-4 border-[1px] border-white/10 rounded-full opacity-0 group-hover:opacity-100 animate-[slow-spin_10s_linear_infinite]" style={{ borderStyle: 'dashed' }}></div>
+                
+                <div className="avatar-glow relative z-10 w-32 h-32 rounded-full overflow-hidden border border-white/10 bg-black flex items-center justify-center">
+                    {displayAvatar ? (
+                        <img src={displayAvatar} className="w-full h-full object-cover" alt="avatar" />
+                    ) : (
+                        <span className="font-syncopate text-4xl text-neutral-600 font-bold">{initials}</span>
+                    )}
+                    <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity duration-300">
+                        <span className="font-syncopate text-[9px] tracking-widest text-white uppercase font-bold">Change</span>
+                    </div>
                 </div>
-                <input ref={fileRef} type="file" accept="image/*" onChange={handleAvatarChange} style={{ display: "none" }} />
-              </div>
-              
-              <div className="flex-1 w-full space-y-6">
-                <div>
-                  <label className="block text-[10px] font-syncopate font-bold tracking-[0.2em] text-[#666] mb-3 uppercase pl-2">Display Name</label>
-                  <div className="prism-focus">
-                    <input className="field" placeholder="Enter your aesthetic name" value={name} onChange={e => setName(e.target.value)} />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-[10px] font-syncopate font-bold tracking-[0.2em] text-[#666] mb-3 uppercase pl-2">Frequency / Bio</label>
-                  <div className="prism-focus">
-                    <textarea className="field" placeholder="What's your vibe? Tell us about yourself..." value={bio} onChange={e => setBio(e.target.value)} rows={3} style={{ resize: "none" }} />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-[10px] font-syncopate font-bold tracking-[0.2em] text-[#666] mb-3 uppercase pl-2">External Link</label>
-                  <div className="prism-focus">
-                    <input className="field" placeholder="https://yourspace.com" value={website} onChange={e => setWebsite(e.target.value)} />
-                  </div>
-                </div>
-              </div>
+                <input ref={fileRef} type="file" accept="image/*" onChange={handleAvatarChange} className="hidden" />
             </div>
 
-            <div className="mt-6">
-              <button type="submit" disabled={saving} className="primary-btn">
-                {saving ? "SYNCING..." : "COMMIT CHANGES"}
-              </button>
+            <h1 className="text-2xl md:text-3xl font-syncopate font-bold text-white tracking-[0.3em] uppercase text-center mb-2">
+                {name || "ANONYMOUS"}
+            </h1>
+            <div className="text-neutral-500 font-inter text-sm tracking-widest uppercase">
+                {user?.email}
             </div>
-          </form>
         </div>
 
-        {/* STATS */}
-        <div className="grid grid-cols-2 gap-6 mb-10">
-          {[["Saved Artifacts", pins.length], ["Archives", boards.length]].map(([label, count]) => (
-            <div key={label as string} className="bg-[#050308]/60 backdrop-blur-xl rounded-3xl p-8 text-center border border-white/5 shadow-[0_20px_40px_rgba(0,0,0,0.6)] hover:border-white/10 hover:shadow-[0_20px_40px_rgba(0,0,0,0.8),_0_0_20px_rgba(168,85,247,0.1)] transition-all duration-300">
+        {/* MINIMALIST FORM */}
+        <form onSubmit={handleSave} className="flex flex-col gap-10 max-w-xl mx-auto mb-24">
+            
+            <div className="group relative">
+                <label className="block text-[9px] font-syncopate font-bold tracking-[0.3em] text-neutral-600 mb-2 uppercase transition-colors group-focus-within:text-white">Designation</label>
+                <input 
+                    className="minimal-input" 
+                    placeholder="Enter your aesthetic identity" 
+                    value={name} 
+                    onChange={e => setName(e.target.value)} 
+                />
+            </div>
+
+            <div className="group relative">
+                <label className="block text-[9px] font-syncopate font-bold tracking-[0.3em] text-neutral-600 mb-2 uppercase transition-colors group-focus-within:text-white">Frequency / Bio</label>
+                <textarea 
+                    className="minimal-input" 
+                    placeholder="Define your parameters..." 
+                    value={bio} 
+                    onChange={e => setBio(e.target.value)} 
+                    rows={2} 
+                    style={{ resize: "none" }} 
+                />
+            </div>
+
+            <div className="group relative">
+                <label className="block text-[9px] font-syncopate font-bold tracking-[0.3em] text-neutral-600 mb-2 uppercase transition-colors group-focus-within:text-white">External Link</label>
+                <input 
+                    className="minimal-input" 
+                    placeholder="https://matrix.net" 
+                    value={website} 
+                    onChange={e => setWebsite(e.target.value)} 
+                />
+            </div>
+
+            <div className="pt-4">
+                <button type="submit" disabled={saving} className="ghost-button">
+                    {saving ? "SYNCING..." : "COMMIT CHANGES"}
+                </button>
+            </div>
+        </form>
+
+        {/* AIRY STATS */}
+        <div className="flex justify-center gap-20 md:gap-32 py-12 border-y border-white/5 mb-16 relative">
+          {/* Subtle glow behind stats */}
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full h-[100px] bg-white/5 blur-[50px] rounded-full pointer-events-none"></div>
+          
+          {[["Artifacts", pins.length], ["Archives", boards.length]].map(([label, count]) => (
+            <div key={label as string} className="flex flex-col items-center relative z-10">
               <div className="text-4xl md:text-5xl font-bold text-white font-syncopate tracking-widest">{count}</div>
-              <div className="text-[10px] color-[#888] mt-4 uppercase tracking-[0.3em] font-bold font-syncopate">{label}</div>
+              <div className="text-[9px] text-neutral-500 mt-4 uppercase tracking-[0.4em] font-bold font-syncopate">{label}</div>
             </div>
           ))}
         </div>
 
-        {/* CONTENT TABS */}
-        <div className="bg-[#050308]/80 backdrop-blur-3xl rounded-[2rem] overflow-hidden border border-white/10 shadow-[0_30px_80px_rgba(0,0,0,0.9)]">
-          <div className="flex border-b border-white/5 bg-black/40">
+        {/* MINIMALIST TABS */}
+        <div className="flex justify-center gap-12 border-b border-white/5 mb-12">
             <button className={`tab-btn ${tab === "pins" ? "active" : ""}`} onClick={() => setTab("pins")}>Artifacts</button>
             <button className={`tab-btn ${tab === "boards" ? "active" : ""}`} onClick={() => setTab("boards")}>Archives</button>
-          </div>
+        </div>
 
-          <div className="p-6 md:p-10">
+        {/* CONTENT GRID */}
+        <div className="pb-16 min-h-[300px]">
             {tab === "pins" && (
               pins.length === 0
-                ? <p className="text-center text-[#666] py-16 text-sm font-syncopate font-bold uppercase tracking-[0.2em]">Collection is empty.</p>
+                ? <p className="text-center text-neutral-600 py-20 text-[10px] font-syncopate font-bold uppercase tracking-[0.3em]">Sector empty.</p>
                 : <div className="pin-grid">
                     {pins.map(pin => (
                       <div key={pin.id} className="pin-thumb">
@@ -270,28 +358,33 @@ export default function ProfilePage() {
 
             {tab === "boards" && (
               boards.length === 0
-                ? <p className="text-center text-[#666] py-16 text-sm font-syncopate font-bold uppercase tracking-[0.2em]">No archives curated.</p>
-                : <div className="flex flex-col gap-4">
+                ? <p className="text-center text-neutral-600 py-20 text-[10px] font-syncopate font-bold uppercase tracking-[0.3em]">No archives curated.</p>
+                : <div className="flex flex-col max-w-2xl mx-auto">
                     {boards.map(board => (
-                      <div key={board.id} className="board-item">
-                        <div className="board-icon">
-                          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#666" strokeWidth="1.5"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+                      <div key={board.id} className="board-item group">
+                        <div className="board-icon group-hover:border-white/30 transition-colors">
+                          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.4)" strokeWidth="1.5"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
                         </div>
-                        <div>
-                          <div className="font-syncopate font-bold text-sm text-white tracking-wide uppercase">{board.name}</div>
-                          {board.description && <div className="text-xs color-[#888] mt-2 font-inter leading-relaxed">{board.description}</div>}
-                          <div className="text-[10px] color-[#a855f7] mt-3 font-bold font-syncopate tracking-widest">{pins.filter(p => p.board_id === board.id).length} ARTIFACTS</div>
+                        <div className="flex-1">
+                          <div className="font-syncopate font-bold text-sm text-white tracking-widest uppercase">{board.name}</div>
+                          {board.description && <div className="text-xs text-neutral-500 mt-2 font-inter leading-relaxed">{board.description}</div>}
+                          <div className="text-[9px] text-neutral-600 mt-3 font-bold font-syncopate tracking-[0.3em] uppercase">{pins.filter(p => p.board_id === board.id).length} ARTIFACTS</div>
+                        </div>
+                        <div className="opacity-0 group-hover:opacity-100 flex gap-4 transition-opacity duration-300">
+                          <button onClick={() => setEditBoard(board)} className="text-[9px] font-syncopate font-bold tracking-[0.2em] uppercase text-neutral-500 hover:text-white transition-colors">EDIT</button>
+                          <button onClick={() => deleteBoard(board.id)} className="text-[9px] font-syncopate font-bold tracking-[0.2em] uppercase text-red-500/50 hover:text-red-500 transition-colors">PURGE</button>
                         </div>
                       </div>
                     ))}
                   </div>
             )}
-          </div>
         </div>
         
         {/* DANGER ZONE */}
-        <div className="mt-16 mb-10 px-4">
-           <button onClick={handleSignOut} className="danger-btn">DISCONNECT COMPLETELY</button>
+        <div className="flex justify-center pb-10">
+           <button onClick={handleSignOut} className="text-[9px] font-syncopate font-bold tracking-[0.4em] uppercase text-neutral-600 hover:text-red-500 transition-colors">
+              DISCONNECT
+           </button>
         </div>
 
       </div>

@@ -325,7 +325,6 @@ export default function ProfilePage() {
 
         {/* AIRY STATS */}
         <div className="flex justify-center gap-20 md:gap-32 py-12 border-y border-white/5 mb-16 relative">
-          {/* Subtle glow behind stats */}
           <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full h-[100px] bg-white/5 blur-[50px] rounded-full pointer-events-none"></div>
           
           {[["Artifacts", pins.length], ["Archives", boards.length]].map(([label, count]) => (
@@ -369,10 +368,6 @@ export default function ProfilePage() {
                           <div className="font-syncopate font-bold text-sm text-white tracking-widest uppercase">{board.name}</div>
                           {board.description && <div className="text-xs text-neutral-500 mt-2 font-inter leading-relaxed">{board.description}</div>}
                           <div className="text-[9px] text-neutral-600 mt-3 font-bold font-syncopate tracking-[0.3em] uppercase">{pins.filter(p => p.board_id === board.id).length} ARTIFACTS</div>
-                        </div>
-                        <div className="opacity-0 group-hover:opacity-100 flex gap-4 transition-opacity duration-300">
-                          <button onClick={() => setEditBoard(board)} className="text-[9px] font-syncopate font-bold tracking-[0.2em] uppercase text-neutral-500 hover:text-white transition-colors">EDIT</button>
-                          <button onClick={() => deleteBoard(board.id)} className="text-[9px] font-syncopate font-bold tracking-[0.2em] uppercase text-red-500/50 hover:text-red-500 transition-colors">PURGE</button>
                         </div>
                       </div>
                     ))}

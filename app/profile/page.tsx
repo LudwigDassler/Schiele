@@ -282,11 +282,11 @@ export default function ProfilePage() {
             </div>
         </div>
 
-        {/* MINIMALIST FORM */}
-        <form onSubmit={handleSave} className="flex flex-col gap-10 max-w-xl mx-auto mb-24">
+        {/* PERFECTLY CENTERED FORM */}
+        <form onSubmit={handleSave} className="flex flex-col items-center gap-10 w-full max-w-md mx-auto mb-24">
             
-            <div className="group relative">
-                <label className="block text-center text-[9px] font-syncopate font-bold tracking-[0.3em] text-neutral-600 mb-2 uppercase transition-colors group-focus-within:text-white">Designation</label>
+            <div className="group relative w-full flex flex-col items-center">
+                <label className="text-[9px] font-syncopate font-bold tracking-[0.3em] text-neutral-600 mb-2 uppercase transition-colors group-focus-within:text-white text-center">Designation</label>
                 <input 
                     className="minimal-input" 
                     placeholder="Enter your aesthetic identity" 
@@ -295,8 +295,8 @@ export default function ProfilePage() {
                 />
             </div>
 
-            <div className="group relative">
-                <label className="block text-center text-[9px] font-syncopate font-bold tracking-[0.3em] text-neutral-600 mb-2 uppercase transition-colors group-focus-within:text-white">Frequency / Bio</label>
+            <div className="group relative w-full flex flex-col items-center">
+                <label className="text-[9px] font-syncopate font-bold tracking-[0.3em] text-neutral-600 mb-2 uppercase transition-colors group-focus-within:text-white text-center">Frequency / Bio</label>
                 <textarea 
                     className="minimal-input" 
                     placeholder="Define your parameters..." 
@@ -307,8 +307,8 @@ export default function ProfilePage() {
                 />
             </div>
 
-            <div className="group relative">
-                <label className="block text-center text-[9px] font-syncopate font-bold tracking-[0.3em] text-neutral-600 mb-2 uppercase transition-colors group-focus-within:text-white">External Link</label>
+            <div className="group relative w-full flex flex-col items-center">
+                <label className="text-[9px] font-syncopate font-bold tracking-[0.3em] text-neutral-600 mb-2 uppercase transition-colors group-focus-within:text-white text-center">External Link</label>
                 <input 
                     className="minimal-input" 
                     placeholder="https://matrix.net" 
@@ -317,9 +317,9 @@ export default function ProfilePage() {
                 />
             </div>
 
-            <div className="pt-4">
+            <div className="pt-4 w-full">
                 <button type="submit" disabled={saving} className="ghost-button">
-                    {saving ? "SYNCING..." : "COMMIT CHANGES"}
+                    {saving ? "SYNCING..." : "SAVE IDENTITY"}
                 </button>
             </div>
         </form>

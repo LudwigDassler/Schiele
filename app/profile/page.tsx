@@ -9,6 +9,8 @@ export default function ProfilePage() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [uploadingArtifact, setUploadingArtifact] = useState(false);
+  
   const [name, setName] = useState("");
   const [bio, setBio] = useState("");
   const [website, setWebsite] = useState("");
@@ -21,7 +23,9 @@ export default function ProfilePage() {
   const [pins, setPins] = useState<any[]>([]);
   const [boards, setBoards] = useState<any[]>([]);
   const [tab, setTab] = useState<"pins" | "boards">("pins");
+  
   const fileRef = useRef<HTMLInputElement>(null);
+  const artifactRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     supabase.auth.getSession().then(async ({ data }) => {
@@ -64,6 +68,53 @@ export default function ProfilePage() {
     const reader = new FileReader();
     reader.onload = () => setAvatarPreview(reader.result as string);
     reader.readAsDataURL(file);
+  }
+
+  // Наполеоновские планы: Функция загрузки своего творчества
+  async function handleArtifactUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file || !user) return;
+    
+    setUploadingArtifact(true);
+    showToast("Uploading artifact...", "success");
+
+    try {
+      const ext = file.name.split(".").pop();
+      const fileName = `${Date.now()}_${Math.random().toString(36).substring(7)}.${ext}`;
+      const path = `${user.id}/${fileName}`;
+      
+      // Загружаем в бакет "artifacts" (тебе нужно будет создать его в Supabase)
+      const { error: uploadError } = await supabase.storage
+        .from("artifacts")
+        .upload(path, file);
+        
+      if (uploadError) throw uploadError;
+      
+      const { data } = supabase.storage.from("artifacts").getPublicUrl(path);
+      
+      // Сохраняем как пин
+      const res = await fetch("/api/pins", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ 
+          user_id: user.id, 
+          image_url: data.publicUrl, 
+          title: "User Upload", 
+          source_url: data.publicUrl 
+        })
+      });
+      
+      if (res.ok) {
+        const json = await res.json();
+        setPins(prev => [json.pin || json.data, ...prev]);
+        showToast("Artifact synthesized successfully");
+      }
+    } catch (err: any) {
+      showToast(err.message || "Failed to upload", "error");
+    } finally {
+      setUploadingArtifact(false);
+      if (artifactRef.current) artifactRef.current.value = "";
+    }
   }
 
   async function handleSave(e: React.FormEvent) {
@@ -130,7 +181,6 @@ export default function ProfilePage() {
         ::-webkit-scrollbar-thumb:hover { background: #fff; }
         
         @keyframes slow-spin { 100% { transform: translate(-50%, -50%) rotate(360deg); } }
-        @keyframes slideUp { from { transform: translate(-50%, 20px); opacity: 0; } to { transform: translate(-50%, 0); opacity: 1; } }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 
         .header { 
@@ -142,8 +192,7 @@ export default function ProfilePage() {
         
         .logo { 
             font-family: 'Syncopate', sans-serif; font-size: 16px; font-weight: 700; color: #fff; 
-            letter-spacing: 0.4em; cursor: pointer; user-select: none; 
-            transition: all 0.3s ease; 
+            letter-spacing: 0.4em; cursor: pointer; user-select: none; transition: all 0.3s ease; 
         }
         .logo:hover { text-shadow: 0 0 15px rgba(255,255,255,0.4); }
         
@@ -154,32 +203,31 @@ export default function ProfilePage() {
         } 
         .hbtn:hover { background: rgba(255,255,255,0.05); color: #fff; } 
         
-        .minimal-input {
-            width: 100%; padding: 12px 0; background: transparent; 
-            border: none; border-bottom: 1px solid rgba(255,255,255,0.1); 
-            color: #fff; font-size: 14px; font-family: 'Inter', sans-serif; 
-            outline: none; transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1); 
-            text-align: center; /* Центрируем текст внутри инпута */
+        /* НОВЫЕ ИНПУТЫ: Призрачные линии */
+        .ghost-input {
+            width: 100%; padding: 8px 0; background: transparent; 
+            border: none; border-bottom: 1px solid transparent; 
+            color: #fff; font-size: 12px; font-family: 'Inter', sans-serif; 
+            outline: none; transition: all 0.4s ease; 
+            text-align: center; opacity: 0.6;
         }
-        .minimal-input:focus { 
-            border-color: rgba(255,255,255,0.8); 
-            box-shadow: 0 1px 10px -2px rgba(255,255,255,0.2); 
+        .ghost-input:focus, .ghost-input:hover { 
+            border-bottom: 1px solid rgba(255,255,255,0.2); 
+            opacity: 1;
         }
-        .minimal-input::placeholder { color: rgba(255,255,255,0.2); font-weight: 300; }
+        .ghost-input::placeholder { color: rgba(255,255,255,0.3); font-weight: 300; text-transform: uppercase; letter-spacing: 1px; font-size: 10px; }
 
-        .ghost-button {
-            width: 100%; padding: 18px 0; background: transparent; 
-            border: 1px solid rgba(255,255,255,0.2); border-radius: 9999px; 
-            color: #fff; font-family: 'Syncopate', sans-serif; font-size: 11px; 
+        /* Изящная кнопка сейва */
+        .sync-btn {
+            background: transparent; border: none; color: #666; 
+            font-family: 'Syncopate', sans-serif; font-size: 10px; 
             font-weight: 700; letter-spacing: 4px; text-transform: uppercase; 
-            cursor: pointer; transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+            cursor: pointer; transition: all 0.3s; padding: 12px 24px;
         }
-        .ghost-button:hover:not(:disabled) {
-            background: #fff; color: #000; border-color: #fff;
-            box-shadow: 0 0 30px rgba(255,255,255,0.3);
-        }
-        .ghost-button:disabled { opacity: 0.4; cursor: not-allowed; }
+        .sync-btn:hover:not(:disabled) { color: #fff; text-shadow: 0 0 10px rgba(255,255,255,0.5); }
+        .sync-btn:disabled { opacity: 0.4; cursor: not-allowed; }
         
+        /* Табы с интегрированными цифрами */
         .tab-btn { 
             padding: 12px 24px; border: none; background: transparent; cursor: pointer; 
             font-size: 11px; font-weight: 700; color: #555; 
@@ -195,30 +243,41 @@ export default function ProfilePage() {
         .tab-btn.active::after { width: 80%; }
         .tab-btn:hover:not(.active) { color: #aaa; }
 
-        .pin-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; width: 100%; }
-        @media (min-width: 640px) { .pin-grid { grid-template-columns: repeat(4, 1fr); gap: 24px; } }
+        /* НОВАЯ СЕТКА: Masonry (Водопад) вместо квадратов */
+        .masonry-grid { column-count: 2; column-gap: 16px; width: 100%; }
+        @media (min-width: 640px) { .masonry-grid { column-count: 3; column-gap: 20px; } }
+        @media (min-width: 1024px) { .masonry-grid { column-count: 4; column-gap: 24px; } }
         
-        .pin-thumb { 
-            aspect-ratio: 1; border-radius: 4px; overflow: hidden; background: #111; 
-            cursor: pointer; position: relative; border: 1px solid transparent; 
-            transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1); 
+        .masonry-item { 
+            break-inside: avoid; margin-bottom: 16px; border-radius: 8px; overflow: hidden; 
+            position: relative; transition: all 0.4s ease; transform: translateZ(0);
         }
-        .pin-thumb img { width: 100%; height: 100%; object-fit: cover; transition: transform 0.8s ease; filter: grayscale(20%); }
-        .pin-thumb:hover { border-color: rgba(255,255,255,0.2); transform: translateY(-4px); box-shadow: 0 15px 30px rgba(0,0,0,0.8); z-index: 2; }
-        .pin-thumb:hover img { transform: scale(1.05); filter: grayscale(0%); }
+        @media (min-width: 640px) { .masonry-item { margin-bottom: 20px; } }
+        @media (min-width: 1024px) { .masonry-item { margin-bottom: 24px; } }
+        
+        .masonry-item img { width: 100%; display: block; filter: grayscale(20%); transition: all 0.5s ease; }
+        .masonry-item:hover { transform: translateY(-4px); box-shadow: 0 15px 30px rgba(0,0,0,0.8); z-index: 2; border: 1px solid rgba(255,255,255,0.1); }
+        .masonry-item:hover img { filter: grayscale(0%); transform: scale(1.02); }
+
+        /* Плашка загрузки */
+        .upload-card {
+            break-inside: avoid; margin-bottom: 24px; border-radius: 8px;
+            border: 1px dashed rgba(255,255,255,0.1); background: rgba(255,255,255,0.02);
+            display: flex; flex-direction: column; items-center; justify-content: center;
+            aspect-ratio: 3/4; cursor: pointer; transition: all 0.3s;
+        }
+        .upload-card:hover { border-color: rgba(255,255,255,0.4); background: rgba(255,255,255,0.05); }
 
         .board-item { 
             display: flex; align-items: center; gap: 24px; padding: 24px 0; 
-            border-bottom: 1px solid rgba(255,255,255,0.05); transition: all 0.3s; 
-            background: transparent;
+            border-bottom: 1px solid rgba(255,255,255,0.05); transition: all 0.3s; background: transparent;
         }
         .board-item:hover { transform: translateX(10px); }
         .board-item:last-child { border-bottom: none; }
         
         .board-icon { 
             width: 64px; height: 64px; border-radius: 8px; background: rgba(255,255,255,0.02); 
-            display: flex; align-items: center; justify-content: center; flex-shrink: 0; 
-            border: 1px solid rgba(255,255,255,0.05); 
+            display: flex; align-items: center; justify-content: center; flex-shrink: 0; border: 1px solid rgba(255,255,255,0.05); 
         }
         
         .toast { 
@@ -231,16 +290,14 @@ export default function ProfilePage() {
         .toast.success { background: rgba(1,1,1,0.9); color: #fff; box-shadow: 0 10px 40px rgba(0,0,0,0.8); }
         .toast.error { background: rgba(1,1,1,0.9); color: #ef4444; border-color: rgba(239,68,68,0.3); }
 
-        .avatar-glow {
-            transition: all 0.5s ease;
-        }
+        .avatar-glow { transition: all 0.5s ease; }
         .group:hover .avatar-glow {
             box-shadow: 0 0 30px rgba(255,255,255,0.15), inset 0 0 20px rgba(0,0,0,0.8);
             border-color: rgba(255,255,255,0.4);
         }
       `}} />
 
-      {/* LZ III Background Elements */}
+      {/* LZ III Background */}
       <div className="fixed inset-0 z-0 pointer-events-none overflow-hidden opacity-30 flex justify-center items-center">
           <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_rgba(20,20,20,0.5)_0%,_rgba(1,1,1,1)_100%)]"></div>
           <div className="absolute w-[150vw] h-[150vw] max-w-[1200px] max-h-[1200px] border-[1px] border-white/5 rounded-full opacity-20 animate-[slow-spin_100s_linear_infinite]" style={{ borderStyle: 'dashed' }}></div>
@@ -251,119 +308,124 @@ export default function ProfilePage() {
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
         </button>
         <span className="logo" onClick={() => router.push("/")}>GELBET</span>
-        <div className="w-10"></div> {/* Spacer for perfect centering */}
+        <div className="w-10"></div> 
       </header>
 
-      {/* 
-        ЖЕСТКОЕ ВЫРАВНИВАНИЕ ПО ЦЕНТРУ (FLEXBOX)
-        Весь контент страницы теперь находится внутри flex-col с items-center
-      */}
-      <main className="w-full flex flex-col items-center mt-16 px-6 relative z-10" style={{ animation: "fadeIn 0.6s ease-out" }}>
+      {/* ЖЕСТКИЙ ЦЕНТР */}
+      <main className="w-full flex flex-col items-center mt-12 px-6 relative z-10" style={{ animation: "fadeIn 0.6s ease-out" }}>
 
         {/* IDENTITY HEADER */}
-        <div className="flex flex-col items-center mb-20 w-full">
-            <div className="relative group cursor-pointer mb-8" onClick={() => fileRef.current?.click()}>
+        <div className="flex flex-col items-center mb-16 w-full">
+            <div className="relative group cursor-pointer mb-6" onClick={() => fileRef.current?.click()}>
                 <div className="absolute -inset-4 border-[1px] border-white/10 rounded-full opacity-0 group-hover:opacity-100 animate-[slow-spin_10s_linear_infinite]" style={{ borderStyle: 'dashed' }}></div>
                 
-                <div className="avatar-glow relative z-10 w-32 h-32 rounded-full overflow-hidden border border-white/10 bg-black flex items-center justify-center">
+                <div className="avatar-glow relative z-10 w-28 h-28 rounded-full overflow-hidden border border-white/10 bg-black flex items-center justify-center">
                     {displayAvatar ? (
                         <img src={displayAvatar} className="w-full h-full object-cover" alt="avatar" />
                     ) : (
-                        <span className="font-syncopate text-4xl text-neutral-600 font-bold">{initials}</span>
+                        <span className="font-syncopate text-3xl text-neutral-600 font-bold">{initials}</span>
                     )}
                     <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity duration-300">
-                        <span className="font-syncopate text-[9px] tracking-widest text-white uppercase font-bold">Change</span>
+                        <span className="font-syncopate text-[8px] tracking-widest text-white uppercase font-bold">Change</span>
                     </div>
                 </div>
                 <input ref={fileRef} type="file" accept="image/*" onChange={handleAvatarChange} className="hidden" />
             </div>
 
-            <h1 className="text-2xl md:text-3xl font-syncopate font-bold text-white tracking-[0.3em] uppercase text-center mb-2">
+            <h1 className="text-xl md:text-2xl font-syncopate font-bold text-white tracking-[0.3em] uppercase text-center mb-2">
                 {name || "ANONYMOUS"}
             </h1>
-            <div className="text-neutral-500 font-inter text-sm tracking-widest uppercase text-center">
+            <div className="text-neutral-500 font-inter text-xs tracking-widest uppercase text-center">
                 {user?.email}
             </div>
         </div>
 
-        {/* PERFECTLY CENTERED FORM */}
-        <form onSubmit={handleSave} className="flex flex-col items-center gap-10 w-full max-w-md mb-24">
+        {/* ПРИЗРАЧНАЯ ФОРМА */}
+        <form onSubmit={handleSave} className="flex flex-col items-center gap-6 w-full max-w-sm mb-16">
             
-            <div className="group relative w-full flex flex-col items-center">
-                <label className="text-[9px] font-syncopate font-bold tracking-[0.3em] text-neutral-600 mb-2 uppercase transition-colors group-focus-within:text-white text-center">Designation</label>
+            <div className="w-full flex flex-col items-center">
                 <input 
-                    className="minimal-input text-center w-full" 
-                    placeholder="Enter your aesthetic identity" 
+                    className="ghost-input" 
+                    placeholder="DESIGNATION" 
                     value={name} 
                     onChange={e => setName(e.target.value)} 
                 />
             </div>
 
-            <div className="group relative w-full flex flex-col items-center">
-                <label className="text-[9px] font-syncopate font-bold tracking-[0.3em] text-neutral-600 mb-2 uppercase transition-colors group-focus-within:text-white text-center">Frequency / Bio</label>
-                <textarea 
-                    className="minimal-input text-center w-full" 
-                    placeholder="Define your parameters..." 
+            <div className="w-full flex flex-col items-center">
+                <input 
+                    className="ghost-input" 
+                    placeholder="FREQUENCY / BIO" 
                     value={bio} 
                     onChange={e => setBio(e.target.value)} 
-                    rows={2} 
-                    style={{ resize: "none" }} 
                 />
             </div>
 
-            <div className="group relative w-full flex flex-col items-center">
-                <label className="text-[9px] font-syncopate font-bold tracking-[0.3em] text-neutral-600 mb-2 uppercase transition-colors group-focus-within:text-white text-center">External Link</label>
+            <div className="w-full flex flex-col items-center">
                 <input 
-                    className="minimal-input text-center w-full" 
-                    placeholder="https://matrix.net" 
+                    className="ghost-input" 
+                    placeholder="EXTERNAL LINK" 
                     value={website} 
                     onChange={e => setWebsite(e.target.value)} 
                 />
             </div>
 
-            <div className="pt-4 w-full">
-                <button type="submit" disabled={saving} className="ghost-button w-full">
-                    {saving ? "SYNCING..." : "SAVE IDENTITY"}
+            <div className="pt-2 w-full flex justify-center">
+                <button type="submit" disabled={saving} className="sync-btn">
+                    {saving ? "SYNCING..." : "[ SYNC IDENTITY ]"}
                 </button>
             </div>
         </form>
 
-        {/* AIRY STATS */}
-        <div className="flex justify-center gap-20 md:gap-32 py-12 border-y border-white/5 mb-16 relative w-full max-w-2xl">
-          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full h-[100px] bg-white/5 blur-[50px] rounded-full pointer-events-none"></div>
-          
-          {[["Artifacts", pins.length], ["Archives", boards.length]].map(([label, count]) => (
-            <div key={label as string} className="flex flex-col items-center relative z-10">
-              <div className="text-4xl md:text-5xl font-bold text-white font-syncopate tracking-widest">{count}</div>
-              <div className="text-[9px] text-neutral-500 mt-4 uppercase tracking-[0.4em] font-bold font-syncopate">{label}</div>
-            </div>
-          ))}
+        {/* ТАБЫ (Теперь с интегрированными счетчиками) */}
+        <div className="flex justify-center items-center gap-8 md:gap-16 border-b border-white/5 mb-12 w-full max-w-3xl relative pb-2">
+            <button className={`tab-btn ${tab === "pins" ? "active" : ""}`} onClick={() => setTab("pins")}>
+                Artifacts <span className="text-neutral-600 ml-1">[{pins.length}]</span>
+            </button>
+            <button className={`tab-btn ${tab === "boards" ? "active" : ""}`} onClick={() => setTab("boards")}>
+                Archives <span className="text-neutral-600 ml-1">[{boards.length}]</span>
+            </button>
         </div>
 
-        {/* MINIMALIST TABS */}
-        <div className="flex justify-center gap-12 border-b border-white/5 mb-12 w-full max-w-2xl">
-            <button className={`tab-btn ${tab === "pins" ? "active" : ""}`} onClick={() => setTab("pins")}>Artifacts</button>
-            <button className={`tab-btn ${tab === "boards" ? "active" : ""}`} onClick={() => setTab("boards")}>Archives</button>
-        </div>
-
-        {/* CONTENT GRID */}
-        <div className="pb-16 min-h-[300px] w-full max-w-4xl flex flex-col items-center">
+        {/* СЕТКА КОНТЕНТА (Masonry) */}
+        <div className="pb-16 min-h-[400px] w-full max-w-6xl">
             {tab === "pins" && (
-              pins.length === 0
-                ? <p className="text-center text-neutral-600 py-20 text-[10px] font-syncopate font-bold uppercase tracking-[0.3em]">Sector empty.</p>
-                : <div className="pin-grid">
+                <div className="masonry-grid">
+                    {/* КАРТОЧКА ЗАГРУЗКИ СВОЕГО ТВОРЧЕСТВА */}
+                    <div 
+                        className="upload-card group flex flex-col items-center justify-center"
+                        onClick={() => artifactRef.current?.click()}
+                    >
+                        {uploadingArtifact ? (
+                            <div className="w-6 h-6 border border-white/20 border-t-[#a855f7] rounded-full animate-spin"></div>
+                        ) : (
+                            <>
+                                <span className="text-2xl text-neutral-500 group-hover:text-white group-hover:scale-125 transition-all mb-2">+</span>
+                                <span className="text-[9px] font-syncopate tracking-widest uppercase text-neutral-500 group-hover:text-white transition-colors">UPLOAD</span>
+                            </>
+                        )}
+                        <input 
+                            ref={artifactRef} 
+                            type="file" 
+                            accept="image/*,video/*" 
+                            onChange={handleArtifactUpload} 
+                            className="hidden" 
+                        />
+                    </div>
+
+                    {/* ПИНЫ (Водопадом) */}
                     {pins.map(pin => (
-                      <div key={pin.id} className="pin-thumb">
+                      <div key={pin.id} className="masonry-item">
                         <img src={pin.image_url} alt={pin.title} loading="lazy" />
                       </div>
                     ))}
-                  </div>
+                </div>
             )}
 
             {tab === "boards" && (
               boards.length === 0
                 ? <p className="text-center text-neutral-600 py-20 text-[10px] font-syncopate font-bold uppercase tracking-[0.3em]">No archives curated.</p>
-                : <div className="flex flex-col w-full max-w-2xl">
+                : <div className="flex flex-col w-full max-w-2xl mx-auto">
                     {boards.map(board => (
                       <div key={board.id} className="board-item group">
                         <div className="board-icon group-hover:border-white/30 transition-colors">
@@ -381,7 +443,7 @@ export default function ProfilePage() {
         </div>
         
         {/* DANGER ZONE */}
-        <div className="flex justify-center pb-10 w-full">
+        <div className="flex justify-center pb-10 w-full mt-10">
            <button onClick={handleSignOut} className="text-[9px] font-syncopate font-bold tracking-[0.4em] uppercase text-neutral-600 hover:text-red-500 transition-colors">
               DISCONNECT
            </button>

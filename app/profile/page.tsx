@@ -159,6 +159,7 @@ export default function ProfilePage() {
             border: none; border-bottom: 1px solid rgba(255,255,255,0.1); 
             color: #fff; font-size: 14px; font-family: 'Inter', sans-serif; 
             outline: none; transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1); 
+            text-align: center; /* Центрируем текст внутри инпута */
         }
         .minimal-input:focus { 
             border-color: rgba(255,255,255,0.8); 
@@ -255,7 +256,7 @@ export default function ProfilePage() {
 
       <div className="w-full max-w-3xl mx-auto mt-16 px-6 relative z-10" style={{ animation: "fadeIn 0.6s ease-out" }}>
 
-        {/* IDENTITY HEADER (Centered, no boxes) */}
+        {/* IDENTITY HEADER */}
         <div className="flex flex-col items-center mb-20">
             <div className="relative group cursor-pointer mb-8" onClick={() => fileRef.current?.click()}>
                 <div className="absolute -inset-4 border-[1px] border-white/10 rounded-full opacity-0 group-hover:opacity-100 animate-[slow-spin_10s_linear_infinite]" style={{ borderStyle: 'dashed' }}></div>
@@ -276,7 +277,7 @@ export default function ProfilePage() {
             <h1 className="text-2xl md:text-3xl font-syncopate font-bold text-white tracking-[0.3em] uppercase text-center mb-2">
                 {name || "ANONYMOUS"}
             </h1>
-            <div className="text-neutral-500 font-inter text-sm tracking-widest uppercase">
+            <div className="text-neutral-500 font-inter text-sm tracking-widest uppercase text-center">
                 {user?.email}
             </div>
         </div>
@@ -285,7 +286,7 @@ export default function ProfilePage() {
         <form onSubmit={handleSave} className="flex flex-col gap-10 max-w-xl mx-auto mb-24">
             
             <div className="group relative">
-                <label className="block text-[9px] font-syncopate font-bold tracking-[0.3em] text-neutral-600 mb-2 uppercase transition-colors group-focus-within:text-white">Designation</label>
+                <label className="block text-center text-[9px] font-syncopate font-bold tracking-[0.3em] text-neutral-600 mb-2 uppercase transition-colors group-focus-within:text-white">Designation</label>
                 <input 
                     className="minimal-input" 
                     placeholder="Enter your aesthetic identity" 
@@ -295,7 +296,7 @@ export default function ProfilePage() {
             </div>
 
             <div className="group relative">
-                <label className="block text-[9px] font-syncopate font-bold tracking-[0.3em] text-neutral-600 mb-2 uppercase transition-colors group-focus-within:text-white">Frequency / Bio</label>
+                <label className="block text-center text-[9px] font-syncopate font-bold tracking-[0.3em] text-neutral-600 mb-2 uppercase transition-colors group-focus-within:text-white">Frequency / Bio</label>
                 <textarea 
                     className="minimal-input" 
                     placeholder="Define your parameters..." 
@@ -307,7 +308,7 @@ export default function ProfilePage() {
             </div>
 
             <div className="group relative">
-                <label className="block text-[9px] font-syncopate font-bold tracking-[0.3em] text-neutral-600 mb-2 uppercase transition-colors group-focus-within:text-white">External Link</label>
+                <label className="block text-center text-[9px] font-syncopate font-bold tracking-[0.3em] text-neutral-600 mb-2 uppercase transition-colors group-focus-within:text-white">External Link</label>
                 <input 
                     className="minimal-input" 
                     placeholder="https://matrix.net" 

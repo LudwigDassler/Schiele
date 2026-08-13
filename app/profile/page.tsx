@@ -195,7 +195,7 @@ export default function ProfilePage() {
         .tab-btn.active::after { width: 80%; }
         .tab-btn:hover:not(.active) { color: #aaa; }
 
-        .pin-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+        .pin-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; width: 100%; }
         @media (min-width: 640px) { .pin-grid { grid-template-columns: repeat(4, 1fr); gap: 24px; } }
         
         .pin-thumb { 
@@ -241,9 +241,9 @@ export default function ProfilePage() {
       `}} />
 
       {/* LZ III Background Elements */}
-      <div className="fixed inset-0 z-0 pointer-events-none overflow-hidden opacity-30">
+      <div className="fixed inset-0 z-0 pointer-events-none overflow-hidden opacity-30 flex justify-center items-center">
           <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_rgba(20,20,20,0.5)_0%,_rgba(1,1,1,1)_100%)]"></div>
-          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[150vw] h-[150vw] max-w-[1200px] max-h-[1200px] border-[1px] border-white/5 rounded-full opacity-20 animate-[slow-spin_100s_linear_infinite]" style={{ borderStyle: 'dashed' }}></div>
+          <div className="absolute w-[150vw] h-[150vw] max-w-[1200px] max-h-[1200px] border-[1px] border-white/5 rounded-full opacity-20 animate-[slow-spin_100s_linear_infinite]" style={{ borderStyle: 'dashed' }}></div>
       </div>
 
       <header className="header">
@@ -254,10 +254,14 @@ export default function ProfilePage() {
         <div className="w-10"></div> {/* Spacer for perfect centering */}
       </header>
 
-      <div className="w-full max-w-3xl mx-auto mt-16 px-6 relative z-10" style={{ animation: "fadeIn 0.6s ease-out" }}>
+      {/* 
+        ЖЕСТКОЕ ВЫРАВНИВАНИЕ ПО ЦЕНТРУ (FLEXBOX)
+        Весь контент страницы теперь находится внутри flex-col с items-center
+      */}
+      <main className="w-full flex flex-col items-center mt-16 px-6 relative z-10" style={{ animation: "fadeIn 0.6s ease-out" }}>
 
         {/* IDENTITY HEADER */}
-        <div className="flex flex-col items-center mb-20">
+        <div className="flex flex-col items-center mb-20 w-full">
             <div className="relative group cursor-pointer mb-8" onClick={() => fileRef.current?.click()}>
                 <div className="absolute -inset-4 border-[1px] border-white/10 rounded-full opacity-0 group-hover:opacity-100 animate-[slow-spin_10s_linear_infinite]" style={{ borderStyle: 'dashed' }}></div>
                 
@@ -283,12 +287,12 @@ export default function ProfilePage() {
         </div>
 
         {/* PERFECTLY CENTERED FORM */}
-        <form onSubmit={handleSave} className="flex flex-col items-center gap-10 w-full max-w-md mx-auto mb-24">
+        <form onSubmit={handleSave} className="flex flex-col items-center gap-10 w-full max-w-md mb-24">
             
             <div className="group relative w-full flex flex-col items-center">
                 <label className="text-[9px] font-syncopate font-bold tracking-[0.3em] text-neutral-600 mb-2 uppercase transition-colors group-focus-within:text-white text-center">Designation</label>
                 <input 
-                    className="minimal-input" 
+                    className="minimal-input text-center w-full" 
                     placeholder="Enter your aesthetic identity" 
                     value={name} 
                     onChange={e => setName(e.target.value)} 
@@ -298,7 +302,7 @@ export default function ProfilePage() {
             <div className="group relative w-full flex flex-col items-center">
                 <label className="text-[9px] font-syncopate font-bold tracking-[0.3em] text-neutral-600 mb-2 uppercase transition-colors group-focus-within:text-white text-center">Frequency / Bio</label>
                 <textarea 
-                    className="minimal-input" 
+                    className="minimal-input text-center w-full" 
                     placeholder="Define your parameters..." 
                     value={bio} 
                     onChange={e => setBio(e.target.value)} 
@@ -310,7 +314,7 @@ export default function ProfilePage() {
             <div className="group relative w-full flex flex-col items-center">
                 <label className="text-[9px] font-syncopate font-bold tracking-[0.3em] text-neutral-600 mb-2 uppercase transition-colors group-focus-within:text-white text-center">External Link</label>
                 <input 
-                    className="minimal-input" 
+                    className="minimal-input text-center w-full" 
                     placeholder="https://matrix.net" 
                     value={website} 
                     onChange={e => setWebsite(e.target.value)} 
@@ -318,14 +322,14 @@ export default function ProfilePage() {
             </div>
 
             <div className="pt-4 w-full">
-                <button type="submit" disabled={saving} className="ghost-button">
+                <button type="submit" disabled={saving} className="ghost-button w-full">
                     {saving ? "SYNCING..." : "SAVE IDENTITY"}
                 </button>
             </div>
         </form>
 
         {/* AIRY STATS */}
-        <div className="flex justify-center gap-20 md:gap-32 py-12 border-y border-white/5 mb-16 relative">
+        <div className="flex justify-center gap-20 md:gap-32 py-12 border-y border-white/5 mb-16 relative w-full max-w-2xl">
           <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full h-[100px] bg-white/5 blur-[50px] rounded-full pointer-events-none"></div>
           
           {[["Artifacts", pins.length], ["Archives", boards.length]].map(([label, count]) => (
@@ -337,13 +341,13 @@ export default function ProfilePage() {
         </div>
 
         {/* MINIMALIST TABS */}
-        <div className="flex justify-center gap-12 border-b border-white/5 mb-12">
+        <div className="flex justify-center gap-12 border-b border-white/5 mb-12 w-full max-w-2xl">
             <button className={`tab-btn ${tab === "pins" ? "active" : ""}`} onClick={() => setTab("pins")}>Artifacts</button>
             <button className={`tab-btn ${tab === "boards" ? "active" : ""}`} onClick={() => setTab("boards")}>Archives</button>
         </div>
 
         {/* CONTENT GRID */}
-        <div className="pb-16 min-h-[300px]">
+        <div className="pb-16 min-h-[300px] w-full max-w-4xl flex flex-col items-center">
             {tab === "pins" && (
               pins.length === 0
                 ? <p className="text-center text-neutral-600 py-20 text-[10px] font-syncopate font-bold uppercase tracking-[0.3em]">Sector empty.</p>
@@ -359,7 +363,7 @@ export default function ProfilePage() {
             {tab === "boards" && (
               boards.length === 0
                 ? <p className="text-center text-neutral-600 py-20 text-[10px] font-syncopate font-bold uppercase tracking-[0.3em]">No archives curated.</p>
-                : <div className="flex flex-col max-w-2xl mx-auto">
+                : <div className="flex flex-col w-full max-w-2xl">
                     {boards.map(board => (
                       <div key={board.id} className="board-item group">
                         <div className="board-icon group-hover:border-white/30 transition-colors">
@@ -377,13 +381,13 @@ export default function ProfilePage() {
         </div>
         
         {/* DANGER ZONE */}
-        <div className="flex justify-center pb-10">
+        <div className="flex justify-center pb-10 w-full">
            <button onClick={handleSignOut} className="text-[9px] font-syncopate font-bold tracking-[0.4em] uppercase text-neutral-600 hover:text-red-500 transition-colors">
               DISCONNECT
            </button>
         </div>
 
-      </div>
+      </main>
 
       {toastMsg && (
         <div className={`toast ${toastMsg.type}`}>

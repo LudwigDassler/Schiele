@@ -1,4 +1,3 @@
-// app/api/mutate/route.ts
 import { NextResponse } from "next/server";
 import { SonicTensor } from "@/lib/tensor";
 import { OverseerCore } from "@/core/overseer";
@@ -53,27 +52,46 @@ export async function POST(req: Request) {
       Верни JSON: { "core_vibe": "...", "sonic_analysis": "...", "color_palette": ["${mutationHex}", ...3 more], "generation_prompt": "..." }
     `;
 
-    const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST",
-      headers: { "Authorization": `Bearer ${process.env.GROQ_API_KEY}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "llama3-8b-8192",
-        messages: [{ role: "system", content: systemPrompt }, { role: "user", content: "Execute mutation." }],
-        temperature: 0.6,
-        response_format: { type: "json_object" }
-      })
-    });
+    // ЗАЩИТА 1: Контроллер таймаута (12 секунд на мутацию)
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 12000);
 
-    if (!res.ok) throw new Error("Groq API failed");
-    const mutatedData = JSON.parse(cleanLLMJSON((await res.json()).choices?.[0]?.message?.content || "{}"));
+    let mutatedData: any = {};
+    try {
+      const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${process.env.GROQ_API_KEY}`, "Content-Type": "application/json" },
+        signal: controller.signal,
+        body: JSON.stringify({
+          model: "llama3-8b-8192",
+          messages: [{ role: "system", content: systemPrompt }, { role: "user", content: "Execute mutation." }],
+          temperature: 0.6,
+          response_format: { type: "json_object" }
+        })
+      });
+      clearTimeout(timeoutId);
+      if (!res.ok) throw new Error("Groq API failed");
+      
+      mutatedData = JSON.parse(cleanLLMJSON((await res.json()).choices?.[0]?.message?.content || "{}"));
+    } catch (err) {
+      clearTimeout(timeoutId);
+      throw err; // Сработает внешний catch, не роняя весь контейнер
+    }
+
+    // ЗАЩИТА 2: Валидатор цветов
+    const isValidHex = (hex: string) => /^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/.test(hex);
+    const validColors = Array.isArray(mutatedData.color_palette) ? mutatedData.color_palette.filter(isValidHex) : [];
+    if (validColors[0] !== mutationHex) validColors.unshift(mutationHex);
+    const fallbackPalette = ["#0A0A0C", "#1A1821", "#d4b896", "#4A3B52"];
+    while (validColors.length < 5) validColors.push(fallbackPalette[validColors.length - 1] || "#FFFFFF");
 
     const genPrompt = mutatedData.generation_prompt || previous_state.generation_prompt;
 
     const rawMutation = {
       ...previous_state,
       core_vibe: mutatedData.core_vibe?.toUpperCase() || "UNKNOWN MUTATION",
-      sonic_analysis: mutatedData.sonic_analysis,
-      color_palette: mutatedData.color_palette,
+      sonic_analysis: mutatedData.sonic_analysis || "Acoustic distortion threshold breached.",
+      color_palette: validColors.slice(0, 5),
       generation_prompt: genPrompt,
       generated_artifact: generateAIImageUrl(genPrompt),
       mutation_cycle: mutation_cycle,
@@ -85,7 +103,6 @@ export async function POST(req: Request) {
     const overseer = new OverseerCore();
     const enforcedMutation = await overseer.critiqueAndEnforce(rawMutation);
 
-    // Переписываем URL картинки, если Надзиратель изменил промпт
     if (enforcedMutation.overseer_intervention) {
        enforcedMutation.generated_artifact = generateAIImageUrl(enforcedMutation.generation_prompt);
     }

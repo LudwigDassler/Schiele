@@ -17,10 +17,10 @@ services:
     container_name: schiele_overseer
     working_dir: /usr/src/app
     volumes:
-      - ./:/usr/src/app # Пробрасываем код внутрь
+      - ./:/usr/src/app
     ports:
       - "4000:4000"
-    command: npm run dev:core # Спецкоманда для запуска только ядра
+    command: npm run dev
     depends_on:
       - neural_core
     environment:

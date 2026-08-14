@@ -1,0 +1,31 @@
+version: '3.8'
+
+services:
+  # Локальный нейро-мозг (Ollama). Полностью автономная LLM.
+  neural_core:
+    image: ollama/ollama:latest
+    container_name: schiele_ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_memory:/root/.ollama
+    restart: unless-stopped
+
+  # Твой локальный сервер для Надзирателя
+  overseer_node:
+    image: node:20-alpine
+    container_name: schiele_overseer
+    working_dir: /usr/src/app
+    volumes:
+      - ./:/usr/src/app # Пробрасываем код внутрь
+    ports:
+      - "4000:4000"
+    command: npm run dev:core # Спецкоманда для запуска только ядра
+    depends_on:
+      - neural_core
+    environment:
+      - OLLAMA_URL=http://neural_core:11434
+      - NODE_ENV=development
+
+volumes:
+  ollama_memory:

@@ -1,34 +1,98 @@
+// app/api/mutate/route.ts
 import { NextResponse } from "next/server";
-import { callGroq, getPersonalVibeContext } from "../../../lib/kashmir";
+import { SonicTensor } from "@/lib/tensor";
+import { OverseerCore } from "@/core/overseer";
 
-const MUTATE_SYSTEM_PROMPT = `You are an AI visual mutation engine, a sibling system to Kashmir.
-The user gives you a concept derived from an image they are looking at right now.
-Your job is to EVOLVE this concept into a highly specific, surreal, and cinematic search query for the NEXT image.
+const MAX_MUTATIONS = 5;
 
-RULES:
-1. Keep the core subject, but shift the atmosphere, lighting, era, or artistic medium.
-2. Sound like a prompt written by a high-end art director or cinematographer.
-3. Maximum 6 words.
-4. NEVER use vague abstract words (beautiful, cool, nice). Use physical, concrete descriptions (liminal, neon-lit, brutalist concrete, 35mm grain, dense fog).
-5. Output ONLY the mutated query as plain text. No quotes, no JSON, no explanation, no prefixes.`;
+function cleanLLMJSON(text: string): string {
+  let cleaned = text.trim();
+  if (cleaned.startsWith("```json")) cleaned = cleaned.replace(/^```json/, "");
+  if (cleaned.startsWith("```")) cleaned = cleaned.replace(/^```/, "");
+  if (cleaned.endsWith("```")) cleaned = cleaned.replace(/```$/, "");
+  return cleaned.trim();
+}
+
+function generateAIImageUrl(prompt: string): string {
+  const seed = Math.floor(Math.random() * 1000000);
+  const encodedPrompt = encodeURIComponent(prompt.trim());
+  return `https://pollinations.ai/p/${encodedPrompt}?width=1080&height=1350&seed=${seed}&nologo=true&enhance=true`;
+}
 
 export async function POST(req: Request) {
   try {
-    const { concept, userId } = await req.json();
-    if (!concept || typeof concept !== "string") {
-      return NextResponse.json({ error: "No concept provided" }, { status: 400 });
+    let body;
+    try { body = await req.json(); } catch { return NextResponse.json({ error: "Invalid JSON" }, { status: 400 }); }
+
+    const { previous_state, mutation_cycle = 1 } = body;
+
+    if (!previous_state || typeof previous_state !== "object") {
+      return NextResponse.json({ error: "Previous state required" }, { status: 400 });
+    }
+    if (mutation_cycle > MAX_MUTATIONS) {
+      return NextResponse.json({ error: "Maximum mutation depth reached." }, { status: 400 });
     }
 
-    const memoryContext = userId ? await getPersonalVibeContext(userId) : "";
-    const systemPrompt = MUTATE_SYSTEM_PROMPT + memoryContext;
+    // 1. МАТЕМАТИЧЕСКАЯ ПЕРЕГРУЗКА
+    const oldDepth = previous_state.math_constants?.fractal_depth || 1.0;
+    const newFractalDepth = Number((oldDepth * 1.618033988749).toFixed(4));
+    
+    const tensor = new SonicTensor(0.9, 0.2, 140);
+    const newTVector = tensor.calculateTranscendenceVector(newFractalDepth);
+    const mutationHex = tensor.getHexColor();
 
-    const mutated = await callGroq(systemPrompt, `Concept to mutate: ${concept}`);
+    // 2. БАЗОВЫЙ СИНТЕЗ ОТ МИКРОСЕРВИСА (Groq)
+    const systemPrompt = `
+      Ты — ядро Aesthetic Nexus. МУТАЦИЯ АРТЕФАКТА №${mutation_cycle}.
+      Старый Вайб: ${previous_state.core_vibe}
+      Старый Промпт: ${previous_state.generation_prompt}
+      Новая Фрактальная Глубина: ${newFractalDepth}
+      Вектор Трансцендентности: ${newTVector}
+      
+      Разрушь старую форму. Сделай визуал более искаженным, мрачным или абстрактным.
+      Верни JSON: { "core_vibe": "...", "sonic_analysis": "...", "color_palette": ["${mutationHex}", ...3 more], "generation_prompt": "..." }
+    `;
 
-    const mutated_query = mutated || `${concept} reimagined`;
+    const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${process.env.GROQ_API_KEY}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "llama3-8b-8192",
+        messages: [{ role: "system", content: systemPrompt }, { role: "user", content: "Execute mutation." }],
+        temperature: 0.6,
+        response_format: { type: "json_object" }
+      })
+    });
 
-    return NextResponse.json({ mutated_query });
-  } catch (error) {
-    console.error("[MUTATE] Error:", error);
-    return NextResponse.json({ error: "Failed to mutate concept" }, { status: 500 });
+    if (!res.ok) throw new Error("Groq API failed");
+    const mutatedData = JSON.parse(cleanLLMJSON((await res.json()).choices?.[0]?.message?.content || "{}"));
+
+    const genPrompt = mutatedData.generation_prompt || previous_state.generation_prompt;
+
+    const rawMutation = {
+      ...previous_state,
+      core_vibe: mutatedData.core_vibe?.toUpperCase() || "UNKNOWN MUTATION",
+      sonic_analysis: mutatedData.sonic_analysis,
+      color_palette: mutatedData.color_palette,
+      generation_prompt: genPrompt,
+      generated_artifact: generateAIImageUrl(genPrompt),
+      mutation_cycle: mutation_cycle,
+      math_constants: { fractal_depth: newFractalDepth, t_vector: newTVector },
+      timestamp: new Date().toISOString()
+    };
+
+    // 3. КОНТРОЛЬ НАДЗИРАТЕЛЯ (Локальная Llama 3)
+    const overseer = new OverseerCore();
+    const enforcedMutation = await overseer.critiqueAndEnforce(rawMutation);
+
+    // Переписываем URL картинки, если Надзиратель изменил промпт
+    if (enforcedMutation.overseer_intervention) {
+       enforcedMutation.generated_artifact = generateAIImageUrl(enforcedMutation.generation_prompt);
+    }
+
+    return NextResponse.json({ source: "mutation_chamber", data: enforcedMutation });
+
+  } catch (criticalError: any) {
+    return NextResponse.json({ error: "Mutation failed", details: criticalError.message }, { status: 500 });
   }
 }

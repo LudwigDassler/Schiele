@@ -1,29 +1,20 @@
+version: '3.8'
+
 services:
-  neural_core:
-    # Используем открытое зеркало для скачивания Ollama
-    image: dockerhub.timeweb.cloud/ollama/ollama:latest
-    container_name: schiele_ollama
-    ports:
-      - "11434:11434"
+  app:
+    image: node:20-alpine
+    container_name: my-pinterest-app
+    working_dir: /app
     volumes:
-      - ollama_memory:/root/.ollama
-    restart: unless-stopped
-
-  overseer_node:
-    # Используем открытое зеркало для скачивания Node.js
-    image: dockerhub.timeweb.cloud/library/node:20-alpine
-    container_name: schiele_overseer
-    working_dir: /usr/src/app
-    volumes:
-      - ./:/usr/src/app
+      - .:/app
+      - /app/node_modules
     ports:
-      - "4000:4000"
+      - "3000:3000"
+    # Команда для запуска режима разработки (измени под свой package.json, если нужно, например: npm start)
     command: npm run dev
-    depends_on:
-      - neural_core
     environment:
-      - OLLAMA_URL=http://neural_core:11434
       - NODE_ENV=development
-
-volumes:
-  ollama_memory:
+      - OLLAMA_HOST=http://host.docker.internal:11434
+    # Гарантирует, что контейнер сможет достучаться до Ollama на хосте (Windows)
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

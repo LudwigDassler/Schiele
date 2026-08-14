@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { SonicTensor } from "@/lib/tensor";
-import { OverseerCore } from "@/core/overseer";
+import { OverseerCore } from "@/lib/overseer";
 
 const MAX_MUTATIONS = 5;
 

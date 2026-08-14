@@ -1,51 +1,113 @@
 import { NextResponse } from 'next/server';
+import { createClient } from '@supabase/supabase-js';
+import { OverseerCore } from '@/core/overseer';
 
-const SUPABASE_URL = "https://kefdjxsmyarwfqqkfgcx.supabase.co";
-const SUPABASE_KEY = "sb_publishable_DHa5G0bhPLWJWNrACLVEUw_2GZS4BMc";
+// Бронированная инициализация. Если в .env нет ключей, берем твои жесткие (хотя лучше прятать их в env).
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "https://kefdjxsmyarwfqqkfgcx.supabase.co";
+const SUPABASE_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "sb_publishable_DHa5G0bhPLWJWNrACLVEUw_2GZS4BMc";
 
+const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+
+// ==========================================
+// 1. ИЗВЛЕЧЕНИЕ (Твоя обновленная галерея)
+// ==========================================
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const category = searchParams.get('category') || 'all';
-  const limit = parseInt(searchParams.get('limit') || '30');
-  const page = parseInt(searchParams.get('page') || '1');
-  const offset = (page - 1) * limit;
+  const limit = parseInt(searchParams.get('limit') || '30', 10);
+  const page = parseInt(searchParams.get('page') || '1', 10);
+  
+  // Вычисляем диапазон для пагинации Supabase (вместо offset)
+  const from = (page - 1) * limit;
+  const to = from + limit - 1;
 
   try {
-    let url = SUPABASE_URL + '/rest/v1/images?select=*&limit=' + limit + '&offset=' + offset + '&order=created_at.desc';
+    let query = supabase
+      .from('images') // Твоя таблица
+      .select('*', { count: 'exact' })
+      .order('created_at', { ascending: false })
+      .range(from, to);
+
     if (category !== 'all') {
-      url = url + '&category=eq.' + category;
+      query = query.eq('category', category);
     }
 
-    const res = await fetch(url, {
-      headers: {
-        "apikey": SUPABASE_KEY,
-        "Authorization": "Bearer " + SUPABASE_KEY,
-      },
-    });
+    const { data, count, error } = await query;
 
-    if (!res.ok) throw new Error('Supabase error');
-    const data = await res.json();
+    if (error) throw error;
 
-    const photos = data.map((item: any) => ({
+    // Маппинг данных с защитой от пустых полей
+    const photos = (data || []).map((item: any) => ({
       id: item.id,
-      src: item.src,
-      thumb: item.src,
-      title: item.title || item.category,
-      author: item.author || 'Schiele',
+      src: item.src || item.image_url, 
+      thumb: item.src || item.image_url,
+      title: item.title || item.core_vibe || item.category || 'UNKNOWN ARTIFACT',
+      author: item.author || 'Schiele (Overseer)',
       authorAvatar: '',
-      
       link: '',
-      category: item.category,
+      category: item.category || 'synthesized',
+      math_constants: item.math_constants || null // Прокидываем математику на фронт
     }));
 
     return NextResponse.json({ 
       photos, 
-      source: 'schiele_db',
-      hasMore: data.length === limit,
-      total: data.length
+      source: 'schiele_db_v2',
+      hasMore: count ? (from + limit) < count : false,
+      total: count || 0
     });
-  } catch (error) {
-    console.error('Error fetching images:', error);
-    return NextResponse.json({ photos: [], error: 'Failed to fetch' }, { status: 500 });
+  } catch (error: any) {
+    console.error('[DB GET ERROR]:', error.message);
+    return NextResponse.json({ photos: [], error: 'Failed to fetch from matrix' }, { status: 500 });
+  }
+}
+
+// ==========================================
+// 2. ИНЪЕКЦИЯ (Сохранение артефакта + Обучение)
+// ==========================================
+export async function POST(req: Request) {
+  try {
+    const body = await req.json();
+    const { artifact, userId = "anon_user" } = body;
+
+    if (!artifact || (!artifact.generated_artifact && !artifact.src)) {
+      return NextResponse.json({ error: "Artifact data missing or corrupted" }, { status: 400 });
+    }
+
+    const imageUrl = artifact.generated_artifact || artifact.src;
+
+    // A. Физическое сохранение в таблицу
+    const { error } = await supabase.from('images').insert({
+      src: imageUrl,
+      title: artifact.core_vibe || "MUTATED ARTIFACT",
+      category: artifact.category || "synthesized",
+      author: userId,
+      core_vibe: artifact.core_vibe,
+      generation_prompt: artifact.generation_prompt,
+      math_constants: artifact.math_constants || {},
+    });
+    
+    if (error) {
+      console.error('[DB POST ERROR]:', error.message);
+      throw new Error("Failed to write artifact to remote database");
+    }
+
+    // B. Онтологическое обучение (Fire-and-forget)
+    // Запускаем асинхронно, чтобы не тормозить интерфейс пользователя
+    setTimeout(() => {
+      try {
+        const overseer = new OverseerCore();
+        overseer.assimilateArtifact(artifact);
+      } catch (memoryError) {
+        console.warn("[OVERSEER WARNING] Failed to assimilate artifact into local memory.", memoryError);
+      }
+    }, 0);
+
+    return NextResponse.json({ 
+      success: true, 
+      message: "Artifact stored physically and assimilated into Overseer memory." 
+    });
+
+  } catch (error: any) {
+    return NextResponse.json({ error: "Storage failure", details: error.message }, { status: 500 });
   }
 }

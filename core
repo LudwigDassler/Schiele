@@ -1,0 +1,107 @@
+// core/overseer.ts
+// Архитектура Надзирателя: Контроль, Валидация и Локальная Память
+
+import fs from 'fs';
+import path from 'path';
+
+// Кустарная, но надежная векторная память (JSON-лог успешных мутаций)
+const MEMORY_BANK_PATH = path.join(process.cwd(), 'core', 'neural_memory.json');
+
+export class OverseerCore {
+  private ollamaUrl: string;
+
+  constructor() {
+    this.ollamaUrl = process.env.OLLAMA_URL || 'http://localhost:11434';
+    this.initMemory();
+  }
+
+  private initMemory() {
+    if (!fs.existsSync(MEMORY_BANK_PATH)) {
+      fs.writeFileSync(MEMORY_BANK_PATH, JSON.stringify({ learned_patterns: [] }));
+    }
+  }
+
+  /**
+   * Функция кустарного обучения. 
+   * Вызывается, когда юзер жмет "STORE ARTIFACT". 
+   * Надзиратель запоминает математику и вайб, которые понравились юзеру.
+   */
+  public assimilateArtifact(artifact: any) {
+    const memory = JSON.parse(fs.readFileSync(MEMORY_BANK_PATH, 'utf-8'));
+    
+    // Запоминаем только суть: математику тензора и итоговый промпт
+    memory.learned_patterns.push({
+      vibe: artifact.core_vibe,
+      fractal_depth: artifact.math_constants?.fractal_depth || 1,
+      successful_prompt: artifact.generation_prompt
+    });
+
+    // Ограничиваем память последними 50 артефактами, чтобы не перегружать контекст
+    if (memory.learned_patterns.length > 50) memory.learned_patterns.shift();
+    
+    fs.writeFileSync(MEMORY_BANK_PATH, JSON.stringify(memory, null, 2));
+    console.log(`[OVERSEER] Artifact assimilated. Memory updated.`);
+  }
+
+  /**
+   * ГЛАВНЫЙ ЦИКЛ НАДЗОРА.
+   * Вызывается ПЕРЕД тем, как отдать результат микросервиса юзеру.
+   */
+  public async critiqueAndEnforce(draftResult: any): Promise<any> {
+    console.log(`[OVERSEER] Inspecting draft from microservice...`);
+    
+    const memory = JSON.parse(fs.readFileSync(MEMORY_BANK_PATH, 'utf-8'));
+    const pastLessons = memory.learned_patterns.slice(-3).map((p: any) => p.vibe).join(', ');
+
+    // Системный промпт для локальной Llama 3. Она выступает критиком.
+    const validationPrompt = `
+      Ты — Абсолютный Надзиратель эстетического реактора. Твоя задача — проверять работу подчиненных API-сервисов.
+      
+      ТЕКУЩИЙ ЧЕРНОВИК ОТ МИКРОСЕРВИСА:
+      - Vibe: ${draftResult.core_vibe}
+      - Prompt: ${draftResult.generation_prompt}
+      - T-Vector: ${draftResult.math_constants?.t_vector || 0}
+      
+      ИСТОРИЯ ОБУЧЕНИЯ (Что нравится пользователю): ${pastLessons || "Пока нет данных"}
+      
+      КРИТЕРИИ УСПЕХА:
+      1. Если T-Vector > 0.5, промпт ОБЯЗАН описывать слом четвертой стены, искажение перспективы и гипноз (манифест Джимми Пейджа).
+      2. Не должно быть банальных слов вроде "beautiful", "trending", "4k".
+      
+      ПРОАНАЛИЗИРУЙ ЧЕРНОВИК. Если он идеален, верни слово "APPROVED".
+      Если он слаб, ВЕРНИ ИСПРАВЛЕННЫЙ, БОЛЕЕ СИЛЬНЫЙ ПРОМПТ. Никакого лишнего текста. Только слово APPROVED или новый промпт.
+    `;
+
+    try {
+      const response = await fetch(`${this.ollamaUrl}/api/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'llama3',
+          prompt: validationPrompt,
+          stream: false,
+          temperature: 0.1 // Низкая температура для строгой логики
+        })
+      });
+
+      const result = await response.json();
+      const verdict = result.response.trim();
+
+      if (verdict.includes("APPROVED")) {
+        console.log(`[OVERSEER] Draft approved. Releasing to frontend.`);
+        return draftResult; // Пропускаем как есть
+      } else {
+        console.log(`[OVERSEER] Draft rejected. Enforcing mutation.`);
+        // Надзиратель переписывает работу микросервиса
+        return {
+          ...draftResult,
+          generation_prompt: verdict,
+          overseer_intervention: true // Пометка, что ядро вмешалось
+        };
+      }
+    } catch (e) {
+      console.warn(`[OVERSEER] Offline. Bypassing enforcement.`);
+      return draftResult;
+    }
+  }
+}

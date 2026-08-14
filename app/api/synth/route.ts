@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { SonicTensor, generateHeuristicsFromText } from "@/lib/tensor"; // <--- Подключаем наше математическое ядро
+import * as cheerio from "cheerio"; //
+import { SonicTensor, generateHeuristicsFromText } from "@/lib/tensor"; 
 
-// 1. Бронированная инициализация Supabase
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 const supabase = createClient(supabaseUrl, supabaseKey);
 
+const HYDRA_PROXY_URL = "https://kashmir-hydra.firsovivan2003.workers.dev"; //[cite: 1]
 const MAX_QUERY_LENGTH = 1000;
 
 function isValidHex(hex: string): boolean {
@@ -20,6 +21,10 @@ function cleanLLMJSON(text: string): string {
   if (cleaned.endsWith("```")) cleaned = cleaned.replace(/```$/, "");
   return cleaned.trim();
 }
+
+const safelyParseJson = (str: string) => { //[cite: 1]
+  try { return JSON.parse(str); } catch { return null; }
+};
 
 // ==========================================
 // ЯДРО 1.5: Акустический сканер (Last.fm)
@@ -46,33 +51,106 @@ async function fetchLastFMMetadata(query: string) {
 }
 
 // ==========================================
-// ЯДРО 2: The Harvester (Unsplash API)
+// ЯДРО 2: The Harvester (Wild Web Scraper через Гидра-прокси)
 // ==========================================
-async function fetchRealImages(searchQueries: string[]) {
-  const unsplashKey = process.env.NEXT_PUBLIC_UNSPLASH_ACCESS_KEY;
-  if (!unsplashKey || searchQueries.length === 0) return [];
+async function searchDuckDuckGo(query: string) { //[cite: 1]
+  const headers = { //[cite: 1]
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36", //[cite: 1]
+    "Accept-Language": "en-US,en;q=0.9", //[cite: 1]
+  };
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 10000);
 
   try {
-    const mainQuery = searchQueries[0]; 
-    const res = await fetch(`https://api.unsplash.com/search/photos?query=${encodeURIComponent(mainQuery)}&per_page=12&orientation=portrait`, {
-      headers: { "Authorization": `Client-ID ${unsplashKey}` }
-    });
+    const tokenTargetUrl = `https://duckduckgo.com/?q=${encodeURIComponent(query)}`; //[cite: 1]
+    const tokenProxyUrl = `${HYDRA_PROXY_URL}/?url=${encodeURIComponent(tokenTargetUrl)}`; //[cite: 1]
+    const tokenRes = await fetch(tokenProxyUrl, { headers, cache: "no-store", signal: controller.signal }); //[cite: 1]
+    if (!tokenRes.ok) throw new Error("Hydra Proxy (Token) error");
 
-    if (!res.ok) throw new Error("Unsplash rejected request");
-    const data = await res.json();
-    
-    return data.results.map((img: any) => ({
-      id: img.id,
-      src: img.urls.regular,
-      thumb: img.urls.small,
-      title: img.alt_description || mainQuery,
-      link: img.links.html,
-      source: "unsplash"
-    }));
-  } catch (e) {
-    console.error("Harvester Error:", e);
+    const html = await tokenRes.text();
+    const vqdMatch = html.match(/vqd=["'](.*?)["']/); //[cite: 1]
+    if (!vqdMatch) throw new Error("DDG vqd token missing"); //[cite: 1]
+    const vqd = vqdMatch[1]; //[cite: 1]
+
+    const imgTargetUrl = `https://duckduckgo.com/i.js?l=us-en&o=json&q=${encodeURIComponent(query)}&vqd=${vqd}&f=,,,,&s=0`; //[cite: 1]
+    const imgProxyUrl = `${HYDRA_PROXY_URL}/?url=${encodeURIComponent(imgTargetUrl)}`; //[cite: 1]
+
+    const imgRes = await fetch(imgProxyUrl, { headers, cache: "no-store", signal: controller.signal }); //[cite: 1]
+    const data = await imgRes.json();
+    clearTimeout(timeoutId);
+
+    if (!data.results || data.results.length === 0) return []; //[cite: 1]
+
+    return data.results.map((r: any, index: number) => ({ //[cite: 1]
+      id: `ddg-synth-${Date.now()}-${index}`, //[cite: 1]
+      src: r.image, //[cite: 1]
+      thumb: r.thumbnail, //[cite: 1]
+      title: r.title, //[cite: 1]
+      link: r.url, //[cite: 1]
+      source: "duckduckgo"
+    })).slice(0, 12);
+  } catch (error) {
+    clearTimeout(timeoutId);
     return [];
   }
+}
+
+async function searchBing(query: string) { //[cite: 1]
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+  try {
+    const targetUrl = `https://www.bing.com/images/search?q=${encodeURIComponent(query)}&setmkt=en-US&setlang=en-US&form=HDRSC2&first=1`; //[cite: 1]
+    const proxyUrl = `${HYDRA_PROXY_URL}/?url=${encodeURIComponent(targetUrl)}`; //[cite: 1]
+
+    const response = await fetch(proxyUrl, { //[cite: 1]
+      cache: "no-store", //[cite: 1]
+      headers: { //[cite: 1]
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36", //[cite: 1]
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8" //[cite: 1]
+      },
+      signal: controller.signal
+    });
+    clearTimeout(timeoutId);
+
+    const html = await response.text();
+    const $ = cheerio.load(html); //[cite: 1]
+    const visualArtifacts: any[] = [];
+
+    $("a.iusc").each((index, element) => { //[cite: 1]
+      const mData = $(element).attr("m"); //[cite: 1]
+      if (mData) {
+        const artifact = safelyParseJson(mData); //[cite: 1]
+        if (artifact && artifact.murl) { //[cite: 1]
+          visualArtifacts.push({
+            id: `bing-synth-${Date.now()}-${index}`, //[cite: 1]
+            src: artifact.murl, //[cite: 1]
+            thumb: artifact.turl || artifact.murl, //[cite: 1]
+            title: artifact.t || query, //[cite: 1]
+            link: artifact.purl || "", //[cite: 1]
+            source: "bing"
+          });
+        }
+      }
+    });
+
+    return visualArtifacts.filter(a => a.src && a.src.startsWith("http")).slice(0, 12); //[cite: 1]
+  } catch (error) {
+    clearTimeout(timeoutId);
+    return [];
+  }
+}
+
+async function fetchWildImages(searchQueries: string[]) {
+  if (searchQueries.length === 0) return [];
+  const mainQuery = searchQueries[0]; 
+  
+  // Каскадный поиск из твоего старого механизма: сначала DDG, если глухо — Bing
+  let artifacts = await searchDuckDuckGo(mainQuery);
+  if (artifacts.length === 0) {
+    artifacts = await searchBing(mainQuery);
+  }
+  return artifacts;
 }
 
 // ==========================================
@@ -136,7 +214,7 @@ export async function POST(req: Request) {
     // Проверка кэша Supabase
     if (!ignore_cache && supabaseUrl) {
       try {
-        const { data: cached } = await supabase.from("search_cache").select("results").eq("query_key", cacheKey).maybeSingle();
+        const { data: cached } = await supabase.from("search_cache").select("results").eq("query_key", cacheKey).maybeSingle(); //[cite: 1]
         if (cached && cached.results) return NextResponse.json({ source: "cache", data: cached.results });
       } catch (e) {}
     }
@@ -168,14 +246,14 @@ export async function POST(req: Request) {
       - Вектор Трансцендентности (T-Vector): ${tVector}
       
       ДИРЕКТИВА ПРОРЫВА (THE PAGE GESTURE):
-      Если T-Vector > 0.2, твой визуальный промпт должен ломать четвертую стену. Изображение должно взаимодействовать со зрителем (экстремальный ракурс, искажение перспективы, объект/свет, тянущийся за пределы кадра, гипнотический контакт). Зритель должен чувствовать приглашение в неизведанное.
+      Если T-Vector > 0.2, твой визуальный промпт должен ломать четвертую стену. Изображение должно взаимодействовать со зрителем (экстремальный ракурс, искажение перспективы, объект/свет, тянущийся за пределы кадра, гипнотический контакт).
       
       ТВОЯ ЗАДАЧА:
       Переведи этот контекст в строгий JSON:
       {
         "core_vibe": "1-3 uppercase words (e.g. 'TRANSCENDENTAL RESONANCE')",
         "sonic_analysis": "1-sentence philosophical/visual breakdown based on the fractal depth.",
-        "search_queries": ["3 distinct English search terms for Unsplash"],
+        "search_queries": ["1 optimal English search query optimized for DuckDuckGo image search to fetch raw aesthetic photography"],
         "color_palette": ["${coreHex}", "#HEX2", "#HEX3", "#HEX4", "#HEX5"],
         "generation_prompt": "Cinematic prompt for AI image generation (Midjourney style). Strictly follow the Transcendence Directive."
       }
@@ -188,22 +266,22 @@ export async function POST(req: Request) {
     try { rawSynthData = await callGroqJSON(systemPrompt, fullContextInput); } 
     catch (err: any) { rawSynthData = {}; }
 
-    // Валидация цветов и принудительное сохранение математического ядра
+    // Валидация цветов
     const validColors = Array.isArray(rawSynthData.color_palette) ? rawSynthData.color_palette.filter(isValidHex) : [];
-    if (validColors[0] !== coreHex) validColors.unshift(coreHex); // Гарантируем, что цвет тензора будет главным
+    if (validColors[0] !== coreHex) validColors.unshift(coreHex); 
     const fallbackPalette = ["#0A0A0C", "#1A1821", "#d4b896", "#4A3B52"];
     while (validColors.length < 5) validColors.push(fallbackPalette[validColors.length - 1] || "#FFFFFF");
 
     const searchQueries = Array.isArray(rawSynthData.search_queries) && rawSynthData.search_queries.length > 0
-        ? rawSynthData.search_queries.slice(0, 3)
-        : [safeQuery, `${safeQuery} aesthetic`];
+        ? rawSynthData.search_queries
+        : [safeQuery];
 
     const genPrompt = rawSynthData.generation_prompt || `Cinematic visual representation of ${safeQuery}, transcendence vector active`;
     
-    // ПАРАЛЛЕЛЬНО ГРУЗИМ НЕЙРО-АРТ И РЕАЛЬНЫЕ ФОТКИ С UNSPLASH
+    // ПАРАЛЛЕЛЬНО ГРУЗИМ НЕЙРО-АРТ И ФОТКИ С ДИКОГО ИНТЕРНЕТА ЧЕРЕЗ HYDRA
     const [generatedArtUrl, realImages] = await Promise.all([
       generate_art ? generateAIImageUrl(genPrompt) : Promise.resolve(null),
-      fetchRealImages(searchQueries)
+      fetchWildImages(searchQueries)
     ]);
 
     const finalResult = {
@@ -214,20 +292,20 @@ export async function POST(req: Request) {
       color_palette: validColors.slice(0, 5),
       generation_prompt: genPrompt,
       generated_artifact: generatedArtUrl,
-      fetched_images: realImages,
-      math_constants: { fractal_depth: fractalDepth, t_vector: tVector }, // Отдаем цифры на фронт для логов
+      fetched_images: realImages, // Теперь здесь сырые данные с DDG/Bing
+      math_constants: { fractal_depth: fractalDepth, t_vector: tVector },
       timestamp: new Date().toISOString()
     };
 
     // Сохранение в кэш Supabase
     if (supabaseUrl) {
       try {
-        await supabase.from("search_cache").upsert({
+        await supabase.from("search_cache").upsert({ //[cite: 1]
           query_key: cacheKey,
           results: finalResult,
-          created_at: new Date().toISOString()
+          created_at: new Date().toISOString() //[cite: 1]
         }, { onConflict: "query_key" });
-      } catch (dbErr) { console.error("Cache write error:", dbErr); }
+      } catch (dbErr) {}
     }
 
     return NextResponse.json({ source: "synth_engine", data: finalResult });

@@ -1,9 +1,7 @@
-version: '3.8'
-
 services:
-  # Локальный нейро-мозг (Ollama). Полностью автономная LLM.
   neural_core:
-    image: ollama/ollama:latest
+    # Используем открытое зеркало для скачивания Ollama
+    image: dockerhub.timeweb.cloud/ollama/ollama:latest
     container_name: schiele_ollama
     ports:
       - "11434:11434"
@@ -11,9 +9,9 @@ services:
       - ollama_memory:/root/.ollama
     restart: unless-stopped
 
-  # Твой локальный сервер для Надзирателя
   overseer_node:
-    image: node:20-alpine
+    # Используем открытое зеркало для скачивания Node.js
+    image: dockerhub.timeweb.cloud/library/node:20-alpine
     container_name: schiele_overseer
     working_dir: /usr/src/app
     volumes:

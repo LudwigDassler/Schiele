@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { OverseerCore } from '@/core/overseer';
+import { OverseerCore } from "@/lib/overseer";
 
 // Бронированная инициализация. Если в .env нет ключей, берем твои жесткие (хотя лучше прятать их в env).
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "https://kefdjxsmyarwfqqkfgcx.supabase.co";

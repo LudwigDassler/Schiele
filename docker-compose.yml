@@ -10,11 +10,10 @@ services:
       - /app/node_modules
     ports:
       - "3000:3000"
-    # Команда для запуска режима разработки (измени под свой package.json, если нужно, например: npm start)
     command: npm run dev
     environment:
       - NODE_ENV=development
+      # Этот мост заставляет Node.js стучаться из контейнера наружу к твоей Windows, где сидит Llama
       - OLLAMA_HOST=http://host.docker.internal:11434
-    # Гарантирует, что контейнер сможет достучаться до Ollama на хосте (Windows)
     extra_hosts:
       - "host.docker.internal:host-gateway"

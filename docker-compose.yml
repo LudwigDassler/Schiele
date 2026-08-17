@@ -13,7 +13,6 @@ services:
     command: npm run dev
     environment:
       - NODE_ENV=development
-      # Этот мост заставляет Node.js стучаться из контейнера наружу к твоей Windows, где сидит Llama
       - OLLAMA_HOST=http://host.docker.internal:11434
     extra_hosts:
       - "host.docker.internal:host-gateway"

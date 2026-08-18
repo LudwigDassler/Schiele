@@ -120,4 +120,4 @@ export class Overseer {
   }
 }
 
-export const overseer = new Overseer();
+export { Overseer as OverseerCore };

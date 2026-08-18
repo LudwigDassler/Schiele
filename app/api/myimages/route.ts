@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { OverseerCore } from "@/lib/overseer";
 
 // Инициализация клиента Supabase через переменные окружения
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -95,20 +94,9 @@ export async function POST(req: Request) {
       throw new Error("Failed to write artifact to remote database");
     }
 
-    // B. Онтологическое обучение (Fire-and-forget)
-    // Запускаем асинхронно, чтобы не тормозить интерфейс пользователя
-    setTimeout(() => {
-      try {
-        const overseer = new OverseerCore();
-        overseer.assimilateArtifact(artifact);
-      } catch (memoryError) {
-        console.warn("[OVERSEER WARNING] Failed to assimilate artifact into local memory.", memoryError);
-      }
-    }, 0);
-
     return NextResponse.json({ 
       success: true, 
-      message: "Artifact stored physically and assimilated into Overseer memory." 
+      message: "Artifact stored physically in remote database." 
     });
 
   } catch (error: any) {

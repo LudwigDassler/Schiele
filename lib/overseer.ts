@@ -1,105 +1,123 @@
-// lib/overseer.ts
-import fs from 'fs';
-import path from 'path';
+import { supabase } from '@/lib/supabase';
 
-// Память Надзирателя
-const MEMORY_BANK_PATH = path.join(process.cwd(), 'lib', 'neural_memory.json');
-
-export class OverseerCore {
-  private ollamaUrl: string;
-
-  constructor() {
-    this.ollamaUrl = process.env.OLLAMA_URL || 'http://localhost:11434';
-    this.initMemory();
+// Улучшенная утилита для очистки JSON от маркдауна и мусора
+function cleanLLMJSON(text: string): string {
+  if (!text) return "{}";
+  
+  let cleaned = text.trim();
+  
+  // Удаляем блоки кода с любым языком (json, js, etc.)
+  cleaned = cleaned.replace(/^```(?:json|js|typescript)?\s*/, "");
+  cleaned = cleaned.replace(/```$/, "");
+  
+  // Пытаемся найти первую '{' и последнюю '}', если есть лишний текст
+  const firstBrace = cleaned.indexOf('{');
+  const lastBrace = cleaned.lastIndexOf('}');
+  
+  if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+    return cleaned.substring(firstBrace, lastBrace + 1);
   }
+  
+  return cleaned.trim() || "{}";
+}
 
-  private initMemory() {
-    if (!fs.existsSync(MEMORY_BANK_PATH)) {
-      try {
-        fs.writeFileSync(MEMORY_BANK_PATH, JSON.stringify({ learned_patterns: [] }));
-      } catch (e) {
-        console.warn("[OVERSEER] Cannot create local memory bank. Running in volatile mode.");
-      }
-    }
-  }
+export class Overseer {
+  private readonly timeoutMs = 5000; // Таймаут 5 секунд, чтобы не висло
 
-  public assimilateArtifact(artifact: any) {
-    try {
-      if (!fs.existsSync(MEMORY_BANK_PATH)) return;
-      const memory = JSON.parse(fs.readFileSync(MEMORY_BANK_PATH, 'utf-8'));
-      
-      memory.learned_patterns.push({
-        vibe: artifact.core_vibe,
-        fractal_depth: artifact.math_constants?.fractal_depth || 1,
-        successful_prompt: artifact.generation_prompt
-      });
+  async evaluateAndMutate(draftResult: any, trackContext: string) {
+    const apiKey = process.env.GROQ_API_KEY;
+    const model = process.env.GROQ_MODEL || "llama-3.1-70b-versatile"; // Дефолт на более мощную Llama
 
-      if (memory.learned_patterns.length > 50) memory.learned_patterns.shift();
-      fs.writeFileSync(MEMORY_BANK_PATH, JSON.stringify(memory, null, 2));
-      console.log(`[OVERSEER] Artifact assimilated.`);
-    } catch (e) {
-      console.warn(`[OVERSEER] Memory assimilation failed:`, e);
-    }
-  }
-
-  public async critiqueAndEnforce(draftResult: any): Promise<any> {
-    console.log(`[OVERSEER] Inspecting draft from microservice...`);
-    
-    let pastLessons = "";
-    try {
-      if (fs.existsSync(MEMORY_BANK_PATH)) {
-        const memory = JSON.parse(fs.readFileSync(MEMORY_BANK_PATH, 'utf-8'));
-        pastLessons = memory.learned_patterns.slice(-3).map((p: any) => p.vibe).join(', ');
-      }
-    } catch (e) {
-      pastLessons = "Memory unavailable";
+    if (!apiKey) {
+      console.warn("Overseer: GROQ_API_KEY missing. Returning draft as-is.");
+      return draftResult; 
     }
 
-    const validationPrompt = `
-      Ты — Абсолютный Надзиратель эстетического реактора. Проверь черновик.
-      Vibe: ${draftResult.core_vibe}
-      Prompt: ${draftResult.generation_prompt}
-      T-Vector: ${draftResult.math_constants?.t_vector || 0}
-      
-      ИСТОРИЯ ОБУЧЕНИЯ: ${pastLessons}
-      
-      КРИТЕРИИ УСПЕХА:
-      1. Если T-Vector > 0.5, промпт ОБЯЗАН ломать четвертую стену и искажать перспективу.
-      2. Никаких слов "beautiful", "trending", "4k".
-      
-      Если промпт идеален, верни слово "APPROVED".
-      Если слаб, ВЕРНИ НОВЫЙ, СИЛЬНЫЙ ПРОМПТ. Только текст промпта или слово APPROVED.
-    `;
-
     try {
-      const response = await fetch(`${this.ollamaUrl}/api/generate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      // 1. Получаем контекст памяти (быстро и только нужные поля)
+      const { data: memory, error: memError } = await supabase
+        .from('synth_memory')
+        .select('track_title, visual_style, dominant_color, psychological_insight')
+        .eq('is_curated', true)
+        .order('created_at', { ascending: false })
+        .limit(3);
+
+      if (memError) console.warn("Overseer: Failed to load memory", memError);
+
+      const memoryContext = memory && memory.length > 0 
+        ? `Опирайся на прошлые эталонные разборы:\n${memory.map(m => `- "${m.track_title}": стиль "${m.visual_style}", цвет ${m.dominant_color}. Инсайт: "${m.psychological_insight}"`).join('\n')}`
+        : 'У тебя пока нет долгосрочной памяти. Опираться только на глубокий анализ текущего запроса.';
+
+      // 2. Формируем промпт
+      const prompt = `Ты — Надзиратель (Overseer), элитный ИИ-критик системы Aesthetic Nexus.
+      Твоя задача: улучшить черновик синестезии, сделав инсайт глубже, палитру сложнее, а стиль точнее.
+      
+      ${memoryContext}
+      
+      Текущий черновик для запроса "${trackContext}":
+      ${JSON.stringify(draftResult)}
+      
+      Верни ТОЛЬКО валидный JSON в точно таком же формате, как входной черновик. Никаких пояснений, никакого текста вне JSON.`;
+
+      // 3. Настройка запроса с таймаутом
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), this.timeoutMs);
+
+      const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${apiKey}`,
+          "Content-Type": "application/json"
+        },
         body: JSON.stringify({
-          model: 'llama3',
-          prompt: validationPrompt,
-          stream: false,
-          temperature: 0.1
-        })
+          model: model,
+          messages: [
+            { role: "system", content: "You are a strict JSON generator. Output ONLY valid JSON." },
+            { role: "user", content: prompt }
+          ],
+          response_format: { type: "json_object" },
+          temperature: 0.4, // Чуть ниже для стабильности формата
+          max_tokens: 1024
+        }),
+        signal: controller.signal
       });
 
-      const result = await response.json();
-      const verdict = result.response.trim();
+      clearTimeout(timeoutId);
 
-      if (verdict.includes("APPROVED")) {
-        console.log(`[OVERSEER] Draft approved.`);
-        return draftResult;
-      } else {
-        console.log(`[OVERSEER] Draft rejected. Enforcing mutation.`);
-        return {
-          ...draftResult,
-          generation_prompt: verdict,
-          overseer_intervention: true
-        };
+      if (!groqRes.ok) {
+        if (groqRes.status === 429) {
+           console.warn("Overseer: Rate limit hit. Skipping mutation.");
+           return draftResult;
+        }
+        throw new Error(`Groq API error: ${groqRes.statusText}`);
       }
-    } catch (e) {
-      console.warn(`[OVERSEER] Offline or unreachable. Bypassing enforcement.`);
-      return draftResult;
+
+      const data = await groqRes.json();
+      const rawContent = data.choices?.[0]?.message?.content;
+
+      if (!rawContent) return draftResult;
+
+      // 4. Безопасный парсинг
+      const cleanedJson = cleanLLMJSON(rawContent);
+      try {
+        const mutatedResult = JSON.parse(cleanedJson);
+        // Простая валидация: если ключей нет, возвращаем черновик
+        if (Object.keys(mutatedResult).length === 0) return draftResult;
+        return mutatedResult;
+      } catch (parseError) {
+        console.error("Overseer: Failed to parse LLM JSON response", parseError);
+        return draftResult;
+      }
+
+    } catch (error: any) {
+      if (error.name === 'AbortError') {
+        console.warn("Overseer: Request timed out. Returning draft.");
+      } else {
+        console.error("Overseer Critical Error:", error);
+      }
+      return draftResult; 
     }
   }
 }
+
+export const overseer = new Overseer();

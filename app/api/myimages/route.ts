@@ -2,11 +2,15 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { OverseerCore } from "@/lib/overseer";
 
-// Бронированная инициализация. Если в .env нет ключей, берем твои жесткие (хотя лучше прятать их в env).
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "https://kefdjxsmyarwfqqkfgcx.supabase.co";
-const SUPABASE_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "sb_publishable_DHa5G0bhPLWJWNrACLVEUw_2GZS4BMc";
+// Инициализация клиента Supabase через переменные окружения
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const SUPABASE_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+if (!SUPABASE_URL || !SUPABASE_KEY) {
+  console.error('[CRITICAL] Missing Supabase credentials in environment variables');
+}
+
+const supabase = createClient(SUPABASE_URL || '', SUPABASE_KEY || '');
 
 // ==========================================
 // 1. ИЗВЛЕЧЕНИЕ (Твоя обновленная галерея)

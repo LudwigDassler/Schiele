@@ -35,11 +35,20 @@ export async function analyzeImageWithNvidia(imageUrl: string): Promise<VisualAn
     CRITICAL INSTRUCTIONS:
     1. TEXT DETECTION: If the image contains ANY text (band names, album titles, slogans), you MUST extract it accurately into 'text_content' and set 'contains_text' to true.
     2. STYLE & MOOD: Define the artistic style and emotional mood.
-    3. COLORS: Extract top 3-5 dominant hex colors.
-    4. TAGS: Generate keywords including extracted text, genre, era.
+    3. COLORS: Extract the top 3-5 dominant hex colors.
+    4. TAGS: Generate keywords including extracted text, genre, era, and visual elements.
 
-    Return ONLY valid JSON. No markdown.
-    Structure: { "description": "...", "tags": [], "colors": [], "style": "...", "mood": "...", "contains_text": bool, "text_content": "..." }`;
+    Return ONLY a valid JSON object. No markdown.
+    Structure:
+    {
+      "description": "Detailed description",
+      "tags": ["keywords"],
+      "colors": ["#HEX1", "#HEX2"],
+      "style": "Style Name",
+      "mood": "Mood Name",
+      "contains_text": true/false,
+      "text_content": "Exact text or null"
+    }`;
 
     const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
@@ -51,24 +60,26 @@ export async function analyzeImageWithNvidia(imageUrl: string): Promise<VisualAn
       },
       body: JSON.stringify({
         model: model,
-        messages: [
-          {
-            role: "user",
-            content: [
-              { type: "text", text: prompt },
-              { type: "image_url", image_url: { url: imageUrl } }
-            ]
-          }
-        ],
+        messages: [{
+          role: "user",
+          content: [
+            { type: "text", text: prompt },
+            { type: "image_url", image_url: { url: imageUrl } }
+          ]
+        }],
         response_format: { type: "json_object" },
         max_tokens: 1000
       })
     });
 
-    if (!response.ok) throw new Error(`OpenRouter Error: ${response.statusText}`);
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error("[Vision] OpenRouter API Error:", response.status, errorText);
+      return null;
+    }
 
     const data = await response.json();
-    let rawContent = data.choices?.[0]?.message?.content;
+    const rawContent = data.choices?.[0]?.message?.content;
     if (!rawContent) return null;
 
     let cleanJson = rawContent.trim();
@@ -89,7 +100,7 @@ export async function saveVisualAnalysis(imageId: string | number, analysis: Vis
       ? [analysis.text_content.toLowerCase(), ...analysis.tags]
       : analysis.tags;
 
-    await supabase
+    const { error } = await supabase
       .from('images')
       .update({
         visual_tags: enrichedTags,
@@ -98,9 +109,10 @@ export async function saveVisualAnalysis(imageId: string | number, analysis: Vis
         core_vibe: analysis.style
       })
       .eq('id', imageId);
-      
+
+    if (error) throw error;
     console.log(`[Vision] Saved analysis for image ${imageId}`);
   } catch (error) {
-    console.error("[Vision] Save failed:", error);
+    console.error("[Vision] Failed to save analysis:", error);
   }
 }

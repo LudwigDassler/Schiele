@@ -1,11 +1,11 @@
 import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
+import { analyzeImageWithNvidia } from '@/lib/vision-analyzer';
 
 // Утилита для безопасной очистки JSON от маркдауна
 function cleanLLMJSON(text: string): string {
   if (!text) return "{}";
   let cleaned = text.trim();
-  // Удаляем обертки ```json ... ``` или ``` ... ```
   cleaned = cleaned.replace(/^```(json)?\s*/, "").replace(/```$/, "").trim();
   return cleaned;
 }
@@ -56,6 +56,37 @@ export async function POST(req: Request) {
     const body = await req.json();
 
     // ==========================================
+    // ВЕТКА 3: ВИЗУАЛЬНАЯ МУТАЦИЯ (Nvidia Vision)
+    // ==========================================
+    if (body.image_url) {
+      console.log(`[MUTATE] Sending artifact to Nvidia: ${body.image_url}`);
+
+      const analysis = await analyzeImageWithNvidia(body.image_url);
+
+      if (!analysis) {
+        throw new Error("Nvidia vision analysis failed or returned null.");
+      }
+
+      // Нейронка сама формирует идеальный запрос для парсера
+      let smartQuery = "";
+      if (analysis.contains_text && analysis.text_content) {
+        // Если есть текст (например, "Pink Floyd"), ставим его во главу угла
+        smartQuery = `${analysis.text_content} ${analysis.style} poster vintage`;
+      } else {
+         // Иначе опираемся на настроение и стиль
+        smartQuery = `${analysis.mood} ${analysis.style} ${analysis.colors?.[0] || ''} aesthetic art`;
+      }
+
+      console.log(`[MUTATE] Nvidia generated smart query: "${smartQuery}"`);
+
+      return NextResponse.json({ 
+        success: true, 
+        smartQuery: smartQuery,
+        raw_analysis: analysis
+      });
+    }
+
+    // ==========================================
     // ВЕТКА 1: НОВЫЙ ФОРМАТ (Mutation Chamber)
     // ==========================================
     if (body.memory_id) {
@@ -102,7 +133,6 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Invalid payload format." }, { status: 400 });
 
   } catch (error: any) {
-    // Не возвращаем детали ошибки клиенту (безопасность)
     console.error("API Route Critical Error:", error);
     return NextResponse.json(
       { error: "Internal Server Error", details: process.env.NODE_ENV === 'development' ? error.message : undefined }, 

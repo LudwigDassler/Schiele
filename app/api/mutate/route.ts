@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
 import { analyzeImageWithNvidia } from '@/lib/vision-analyzer';
 
-// Утилита для безопасной очистки JSON от маркдауна
+// Утилита для безопасной очистки JSON
 function cleanLLMJSON(text: string): string {
   if (!text) return "{}";
   let cleaned = text.trim();
@@ -10,21 +10,22 @@ function cleanLLMJSON(text: string): string {
   return cleaned;
 }
 
-// Единая функция вызова Groq с таймаутом и обработкой ошибок
-async function callGroq(prompt: string) {
+// 🔥 Единая функция вызова LLM (ТЕПЕРЬ ЧЕРЕЗ OPENROUTER, БЕЗ GROQ)
+async function callBrain(prompt: string) {
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 20000); // Даем 20 секунд (защита от холодных стартов)
+  const timeoutId = setTimeout(() => controller.abort(), 20000); // 20 секунд таймаут
 
   try {
-    const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
       headers: {
-        "Authorization": `Bearer ${process.env.GROQ_API_KEY}`,
+        // Берем тот же ключ, что у Nvidia. Больше никаких Groq-ключей!
+        "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        // 🔥 ИСПРАВЛЕНИЕ: Жестко ставим надежный mixtral как дефолт
-        model: process.env.GROQ_MODEL || "mixtral-8x7b-32768",
+        // Надежная, быстрая и стабильная Llama 3.1
+        model: "meta-llama/llama-3.1-8b-instruct",
         messages: [{ role: "user", content: prompt }],
         response_format: { type: "json_object" },
         temperature: 0.9
@@ -36,7 +37,7 @@ async function callGroq(prompt: string) {
 
     if (!res.ok) {
       const errText = await res.text().catch(() => "Unknown error");
-      throw new Error(`Groq API Error: ${res.status} ${errText}`);
+      throw new Error(`OpenRouter API Error: ${res.status} ${errText}`);
     }
 
     const data = await res.json();
@@ -47,7 +48,7 @@ async function callGroq(prompt: string) {
     if (error.name === 'AbortError') {
       throw new Error("AI request timed out (20s limit)");
     }
-    console.error("Groq Internal Error:", error.message);
+    console.error("OpenRouter Internal Error:", error.message);
     throw error;
   }
 }
@@ -57,7 +58,7 @@ export async function POST(req: Request) {
     const body = await req.json();
 
     // ==========================================
-    // ВЕТКА 3: ВИЗУАЛЬНАЯ МУТАЦИЯ (Nvidia + Groq)
+    // ВЕТКА 3: ВИЗУАЛЬНАЯ МУТАЦИЯ (Nvidia + Llama через OpenRouter)
     // ==========================================
     if (body.image_url) {
       console.log(`[MUTATE] Step 1: Nvidia scanning artifact: ${body.image_url}`);
@@ -77,9 +78,9 @@ export async function POST(req: Request) {
         };
       }
 
-      console.log(`[MUTATE] Step 2: Groq translating facts... History length:`, Array.isArray(body.history) ? body.history.length : 0);
+      console.log(`[MUTATE] Step 2: OpenRouter Llama translating facts... History length:`, Array.isArray(body.history) ? body.history.length : 0);
 
-      // 2. Мозг: Groq осмысляет факты, учитывает контекст и историю
+      // 2. Мозг: Llama осмысляет факты
       const historyText = Array.isArray(body.history) && body.history.length > 0 
         ? `\nПРЕДЫДУЩИЕ ВАЙБЫ (КАТЕГОРИЧЕСКИ НЕ ПОВТОРЯЙ ИХ, ищи новые ассоциации): ${JSON.stringify(body.history)}` 
         : "";
@@ -98,9 +99,8 @@ export async function POST(req: Request) {
         Формат ответа СТРОГО JSON: {"searchQuery": "...", "displayVibe": "..."}
       `;
 
-      const curated = await callGroq(prompt);
+      const curated = await callBrain(prompt);
 
-      // БРОНЯ: Фолбэки
       const finalSearchQuery = curated.searchQuery || curated.query || `${analysis.mood} ${analysis.style} art`;
       const finalDisplayVibe = curated.displayVibe || curated.vibe || "NEW RESONANCE";
 
@@ -129,7 +129,7 @@ export async function POST(req: Request) {
 
       if (mutate_direction && current_palette) {
         const systemPrompt = `Ты — колорист-мутатор Aesthetic Nexus. Текущая палитра: ${JSON.stringify(current_palette)}. Смести эту палитру в сторону направления: "${mutate_direction}". Верни СТРОГО JSON: { "dominant": "#HEX", "accent": "#HEX", "ambient_fog": "#HEX", "style_shift": "описание" }`;
-        const mutated = await callGroq(systemPrompt);
+        const mutated = await callBrain(systemPrompt);
         return NextResponse.json({ mutated });
       }
 
@@ -141,7 +141,7 @@ export async function POST(req: Request) {
     // ==========================================
     if (body.concept) {
       const systemPrompt = `Ты креативный генератор идей. Концепт: "${body.concept}". Предложи 3 новых вектора. Ответь СТРОГО в JSON: { "mutations": ["вектор 1", "вектор 2", "вектор 3"] }`;
-      const result = await callGroq(systemPrompt);
+      const result = await callBrain(systemPrompt);
       return NextResponse.json(result);
     }
 

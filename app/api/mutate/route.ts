@@ -23,7 +23,8 @@ async function callGroq(prompt: string) {
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        model: process.env.GROQ_MODEL || "llama-3.3-70b-versatile",
+        // 🔥 ИСПРАВЛЕНИЕ: Жестко прописываем новую модель, игнорируя старые настройки Render
+        model: "llama-3.3-70b-versatile",
         messages: [{ role: "user", content: prompt }],
         response_format: { type: "json_object" },
         temperature: 0.9
@@ -64,7 +65,6 @@ export async function POST(req: Request) {
       // 1. Глаза: Nvidia собирает сырые факты
       let analysis = await analyzeImageWithNvidia(body.image_url);
 
-      // 🔥 ИСПРАВЛЕНИЕ: Добавили missing properties (description, tags), чтобы TypeScript был доволен
       if (!analysis) {
         console.warn("[MUTATE] Warning: Nvidia analysis failed (bad JSON). Using fallback aesthetics.");
         analysis = {

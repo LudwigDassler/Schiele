@@ -1,34 +1,63 @@
 import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
-import { analyzeImageWithNvidia } from '@/lib/vision-analyzer';
 
 // Утилита для безопасной очистки JSON
 function cleanLLMJSON(text: string): string {
   if (!text) return "{}";
   let cleaned = text.trim();
   cleaned = cleaned.replace(/^```(json)?\s*/, "").replace(/```$/, "").trim();
+  
+  // Дополнительная чистка на случай, если бесплатная модель добавит текст до/после JSON
+  const jsonStart = cleaned.indexOf('{');
+  const jsonEnd = cleaned.lastIndexOf('}');
+  if (jsonStart !== -1 && jsonEnd !== -1) {
+    cleaned = cleaned.substring(jsonStart, jsonEnd + 1);
+  }
+  
   return cleaned;
 }
 
-// 🔥 Единая функция вызова LLM (ТЕПЕРЬ ЧЕРЕЗ OPENROUTER, БЕЗ GROQ)
-async function callBrain(prompt: string) {
+// 🔥 ЕДИНЫЙ УМНЫЙ МОЗГ (БЕСПЛАТНЫЙ): Зрение и логика в одном запросе
+async function callSmartVisionBrain(imageUrl: string, historyText: string) {
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 20000); // 20 секунд таймаут
+  const timeoutId = setTimeout(() => controller.abort(), 20000); // 20 секунд
+
+  const prompt = `
+    Ты — элитный арт-директор, историк искусств и куратор приложения Schiele.
+    Внимательно посмотри на прикрепленное изображение и выдай концепт.
+
+    ЖЕСТКИЕ ПРАВИЛА:
+    1. УЗНАВАЙ КОНТЕКСТ: Если на фото известный человек (например, Оппенгеймер, Джимми Пейдж), историческая эпоха или конкретный стиль — ИСПОЛЬЗУЙ ЭТО. Никакой абстрактной воды вроде "Whispers of the unknown".
+    2. ФАКТУРА: Вайб должен быть материальным и точным. Пример: для старого фото ученого с сигаретой — "Atomic Era Noir" или "Mid-Century Intellectual".
+    3. ИСТОРИЯ: Учитывай предыдущие мутации и не повторяйся: ${historyText}
+
+    Сгенерируй СТРОГО JSON (без маркдауна и лишних слов) с двумя полями:
+    1. "searchQuery": точный запрос для поиска картинок (4-6 слов). Например: "1940s scientist vintage portrait photography".
+    2. "displayVibe": эстетичное, хлесткое название вайба для интерфейса (2-4 слова, на английском).
+
+    Формат ответа СТРОГО: {"searchQuery": "...", "displayVibe": "..."}
+  `;
 
   try {
     const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
       headers: {
-        // Берем тот же ключ, что у Nvidia. Больше никаких Groq-ключей!
         "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        // Надежная, быстрая и стабильная Llama 3.1
-        model: "meta-llama/llama-3.1-8b-instruct",
-        messages: [{ role: "user", content: prompt }],
-        response_format: { type: "json_object" },
-        temperature: 0.9
+        // 🔥 Используем БЕСПЛАТНУЮ зрячую модель от Meta
+        model: "meta-llama/llama-3.2-11b-vision-instruct:free", 
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: prompt },
+              { type: "image_url", image_url: { url: imageUrl } }
+            ]
+          }
+        ],
+        temperature: 0.7
       }),
       signal: controller.signal
     });
@@ -37,18 +66,43 @@ async function callBrain(prompt: string) {
 
     if (!res.ok) {
       const errText = await res.text().catch(() => "Unknown error");
-      throw new Error(`OpenRouter API Error: ${res.status} ${errText}`);
+      throw new Error(`OpenRouter Error: ${res.status} ${errText}`);
     }
 
     const data = await res.json();
     const rawContent = data.choices?.[0]?.message?.content || "{}";
-    
     return JSON.parse(cleanLLMJSON(rawContent));
   } catch (error: any) {
-    if (error.name === 'AbortError') {
-      throw new Error("AI request timed out (20s limit)");
-    }
-    console.error("OpenRouter Internal Error:", error.message);
+    clearTimeout(timeoutId);
+    throw error;
+  }
+}
+
+// Обычный текстовый мозг для веток без картинок (БЕСПЛАТНЫЙ)
+async function callTextBrain(prompt: string) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 15000);
+  try {
+    const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        // 🔥 Бесплатная, быстрая текстовая Llama
+        model: "meta-llama/llama-3.1-8b-instruct:free",
+        messages: [{ role: "user", content: prompt }],
+        temperature: 0.8
+      }),
+      signal: controller.signal
+    });
+    clearTimeout(timeoutId);
+    if (!res.ok) throw new Error("Text Brain Error");
+    const data = await res.json();
+    return JSON.parse(cleanLLMJSON(data.choices?.[0]?.message?.content || "{}"));
+  } catch (error) {
+    clearTimeout(timeoutId);
     throw error;
   }
 }
@@ -58,59 +112,38 @@ export async function POST(req: Request) {
     const body = await req.json();
 
     // ==========================================
-    // ВЕТКА 3: ВИЗУАЛЬНАЯ МУТАЦИЯ (Nvidia + Llama через OpenRouter)
+    // ВЕТКА 3: ВИЗУАЛЬНАЯ МУТАЦИЯ (Картинка напрямую в Multimodal AI)
     // ==========================================
     if (body.image_url) {
-      console.log(`[MUTATE] Step 1: Nvidia scanning artifact: ${body.image_url}`);
+      console.log(`[MUTATE] Step 1: Multimodal scanning artifact: ${body.image_url}`);
 
-      // 1. Глаза: Nvidia собирает сырые факты
-      let analysis = await analyzeImageWithNvidia(body.image_url);
-
-      if (!analysis) {
-        console.warn("[MUTATE] Warning: Nvidia analysis failed (bad JSON). Using fallback aesthetics.");
-        analysis = {
-          mood: "mysterious",
-          style: "abstract visual art",
-          colors: ["#000000", "#FFFFFF"],
-          contains_text: false,
-          description: "Unknown visual artifact",
-          tags: ["abstract", "unknown"]
-        };
-      }
-
-      console.log(`[MUTATE] Step 2: OpenRouter Llama translating facts... History length:`, Array.isArray(body.history) ? body.history.length : 0);
-
-      // 2. Мозг: Llama осмысляет факты
       const historyText = Array.isArray(body.history) && body.history.length > 0 
-        ? `\nПРЕДЫДУЩИЕ ВАЙБЫ (КАТЕГОРИЧЕСКИ НЕ ПОВТОРЯЙ ИХ, ищи новые ассоциации): ${JSON.stringify(body.history)}` 
-        : "";
+        ? JSON.stringify(body.history) 
+        : "Это первый запуск.";
 
-      const prompt = `
-        Ты — музыкальный и эстетический ИИ-куратор приложения Schiele.
-        Твоя задача — проанализировать сырые технические данные с картинки и создать концепт.
-        Важно: избегай буквальных ошибок машинного перевода (например, если в тексте "Jimmy Page gear", имеется в виду гитарное оборудование великого музыканта, а не запчасти от машин. Заменяй двусмысленные слова на точные, например, gear -> guitars/equipment).
+      try {
+        const curated = await callSmartVisionBrain(body.image_url, historyText);
+        
+        // Фолбэки на случай непредвиденных сбоев
+        const finalSearchQuery = curated.searchQuery || curated.query || "vintage noir portrait";
+        const finalDisplayVibe = curated.displayVibe || curated.vibe || "VINTAGE AURA";
 
-        Сырые данные с картинки: ${JSON.stringify(analysis)} ${historyText}
+        console.log(`[MUTATE] AI Decision -> Query: "${finalSearchQuery}", Display: "${finalDisplayVibe}"`);
 
-        Сгенерируй строго JSON с двумя полями:
-        1. "searchQuery": оптимизированный запрос для поиска картинок (максимум 5-6 слов, без хешкодов цветов). Он должен выдавать релевантные, крутые картинки. Уточняй контекст (например, добавляй 'concert', 'guitar', если речь о музыкантах).
-        2. "displayVibe": короткое, загадочное и эстетичное название этого вайба для интерфейса (2-4 слова, на английском, например "70s Rock Aura" или "Surreal Pink Floyd Art").
+        return NextResponse.json({ 
+          success: true, 
+          smartQuery: finalSearchQuery, 
+          displayVibe: finalDisplayVibe 
+        });
 
-        Формат ответа СТРОГО JSON: {"searchQuery": "...", "displayVibe": "..."}
-      `;
-
-      const curated = await callBrain(prompt);
-
-      const finalSearchQuery = curated.searchQuery || curated.query || `${analysis.mood} ${analysis.style} art`;
-      const finalDisplayVibe = curated.displayVibe || curated.vibe || "NEW RESONANCE";
-
-      console.log(`[MUTATE] AI Decision -> Query: "${finalSearchQuery}", Display: "${finalDisplayVibe}"`);
-
-      return NextResponse.json({ 
-        success: true, 
-        smartQuery: finalSearchQuery, 
-        displayVibe: finalDisplayVibe 
-      });
+      } catch (visionError) {
+        console.error("[MUTATE] Multimodal failed, falling back...", visionError);
+        return NextResponse.json({ 
+          success: true, 
+          smartQuery: "aesthetic vintage portrait", 
+          displayVibe: "SIGNAL RECOVERED" 
+        });
+      }
     }
 
     // ==========================================
@@ -123,16 +156,14 @@ export async function POST(req: Request) {
         const updatePayload: any = {};
         if (rating !== undefined) updatePayload.user_rating = rating;
         if (is_curated !== undefined) updatePayload.is_curated = is_curated;
-
         await supabase.from('synth_memory').update(updatePayload).eq('id', memory_id);
       }
 
       if (mutate_direction && current_palette) {
         const systemPrompt = `Ты — колорист-мутатор Aesthetic Nexus. Текущая палитра: ${JSON.stringify(current_palette)}. Смести эту палитру в сторону направления: "${mutate_direction}". Верни СТРОГО JSON: { "dominant": "#HEX", "accent": "#HEX", "ambient_fog": "#HEX", "style_shift": "описание" }`;
-        const mutated = await callBrain(systemPrompt);
+        const mutated = await callTextBrain(systemPrompt);
         return NextResponse.json({ mutated });
       }
-
       return NextResponse.json({ success: true, message: "Память обновлена" });
     }
 
@@ -141,7 +172,7 @@ export async function POST(req: Request) {
     // ==========================================
     if (body.concept) {
       const systemPrompt = `Ты креативный генератор идей. Концепт: "${body.concept}". Предложи 3 новых вектора. Ответь СТРОГО в JSON: { "mutations": ["вектор 1", "вектор 2", "вектор 3"] }`;
-      const result = await callBrain(systemPrompt);
+      const result = await callTextBrain(systemPrompt);
       return NextResponse.json(result);
     }
 

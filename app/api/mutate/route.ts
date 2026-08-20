@@ -23,8 +23,8 @@ async function callGroq(prompt: string) {
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        // 🔥 ИСПРАВЛЕНИЕ: Жестко прописываем новую модель, игнорируя старые настройки Render
-        model: "llama-3.3-70b-versatile",
+        // 🔥 Возвращаем управление в Render, дефолт - железобетонная модель
+        model: process.env.GROQ_MODEL || "llama3-70b-8192",
         messages: [{ role: "user", content: prompt }],
         response_format: { type: "json_object" },
         temperature: 0.9

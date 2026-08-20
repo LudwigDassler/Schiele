@@ -23,8 +23,8 @@ async function callGroq(prompt: string) {
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        // 🔥 Возвращаем управление в Render, дефолт - железобетонная модель
-        model: process.env.GROQ_MODEL || "llama3-70b-8192",
+        // 🔥 ИСПРАВЛЕНИЕ: Жестко ставим надежный mixtral как дефолт
+        model: process.env.GROQ_MODEL || "mixtral-8x7b-32768",
         messages: [{ role: "user", content: prompt }],
         response_format: { type: "json_object" },
         temperature: 0.9

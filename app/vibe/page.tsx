@@ -33,9 +33,13 @@ function VibeContent() {
   const [relatedLoading, setRelatedLoading] = useState(true);
   
   const [isMutating, setIsMutating] = useState(false);
-  const [activeVibe, setActiveVibe] = useState("Scanning...");
+  
+  // 🔥 РАЗДЕЛЯЕМ: displayVibe - для красоты на экране, searchQuery - для поиска под капотом
+  const [displayVibe, setDisplayVibe] = useState("ANALYZING...");
 
   const currentQueryRef = useRef("");
+  const historyRef = useRef<string[]>([]); // Память мутаций, чтобы не было зацикливаний
+  const lastAnalyzedSrcRef = useRef<string | null>(null);
   const relatedAbortRef = useRef<AbortController | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -49,56 +53,44 @@ function VibeContent() {
       setUser(data.session?.user ?? null);
       if (data.session?.user) {
         setIdentity(data.session.user.id);
-        fetch(`/api/pins?user_id=${data.session.user.id}`).then(r => r.ok ? r.json() : null).then(d => { if (d) setPins(d.pins || d.data || []); }).catch(() => {});
+        fetch(`/api/pins?user_id=${data.session.user.id}`)
+          .then(r => r.ok ? r.json() : null)
+          .then(d => { if (d) setPins(d.pins || d.data || []); })
+          .catch(() => {});
       } else {
         setIdentity(getAnonId());
       }
     });
   }, []);
 
-  const fetchRelated = useCallback(async (pageNum: number, reset: boolean, queryOverride?: string, forceRescan: boolean = false) => {
-    if (!src) return;
+  // 🔥 ЧИСТЫЙ ПОИСК (Только делает запрос к DDG/Bing, больше не пытается угадывать слова)
+  const fetchImages = useCallback(async (query: string, pageNum: number, reset: boolean) => {
+    if (!query || !src) return;
     setRelatedLoading(true);
+
     if (reset) {
       relatedAbortRef.current?.abort();
       relatedAbortRef.current = new AbortController();
     }
 
     try {
-      let aiQuery = queryOverride || currentQueryRef.current;
-
-      if ((reset && !aiQuery) || forceRescan) {
-        setActiveVibe("Scanning...");
-        try {
-          const aiRes = await fetch("/api/ai", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "analyze_image", payload: src, userId: identity, title: fallbackTitle, ignore_cache: forceRescan }) });
-          if (aiRes.ok) {
-            const aiData = await aiRes.json();
-            if (aiData.result) aiQuery = aiData.result;
-          }
-        } catch (err) { console.error("Vision failed", err); }
-
-        if (!aiQuery || aiQuery.length < 3) {
-          const stopWords = new Set(["photo", "image", "picture", "wallpaper", "background", "free", "download", "high", "resolution", "by", "of", "the", "in", "on", "a", "and", "is", "with", "for", "hd", "4k", "stock", "quality"]);
-          const rawWords = fallbackTitle.toLowerCase().replace(/[^a-zа-яё0-9\s]/g, "").split(/\s+/);
-          const keywords = Array.from(new Set(rawWords.filter(w => w.length > 2 && !stopWords.has(w)))).slice(0, 3);
-          aiQuery = keywords.length > 0 ? keywords.join(" ") : "aesthetic";
-        }
-        aiQuery = aiQuery.replace(/[^a-zA-Zа-яА-ЯёЁ0-9\s]/g, " ").replace(/\s+/g, " ").trim();
-      }
-
-      currentQueryRef.current = aiQuery;
-      setActiveVibe(aiQuery);
-
-      const params = new URLSearchParams({ page: String(pageNum), query: aiQuery });
+      const params = new URLSearchParams({ page: String(pageNum), query });
       const res = await fetch(`/api/search?${params}`, { signal: relatedAbortRef.current?.signal });
       const data = await res.json();
       const rawArray = Array.isArray(data) ? data : (data.data || data.photos || data.items || data.results || []);
-      const isNsfwQuery = checkNsfw(aiQuery);
+      const isNsfwQuery = checkNsfw(query);
 
       const fetched = rawArray
         .map((p: any) => {
           const mappedSrc = p.src || p.image || p.image_url || p.url;
-          return { ...p, id: p.id || mappedSrc, src: mappedSrc, thumb: p.thumb || p.thumbnail || p.image || mappedSrc, link: p.link || p.url || p.source_url || mappedSrc, isNsfw: isNsfwQuery || checkNsfw(p.title || "") };
+          return {
+            ...p,
+            id: p.id || mappedSrc,
+            src: mappedSrc,
+            thumb: p.thumb || p.thumbnail || p.image || mappedSrc,
+            link: p.link || p.url || p.source_url || mappedSrc,
+            isNsfw: isNsfwQuery || checkNsfw(p.title || "")
+          };
         })
         .filter((p: any) => p.src && p.src.startsWith("http") && p.src !== src);
 
@@ -110,68 +102,96 @@ function VibeContent() {
       });
       setRelatedHasMore(fetched.length > 0);
     } catch (e: any) {
+      if (e.name !== "AbortError") console.error("[FETCH IMAGES ERROR]", e);
     } finally {
       setRelatedLoading(false);
     }
-  }, [src, fallbackTitle, identity]);
+  }, [src]);
 
+  // 🔥 ЕДИНЫЙ МОЗГ (Вызывается и при старте, и по кнопке MUTATE)
+  const handleMutate = useCallback(async (isInitial = false) => {
+    if (isMutating || !src) return;
+    setIsMutating(true);
+
+    if (isInitial) {
+      setDisplayVibe("ANALYZING...");
+      setRelatedLoading(true);
+    }
+
+    try {
+      // Отправляем картинку + ИСТОРИЮ на наш новый бэкенд
+      const res = await fetch("/api/mutate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          image_url: src,
+          history: historyRef.current 
+        })
+      });
+
+      const data = await res.json();
+
+      if (data.smartQuery && data.displayVibe) {
+        setDisplayVibe(data.displayVibe); // На экран идет красота (напр. "Jimmy Page Aura")
+        currentQueryRef.current = data.smartQuery; // В поиск идет скрытый запрос (напр. "Jimmy Page guitar stage")
+
+        // Записываем в память, чтобы ИИ больше это не повторял
+        historyRef.current.push(data.displayVibe);
+
+        setRelatedPhotos([]);
+        setRelatedPage(1);
+        setRelatedHasMore(true);
+        await fetchImages(data.smartQuery, 1, true);
+      }
+    } catch (e) {
+      console.error("Mutation failed", e);
+      if (isInitial) setDisplayVibe("SIGNAL LOST");
+    } finally {
+      setIsMutating(false);
+    }
+  }, [src, isMutating, fetchImages]);
+
+  // 🔥 АВТОЗАПУСК: Как только юзер открыл страницу, ИИ сразу анализирует картинку!
   useEffect(() => {
-    if (!src || identity === null) return;
+    if (!src || lastAnalyzedSrcRef.current === src) return;
+    lastAnalyzedSrcRef.current = src;
+    
     currentQueryRef.current = "";
+    historyRef.current = [];
     setRelatedPhotos([]);
     setRelatedPage(1);
     setRelatedHasMore(true);
-    fetchRelated(1, true);
-  }, [src, identity]);
 
+    handleMutate(true);
+  }, [src, handleMutate]);
+
+  // Бесконечный скролл вниз
   useEffect(() => {
     if (!bottomRef.current) return;
     const observer = new IntersectionObserver(entries => {
       if (entries[0].isIntersecting && relatedHasMore && !relatedLoading && currentQueryRef.current) {
-        const next = relatedPage + 1;
-        setRelatedPage(next);
-        fetchRelated(next, false);
+        setRelatedPage(prev => {
+          const next = prev + 1;
+          fetchImages(currentQueryRef.current, next, false);
+          return next;
+        });
       }
     }, { threshold: 0.1 });
+
     observer.observe(bottomRef.current);
     return () => observer.disconnect();
-  }, [relatedHasMore, relatedLoading, relatedPage, fetchRelated]);
-
-  async function handleMutate() {
-    if (isMutating || !src) return;
-    setIsMutating(true);
-    try {
-      const res = await fetch("/api/mutate", { 
-        method: "POST", 
-        headers: { "Content-Type": "application/json" }, 
-        body: JSON.stringify({ image_url: src }) 
-      });
-      
-      const data = await res.json();
-      const newQuery = data.smartQuery;
-      
-      if (newQuery) {
-        setActiveVibe(newQuery); 
-        currentQueryRef.current = newQuery;
-        
-        setRelatedPhotos([]);
-        setRelatedPage(1);
-        setRelatedHasMore(true);
-        await fetchRelated(1, true, newQuery);
-      }
-    } catch (e) {
-      console.error("Mutation failed", e);
-    } finally {
-      setIsMutating(false);
-    }
-  }
+  }, [relatedHasMore, relatedLoading, fetchImages]);
 
   function isPinned(photo: Photo) { return pins.some(p => p.image_url === photo.src); }
 
   async function savePin(photo: Photo) {
     if (!user) { router.push("/auth"); return; }
     try {
-      const res = await fetch("/api/pins", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ user_id: user.id, image_url: photo.src, title: photo.title, source_url: photo.link }) });
+      const res = await fetch("/api/pins", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: user.id, image_url: photo.src, title: photo.title, source_url: photo.link })
+      });
       if (res.ok) {
         const data = await res.json();
         if (data.pin || data.data) setPins(prev => [data.pin || data.data, ...prev]);
@@ -181,7 +201,7 @@ function VibeContent() {
 
   function sharePhoto(photo: Photo) {
     const url = photo.link || window.location.href;
-    if (navigator.share) navigator.share({ title: fallbackTitle || "Gelbet Vibe", url });
+    if (navigator.share) navigator.share({ title: displayVibe, url });
     else navigator.clipboard.writeText(url);
   }
 
@@ -189,10 +209,10 @@ function VibeContent() {
     feedLocalAI(photo.src, photo.id);
     const isBlurred = photo.isNsfw && !nsfwAllowed;
     if (isBlurred) { setShowAgeGate(photo); return; }
+    // При переходе на новую картинку сбрасываем память
+    lastAnalyzedSrcRef.current = null;
     router.push(`/vibe?src=${encodeURIComponent(photo.src)}&title=${encodeURIComponent(photo.title || "")}&link=${encodeURIComponent(photo.link || "")}`);
   }
-
-  const currentPhoto: Photo = { id: src || "", src: src || "", thumb: src || "", title: fallbackTitle, link: link || "" };
 
   if (!src) return <div style={{ color: "#fff", padding: 40, textAlign: "center", background: "#020104", minHeight: "100vh", fontFamily: 'Syncopate' }}>Artifact not found.</div>;
 
@@ -236,15 +256,12 @@ function VibeContent() {
         <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
       </button>
 
-      {/* 🔥 АДАПТИВНЫЙ КОНТЕЙНЕР (flex-col на мобилках, flex-row на десктопах) */}
       <div className="flex-shrink-0 flex items-center justify-center p-4 pt-24 md:p-10 md:pt-28">
         <div className="w-full max-w-7xl bg-[#050308]/60 backdrop-blur-3xl border border-white/10 rounded-[2rem] overflow-hidden flex flex-col lg:flex-row shadow-[0_30px_80px_rgba(0,0,0,0.9),_0_0_40px_rgba(168,85,247,0.1)] relative z-10 prism-hover">
           
-          {/* 🔥 ЛЕВАЯ ЧАСТЬ (Flex-1 забирает столько места, сколько нужно формату картинки) */}
           <div className="flex-1 p-4 md:p-8 flex items-center justify-center relative min-h-[40vh] lg:min-h-[60vh]">
             <div className="absolute inset-0 bg-gradient-to-br from-white/5 to-transparent pointer-events-none"></div>
             
-            {/* Обертка картинки. Нет жесткого обрезания, масштабируется сама! */}
             <div className="relative flex items-center justify-center w-full h-full max-h-[60vh] lg:max-h-[75vh] group">
               <img src={currentPhoto.src} alt="Artifact" className="max-w-full max-h-full object-contain rounded-xl shadow-[0_20px_50px_rgba(0,0,0,0.8)] transition-transform duration-1000 group-hover:scale-[1.02]" />
               <div className="absolute top-4 right-4 flex gap-3 opacity-0 group-hover:opacity-100 transition-opacity duration-500 transform translate-y-2 group-hover:translate-y-0">
@@ -255,41 +272,29 @@ function VibeContent() {
             </div>
           </div>
           
-          {/* 🔥 ПРАВАЯ ЧАСТЬ (Фиксированная ширина на десктопе) */}
           <div className="w-full lg:w-[400px] xl:w-[480px] shrink-0 p-6 md:p-10 flex flex-col justify-center relative bg-gradient-to-t lg:bg-gradient-to-l from-white/5 to-transparent border-t lg:border-t-0 lg:border-l border-white/5">
             
             <div className="relative z-20 text-center lg:text-left">
               <p className="text-[#888] text-[9px] md:text-[10px] font-syncopate tracking-[0.3em] uppercase m-0 leading-relaxed font-bold mb-3">
-                {activeVibe === "Scanning..." ? "ANALYZING FREQUENCY..." : "CURRENT RESONANCE:"}
+                {displayVibe === "ANALYZING..." ? "ANALYZING FREQUENCY..." : "CURRENT RESONANCE:"}
               </p>
-              {/* Адаптивный размер шрифта */}
               <h1 className="text-xl md:text-2xl xl:text-3xl font-syncopate tracking-[0.1em] font-bold text-white leading-tight uppercase text-shadow-[0_0_20px_rgba(255,255,255,0.2)] break-words">
-                {activeVibe !== "Scanning..." ? activeVibe : "SYNTHESIZING..."}
+                {displayVibe}
               </h1>
             </div>
 
             <div className="flex flex-col gap-6 mt-10 md:mt-16 relative z-10 w-full items-center lg:items-start">
               
-              {/* 🔥 МЕНЬШАЯ, НО СТОЛЬ ЖЕ ДЕТАЛИЗИРОВАННАЯ КНОПКА MUTATE */}
-              <div onClick={handleMutate} className={`relative w-[180px] h-[180px] md:w-[200px] md:h-[200px] flex justify-center items-center cursor-pointer group mx-auto lg:mx-0 ${isMutating ? 'is-mutating' : ''}`}>
-                
-                {/* Руны по краям */}
+              <div onClick={() => handleMutate(false)} className={`relative w-[180px] h-[180px] md:w-[200px] md:h-[200px] flex justify-center items-center cursor-pointer group mx-auto lg:mx-0 ${isMutating ? 'is-mutating' : ''}`}>
                 <div className="absolute inset-2 border-[1px] border-[#a855f7]/30 rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-1000 animate-[volvelle-spin_15s_linear_infinite]" style={{ borderStyle: 'dashed' }}></div>
-                
-                {/* Три цветных сгустка плазмы */}
                 <div className="absolute w-[120%] h-[120%] blur-[25px] opacity-70 mix-blend-screen transition-all duration-1000 group-hover:opacity-100 group-hover:scale-110" style={{ WebkitMaskImage: 'radial-gradient(ellipse 70% 45% at 50% 50%, black 20%, transparent 80%)', maskImage: 'radial-gradient(ellipse 70% 45% at 50% 50%, black 20%, transparent 80%)', filter: isMutating ? 'blur(35px)' : 'blur(25px)' }}>
                   <div className="absolute w-[60%] h-[60%] -top-[10%] left-0 rounded-full bg-[#3a0088]" style={{ animation: 'ooze 12s infinite alternate ease-in-out', animationPlayState: isMutating ? 'running' : 'paused' }}></div>
                   <div className="absolute w-[50%] h-[50%] -bottom-[10%] right-0 rounded-full bg-[#f97316]" style={{ animation: 'ooze 10s infinite alternate-reverse ease-in-out', animationPlayState: isMutating ? 'running' : 'paused' }}></div>
                   <div className="absolute w-[40%] h-[40%] top-[30%] left-[30%] rounded-full bg-[#d946ef] opacity-80" style={{ animation: 'ooze 15s infinite alternate ease-in-out', animationPlayState: isMutating ? 'running' : 'paused' }}></div>
                 </div>
-
-                {/* Эффект текущей жидкости */}
                 <div className="absolute -inset-[10%] opacity-40 pointer-events-none transition-opacity duration-500 group-hover:opacity-90 force-fluid-filter" style={{ background: 'repeating-linear-gradient(-45deg, transparent, transparent 2px, rgba(255, 255, 255, 0.2) 3px, rgba(255, 255, 255, 0.2) 4px)', WebkitMaskImage: 'radial-gradient(ellipse 70% 45% at 50% 50%, black 20%, transparent 80%)', maskImage: 'radial-gradient(ellipse 70% 45% at 50% 50%, black 20%, transparent 80%)', animation: isMutating ? 'flow-lines 5s linear infinite' : 'flow-lines 20s linear infinite' }}></div>
-
-                {/* Само черное ядро: уменьшено до 100px */}
                 <div className="absolute w-[90px] h-[90px] md:w-[100px] md:h-[100px] rounded-full z-5 transition-all duration-[1.5s] ease-[cubic-bezier(0.19,1,0.22,1)] shadow-[inset_0_0_30px_rgba(0,0,0,1)]" style={{ background: 'radial-gradient(circle, rgba(2,1,4,0.95) 0%, rgba(2,1,4,0.6) 40%, rgba(0,0,0,0) 80%)', filter: isMutating ? 'blur(10px)' : 'blur(3px)', transform: isMutating ? 'scale(1.4)' : 'scale(1)', opacity: isMutating ? 0.8 : 1 }}></div>
 
-                {/* Текст */}
                 <div className="relative z-10 text-white uppercase font-syncopate font-bold text-center" style={{ fontSize: '9px', letterSpacing: isMutating ? '0.2em' : '0.4em', textShadow: isMutating ? '0 0 20px white, 0 0 40px #a855f7' : '0 0 10px rgba(255, 255, 255, 0.5)', transition: 'all 0.8s cubic-bezier(0.16,1,0.3,1)', animation: isMutating ? 'text-pulse 1s infinite alternate' : 'none' }}>
                   {isMutating ? 'MUTATING...' : 'MUTATE'}
                 </div>

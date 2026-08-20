@@ -1,42 +1,23 @@
 import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
+import { analyzeImageWithNvidia } from '@/lib/vision-analyzer';
 
-// Утилита для безопасной очистки JSON
+// Утилита для жесткой очистки JSON от любого мусора
 function cleanLLMJSON(text: string): string {
   if (!text) return "{}";
   let cleaned = text.trim();
-  cleaned = cleaned.replace(/^```(json)?\s*/, "").replace(/```$/, "").trim();
-  
-  // Дополнительная чистка на случай, если бесплатная модель добавит текст до/после JSON
   const jsonStart = cleaned.indexOf('{');
   const jsonEnd = cleaned.lastIndexOf('}');
   if (jsonStart !== -1 && jsonEnd !== -1) {
     cleaned = cleaned.substring(jsonStart, jsonEnd + 1);
   }
-  
-  return cleaned;
+  return cleaned || "{}";
 }
 
-// 🔥 ЕДИНЫЙ УМНЫЙ МОЗГ (БЕСПЛАТНЫЙ): Зрение и логика в одном запросе
-async function callSmartVisionBrain(imageUrl: string, historyText: string) {
+// 🔥 Единый текстовый мозг: УМНЫЙ, БЕСПЛАТНЫЙ, СТАБИЛЬНЫЙ
+async function callSmartTextBrain(prompt: string) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 20000); // 20 секунд
-
-  const prompt = `
-    Ты — элитный арт-директор, историк искусств и куратор приложения Schiele.
-    Внимательно посмотри на прикрепленное изображение и выдай концепт.
-
-    ЖЕСТКИЕ ПРАВИЛА:
-    1. УЗНАВАЙ КОНТЕКСТ: Если на фото известный человек (например, Оппенгеймер, Джимми Пейдж), историческая эпоха или конкретный стиль — ИСПОЛЬЗУЙ ЭТО. Никакой абстрактной воды вроде "Whispers of the unknown".
-    2. ФАКТУРА: Вайб должен быть материальным и точным. Пример: для старого фото ученого с сигаретой — "Atomic Era Noir" или "Mid-Century Intellectual".
-    3. ИСТОРИЯ: Учитывай предыдущие мутации и не повторяйся: ${historyText}
-
-    Сгенерируй СТРОГО JSON (без маркдауна и лишних слов) с двумя полями:
-    1. "searchQuery": точный запрос для поиска картинок (4-6 слов). Например: "1940s scientist vintage portrait photography".
-    2. "displayVibe": эстетичное, хлесткое название вайба для интерфейса (2-4 слова, на английском).
-
-    Формат ответа СТРОГО: {"searchQuery": "...", "displayVibe": "..."}
-  `;
 
   try {
     const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
@@ -46,17 +27,9 @@ async function callSmartVisionBrain(imageUrl: string, historyText: string) {
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        // 🔥 Используем БЕСПЛАТНУЮ зрячую модель от Meta
-        model: "meta-llama/llama-3.2-11b-vision-instruct:free", 
-        messages: [
-          {
-            role: "user",
-            content: [
-              { type: "text", text: prompt },
-              { type: "image_url", image_url: { url: imageUrl } }
-            ]
-          }
-        ],
+        // Используем 70-миллиардную модель. Она гениальна, не льет воду и работает бесплатно.
+        model: "meta-llama/llama-3.3-70b-instruct:free",
+        messages: [{ role: "user", content: prompt }],
         temperature: 0.7
       }),
       signal: controller.signal
@@ -78,54 +51,60 @@ async function callSmartVisionBrain(imageUrl: string, historyText: string) {
   }
 }
 
-// Обычный текстовый мозг для веток без картинок (БЕСПЛАТНЫЙ)
-async function callTextBrain(prompt: string) {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 15000);
-  try {
-    const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        // 🔥 Бесплатная, быстрая текстовая Llama
-        model: "meta-llama/llama-3.1-8b-instruct:free",
-        messages: [{ role: "user", content: prompt }],
-        temperature: 0.8
-      }),
-      signal: controller.signal
-    });
-    clearTimeout(timeoutId);
-    if (!res.ok) throw new Error("Text Brain Error");
-    const data = await res.json();
-    return JSON.parse(cleanLLMJSON(data.choices?.[0]?.message?.content || "{}"));
-  } catch (error) {
-    clearTimeout(timeoutId);
-    throw error;
-  }
-}
-
 export async function POST(req: Request) {
   try {
     const body = await req.json();
 
     // ==========================================
-    // ВЕТКА 3: ВИЗУАЛЬНАЯ МУТАЦИЯ (Картинка напрямую в Multimodal AI)
+    // ВЕТКА 3: ВИЗУАЛЬНАЯ МУТАЦИЯ (Nvidia + Умная Llama 70B)
     // ==========================================
     if (body.image_url) {
-      console.log(`[MUTATE] Step 1: Multimodal scanning artifact: ${body.image_url}`);
+      console.log(`[MUTATE] Step 1: Nvidia scanning artifact: ${body.image_url}`);
+
+      // 1. Глаза: Nvidia безотказно собирает факты
+      let analysis = await analyzeImageWithNvidia(body.image_url);
+
+      if (!analysis) {
+        console.warn("[MUTATE] Warning: Nvidia analysis failed (bad JSON). Using fallback.");
+        analysis = {
+          mood: "mysterious",
+          style: "vintage photography",
+          colors: ["#000000", "#FFFFFF"],
+          contains_text: false,
+          description: "Vintage historical artifact",
+          tags: ["vintage", "history"]
+        };
+      }
+
+      console.log(`[MUTATE] Step 2: OpenRouter 70B Brain translating facts... History length:`, Array.isArray(body.history) ? body.history.length : 0);
 
       const historyText = Array.isArray(body.history) && body.history.length > 0 
-        ? JSON.stringify(body.history) 
-        : "Это первый запуск.";
+        ? `\nПРЕДЫДУЩИЕ ВАЙБЫ (КАТЕГОРИЧЕСКИ НЕ ПОВТОРЯЙ ИХ, ищи новые ассоциации): ${JSON.stringify(body.history)}` 
+        : "";
+
+      // 2. Мозг: Жесткий промпт для 70B модели
+      const prompt = `
+        Ты — элитный арт-директор, историк искусств и куратор приложения Schiele.
+        Проанализируй сырые технические данные с картинки и создай концепт.
+
+        ЖЕСТКИЕ ПРАВИЛА:
+        1. УЗНАВАЙ КОНТЕКСТ: Если в описании есть известный человек (например, Оппенгеймер, Дэвид Боуи), историческая эпоха или бренд — ИСПОЛЬЗУЙ ЭТО. Никакой абстрактной воды вроде "Whispers of the unknown".
+        2. ФАКТУРА: Вайб должен быть материальным и точным. Пример: для старого фото ученого с сигаретой — "Atomic Era Noir", "Manhattan Project" или "Mid-Century Intellectual".
+        3. ИСТОРИЯ: Учитывай предыдущие мутации и не повторяйся: ${historyText}
+
+        Сырые данные от визуального анализатора: ${JSON.stringify(analysis)}
+
+        Сгенерируй СТРОГО JSON (без маркдауна и лишних слов) с двумя полями:
+        1. "searchQuery": точный запрос для поиска картинок (4-6 слов). Например: "1940s scientist vintage portrait photography".
+        2. "displayVibe": эстетичное, хлесткое название вайба для интерфейса (2-4 слова, на английском).
+
+        Формат ответа СТРОГО: {"searchQuery": "...", "displayVibe": "..."}
+      `;
 
       try {
-        const curated = await callSmartVisionBrain(body.image_url, historyText);
+        const curated = await callSmartTextBrain(prompt);
         
-        // Фолбэки на случай непредвиденных сбоев
-        const finalSearchQuery = curated.searchQuery || curated.query || "vintage noir portrait";
+        const finalSearchQuery = curated.searchQuery || curated.query || `${analysis.mood} ${analysis.style}`;
         const finalDisplayVibe = curated.displayVibe || curated.vibe || "VINTAGE AURA";
 
         console.log(`[MUTATE] AI Decision -> Query: "${finalSearchQuery}", Display: "${finalDisplayVibe}"`);
@@ -136,8 +115,8 @@ export async function POST(req: Request) {
           displayVibe: finalDisplayVibe 
         });
 
-      } catch (visionError) {
-        console.error("[MUTATE] Multimodal failed, falling back...", visionError);
+      } catch (brainError) {
+        console.error("[MUTATE] Text Brain failed, falling back...", brainError);
         return NextResponse.json({ 
           success: true, 
           smartQuery: "aesthetic vintage portrait", 
@@ -161,7 +140,7 @@ export async function POST(req: Request) {
 
       if (mutate_direction && current_palette) {
         const systemPrompt = `Ты — колорист-мутатор Aesthetic Nexus. Текущая палитра: ${JSON.stringify(current_palette)}. Смести эту палитру в сторону направления: "${mutate_direction}". Верни СТРОГО JSON: { "dominant": "#HEX", "accent": "#HEX", "ambient_fog": "#HEX", "style_shift": "описание" }`;
-        const mutated = await callTextBrain(systemPrompt);
+        const mutated = await callSmartTextBrain(systemPrompt);
         return NextResponse.json({ mutated });
       }
       return NextResponse.json({ success: true, message: "Память обновлена" });
@@ -172,7 +151,7 @@ export async function POST(req: Request) {
     // ==========================================
     if (body.concept) {
       const systemPrompt = `Ты креативный генератор идей. Концепт: "${body.concept}". Предложи 3 новых вектора. Ответь СТРОГО в JSON: { "mutations": ["вектор 1", "вектор 2", "вектор 3"] }`;
-      const result = await callTextBrain(systemPrompt);
+      const result = await callSmartTextBrain(systemPrompt);
       return NextResponse.json(result);
     }
 

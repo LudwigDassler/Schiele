@@ -26,7 +26,7 @@ async function callGroq(prompt: string) {
         model: process.env.GROQ_MODEL || "llama-3.1-70b-versatile",
         messages: [{ role: "user", content: prompt }],
         response_format: { type: "json_object" },
-        temperature: 0.7
+        temperature: 0.9 // Высокая креативность для крутых мутаций
       }),
       signal: controller.signal
     });
@@ -56,33 +56,51 @@ export async function POST(req: Request) {
     const body = await req.json();
 
     // ==========================================
-    // ВЕТКА 3: ВИЗУАЛЬНАЯ МУТАЦИЯ (Nvidia Vision)
+    // ВЕТКА 3: ВИЗУАЛЬНАЯ МУТАЦИЯ (Nvidia + Groq)
     // ==========================================
     if (body.image_url) {
-      console.log(`[MUTATE] Sending artifact to Nvidia: ${body.image_url}`);
+      console.log(`[MUTATE] Step 1: Nvidia scanning artifact: ${body.image_url}`);
 
+      // 1. Глаза: Nvidia собирает сырые факты (текст, цвета, объекты)
       const analysis = await analyzeImageWithNvidia(body.image_url);
 
       if (!analysis) {
-        throw new Error("Nvidia vision analysis failed or returned null.");
+        throw new Error("Nvidia vision analysis failed.");
       }
 
-      // Нейронка сама формирует идеальный запрос для парсера
-      let smartQuery = "";
-      if (analysis.contains_text && analysis.text_content) {
-        // Если есть текст (например, "Pink Floyd"), ставим его во главу угла
-        smartQuery = `${analysis.text_content} ${analysis.style} poster vintage`;
-      } else {
-         // Иначе опираемся на настроение и стиль
-        smartQuery = `${analysis.mood} ${analysis.style} ${analysis.colors?.[0] || ''} aesthetic art`;
-      }
+      console.log(`[MUTATE] Step 2: Groq translating facts... History length:`, Array.isArray(body.history) ? body.history.length : 0);
 
-      console.log(`[MUTATE] Nvidia generated smart query: "${smartQuery}"`);
+      // 2. Мозг: Groq осмысляет факты, учитывает контекст и историю
+      const historyText = Array.isArray(body.history) && body.history.length > 0 
+        ? `\nПРЕДЫДУЩИЕ ВАЙБЫ (КАТЕГОРИЧЕСКИ НЕ ПОВТОРЯЙ ИХ, ищи новые ассоциации): ${JSON.stringify(body.history)}` 
+        : "";
+
+      const prompt = `
+        Ты — музыкальный и эстетический ИИ-куратор приложения Schiele.
+        Твоя задача — проанализировать сырые технические данные с картинки и создать концепт.
+        Важно: избегай буквальных ошибок машинного перевода (например, если в тексте "Jimmy Page gear", имеется в виду гитарное оборудование великого музыканта, а не запчасти от машин. Заменяй двусмысленные слова на точные, например, gear -> guitars/equipment).
+
+        Сырые данные с картинки: ${JSON.stringify(analysis)} ${historyText}
+
+        Сгенерируй строго JSON с двумя полями:
+        1. "searchQuery": оптимизированный запрос для поиска картинок (максимум 5-6 слов, без хешкодов цветов). Он должен выдавать релевантные, крутые картинки. Уточняй контекст (например, добавляй 'concert', 'guitar', если речь о музыкантах).
+        2. "displayVibe": короткое, загадочное и эстетичное название этого вайба для интерфейса (2-4 слова, на английском, например "70s Rock Aura" или "Surreal Pink Floyd Art").
+
+        Формат ответа СТРОГО JSON: {"searchQuery": "...", "displayVibe": "..."}
+      `;
+
+      const curated = await callGroq(prompt);
+
+      // БРОНЯ: Фолбэки на случай, если ИИ вернет ключи с другими именами или сломается
+      const finalSearchQuery = curated.searchQuery || curated.query || `${analysis.mood || 'dark'} ${analysis.style || 'aesthetic'} art`;
+      const finalDisplayVibe = curated.displayVibe || curated.vibe || "NEW RESONANCE";
+
+      console.log(`[MUTATE] AI Decision -> Query: "${finalSearchQuery}", Display: "${finalDisplayVibe}"`);
 
       return NextResponse.json({ 
         success: true, 
-        smartQuery: smartQuery,
-        raw_analysis: analysis
+        smartQuery: finalSearchQuery, 
+        displayVibe: finalDisplayVibe 
       });
     }
 
@@ -92,25 +110,16 @@ export async function POST(req: Request) {
     if (body.memory_id) {
       const { memory_id, rating, is_curated, mutate_direction, current_palette } = body;
 
-      // 1. Обновление рейтинга/кураторства
       if ((rating !== undefined || is_curated !== undefined) && process.env.NEXT_PUBLIC_SUPABASE_URL) {
         const updatePayload: any = {};
         if (rating !== undefined) updatePayload.user_rating = rating;
         if (is_curated !== undefined) updatePayload.is_curated = is_curated;
 
-        await supabase
-          .from('synth_memory')
-          .update(updatePayload)
-          .eq('id', memory_id);
+        await supabase.from('synth_memory').update(updatePayload).eq('id', memory_id);
       }
 
-      // 2. Мутация палитры
       if (mutate_direction && current_palette) {
-        const systemPrompt = `Ты — колорист-мутатор Aesthetic Nexus. 
-        Текущая палитра: ${JSON.stringify(current_palette)}.
-        Смести эту палитру в сторону направления: "${mutate_direction}".
-        Верни СТРОГО валидный JSON: { "dominant": "#HEX", "accent": "#HEX", "ambient_fog": "#HEX", "style_shift": "описание сдвига" }`;
-
+        const systemPrompt = `Ты — колорист-мутатор Aesthetic Nexus. Текущая палитра: ${JSON.stringify(current_palette)}. Смести эту палитру в сторону направления: "${mutate_direction}". Верни СТРОГО JSON: { "dominant": "#HEX", "accent": "#HEX", "ambient_fog": "#HEX", "style_shift": "описание" }`;
         const mutated = await callGroq(systemPrompt);
         return NextResponse.json({ mutated });
       }
@@ -122,10 +131,7 @@ export async function POST(req: Request) {
     // ВЕТКА 2: СТАРЫЙ ФОРМАТ (Кнопка Mutate)
     // ==========================================
     if (body.concept) {
-      const systemPrompt = `Ты креативный генератор идей. Концепт: "${body.concept}". 
-      Предложи 3 новых вектора развития этого вайба.
-      Ответь СТРОГО в JSON: { "mutations": ["вектор 1", "вектор 2", "вектор 3"] }`;
-
+      const systemPrompt = `Ты креативный генератор идей. Концепт: "${body.concept}". Предложи 3 новых вектора. Ответь СТРОГО в JSON: { "mutations": ["вектор 1", "вектор 2", "вектор 3"] }`;
       const result = await callGroq(systemPrompt);
       return NextResponse.json(result);
     }
@@ -133,10 +139,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Invalid payload format." }, { status: 400 });
 
   } catch (error: any) {
-    console.error("API Route Critical Error:", error);
-    return NextResponse.json(
-      { error: "Internal Server Error", details: process.env.NODE_ENV === 'development' ? error.message : undefined }, 
-      { status: 500 }
-    );
+    console.error("API Route Critical Error:", error.message);
+    return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
   }
 }

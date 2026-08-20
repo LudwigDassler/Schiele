@@ -13,7 +13,7 @@ function cleanLLMJSON(text: string): string {
 // Единая функция вызова Groq с таймаутом и обработкой ошибок
 async function callGroq(prompt: string) {
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 8000); // Таймаут 8 секунд
+  const timeoutId = setTimeout(() => controller.abort(), 20000); // Даем 20 секунд (защита от холодных стартов)
 
   try {
     const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
@@ -23,10 +23,11 @@ async function callGroq(prompt: string) {
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        model: process.env.GROQ_MODEL || "llama-3.1-70b-versatile",
+        // 🔥 ИСПРАВЛЕНИЕ 1: Обновили модель на актуальную 3.3
+        model: process.env.GROQ_MODEL || "llama-3.3-70b-versatile",
         messages: [{ role: "user", content: prompt }],
         response_format: { type: "json_object" },
-        temperature: 0.9 // Высокая креативность для крутых мутаций
+        temperature: 0.9
       }),
       signal: controller.signal
     });
@@ -44,7 +45,7 @@ async function callGroq(prompt: string) {
     return JSON.parse(cleanLLMJSON(rawContent));
   } catch (error: any) {
     if (error.name === 'AbortError') {
-      throw new Error("AI request timed out (8s limit)");
+      throw new Error("AI request timed out (20s limit)");
     }
     console.error("Groq Internal Error:", error.message);
     throw error;
@@ -61,11 +62,18 @@ export async function POST(req: Request) {
     if (body.image_url) {
       console.log(`[MUTATE] Step 1: Nvidia scanning artifact: ${body.image_url}`);
 
-      // 1. Глаза: Nvidia собирает сырые факты (текст, цвета, объекты)
-      const analysis = await analyzeImageWithNvidia(body.image_url);
+      // 1. Глаза: Nvidia собирает сырые факты
+      let analysis = await analyzeImageWithNvidia(body.image_url);
 
+      // 🔥 ИСПРАВЛЕНИЕ 2: Если Nvidia вернула кривой JSON, не падаем, а используем заглушку
       if (!analysis) {
-        throw new Error("Nvidia vision analysis failed.");
+        console.warn("[MUTATE] Warning: Nvidia analysis failed (bad JSON). Using fallback aesthetics.");
+        analysis = {
+          mood: "mysterious",
+          style: "abstract visual art",
+          colors: ["#000000", "#FFFFFF"],
+          contains_text: false
+        };
       }
 
       console.log(`[MUTATE] Step 2: Groq translating facts... History length:`, Array.isArray(body.history) ? body.history.length : 0);
@@ -91,8 +99,8 @@ export async function POST(req: Request) {
 
       const curated = await callGroq(prompt);
 
-      // БРОНЯ: Фолбэки на случай, если ИИ вернет ключи с другими именами или сломается
-      const finalSearchQuery = curated.searchQuery || curated.query || `${analysis.mood || 'dark'} ${analysis.style || 'aesthetic'} art`;
+      // БРОНЯ: Фолбэки
+      const finalSearchQuery = curated.searchQuery || curated.query || `${analysis.mood} ${analysis.style} art`;
       const finalDisplayVibe = curated.displayVibe || curated.vibe || "NEW RESONANCE";
 
       console.log(`[MUTATE] AI Decision -> Query: "${finalSearchQuery}", Display: "${finalDisplayVibe}"`);

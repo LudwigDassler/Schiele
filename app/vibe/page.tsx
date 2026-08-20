@@ -33,12 +33,11 @@ function VibeContent() {
   const [relatedLoading, setRelatedLoading] = useState(true);
   
   const [isMutating, setIsMutating] = useState(false);
-  
-  // 🔥 РАЗДЕЛЯЕМ: displayVibe - для красоты на экране, searchQuery - для поиска под капотом
   const [displayVibe, setDisplayVibe] = useState("ANALYZING...");
 
+  // Refs для предотвращения состояний гонки (Race conditions)
   const currentQueryRef = useRef("");
-  const historyRef = useRef<string[]>([]); // Память мутаций, чтобы не было зацикливаний
+  const historyRef = useRef<string[]>([]);
   const lastAnalyzedSrcRef = useRef<string | null>(null);
   const relatedAbortRef = useRef<AbortController | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -63,7 +62,7 @@ function VibeContent() {
     });
   }, []);
 
-  // 🔥 ЧИСТЫЙ ПОИСК (Только делает запрос к DDG/Bing, больше не пытается угадывать слова)
+  // Поиск картинок через парсер
   const fetchImages = useCallback(async (query: string, pageNum: number, reset: boolean) => {
     if (!query || !src) return;
     setRelatedLoading(true);
@@ -102,13 +101,15 @@ function VibeContent() {
       });
       setRelatedHasMore(fetched.length > 0);
     } catch (e: any) {
-      if (e.name !== "AbortError") console.error("[FETCH IMAGES ERROR]", e);
+      if (e.name !== "AbortError") {
+        console.error("[FETCH IMAGES ERROR]", e);
+      }
     } finally {
       setRelatedLoading(false);
     }
   }, [src]);
 
-  // 🔥 ЕДИНЫЙ МОЗГ (Вызывается и при старте, и по кнопке MUTATE)
+  // Контроллер Мутации (Nvidia + Groq)
   const handleMutate = useCallback(async (isInitial = false) => {
     if (isMutating || !src) return;
     setIsMutating(true);
@@ -119,43 +120,43 @@ function VibeContent() {
     }
 
     try {
-      // Отправляем картинку + ИСТОРИЮ на наш новый бэкенд
       const res = await fetch("/api/mutate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           image_url: src,
-          history: historyRef.current 
+          history: historyRef.current
         })
       });
 
       const data = await res.json();
 
       if (data.smartQuery && data.displayVibe) {
-        setDisplayVibe(data.displayVibe); // На экран идет красота (напр. "Jimmy Page Aura")
-        currentQueryRef.current = data.smartQuery; // В поиск идет скрытый запрос (напр. "Jimmy Page guitar stage")
+        setDisplayVibe(data.displayVibe);
+        currentQueryRef.current = data.smartQuery;
 
-        // Записываем в память, чтобы ИИ больше это не повторял
+        // Сохраняем в ref для избежания повторов
         historyRef.current.push(data.displayVibe);
 
         setRelatedPhotos([]);
         setRelatedPage(1);
         setRelatedHasMore(true);
         await fetchImages(data.smartQuery, 1, true);
+      } else {
+        throw new Error(data.error || "Invalid mutation response");
       }
     } catch (e) {
-      console.error("Mutation failed", e);
-      if (isInitial) setDisplayVibe("SIGNAL LOST");
+      console.error("[MUTATION FAILED]", e);
+      if (isInitial) setDisplayVibe("RESONANCE LOST");
     } finally {
       setIsMutating(false);
     }
   }, [src, isMutating, fetchImages]);
 
-  // 🔥 АВТОЗАПУСК: Как только юзер открыл страницу, ИИ сразу анализирует картинку!
+  // Автозапуск при смене картинки или открытии страницы
   useEffect(() => {
     if (!src || lastAnalyzedSrcRef.current === src) return;
     lastAnalyzedSrcRef.current = src;
-    
     currentQueryRef.current = "";
     historyRef.current = [];
     setRelatedPhotos([]);
@@ -165,7 +166,7 @@ function VibeContent() {
     handleMutate(true);
   }, [src, handleMutate]);
 
-  // Бесконечный скролл вниз
+  // Бесконечный скролл
   useEffect(() => {
     if (!bottomRef.current) return;
     const observer = new IntersectionObserver(entries => {
@@ -190,7 +191,12 @@ function VibeContent() {
       const res = await fetch("/api/pins", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_id: user.id, image_url: photo.src, title: photo.title, source_url: photo.link })
+        body: JSON.stringify({
+          user_id: user.id,
+          image_url: photo.src,
+          title: photo.title,
+          source_url: photo.link
+        })
       });
       if (res.ok) {
         const data = await res.json();
@@ -209,10 +215,11 @@ function VibeContent() {
     feedLocalAI(photo.src, photo.id);
     const isBlurred = photo.isNsfw && !nsfwAllowed;
     if (isBlurred) { setShowAgeGate(photo); return; }
-    // При переходе на новую картинку сбрасываем память
-    lastAnalyzedSrcRef.current = null;
     router.push(`/vibe?src=${encodeURIComponent(photo.src)}&title=${encodeURIComponent(photo.title || "")}&link=${encodeURIComponent(photo.link || "")}`);
   }
+
+  // 🔥 ИСПРАВЛЕНИЕ: ВОТ ЭТА СТРОЧКА ТЕПЕРЬ НА МЕСТЕ
+  const currentPhoto: Photo = { id: src || "", src: src || "", thumb: src || "", title: fallbackTitle, link: link || "" };
 
   if (!src) return <div style={{ color: "#fff", padding: 40, textAlign: "center", background: "#020104", minHeight: "100vh", fontFamily: 'Syncopate' }}>Artifact not found.</div>;
 

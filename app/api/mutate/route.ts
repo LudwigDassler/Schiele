@@ -1,3 +1,5 @@
+import { NextResponse } from 'next/server';
+
 // ==========================================
 // 🕸 ЯДРО: WIKIDATA KNOWLEDGE GRAPH PARSER
 // ==========================================
@@ -41,13 +43,13 @@ async function fetchWikidataContext(entityName: string) {
     extractQIds('P31');  // Instance of
     extractQIds('P106'); // Occupation
     extractQIds('P136'); // Genre
-    extractQIds('P178'); // Developer (для игр/софта)
-    extractQIds('P577'); // Publication date (можно распарсить год отдельно)
+    extractQIds('P178'); // Developer
+    extractQIds('P577'); // Publication date
 
-    let tags = new Set<string>();
+    const tags = new Set<string>();
     tags.add(entityName.toLowerCase());
 
-    // 4. ПАКЕТНЫЙ ЗАПРОС ЛЕЙБЛОВ (если есть что переводить)
+    // 4. ПАКЕТНЫЙ ЗАПРОС ЛЕЙБЛОВ
     if (qIdsToFetch.size > 0) {
       const qIdsString = Array.from(qIdsToFetch).join('|');
       const labelsUrl = `https://www.wikidata.org/w/api.php?action=wbgetentities&ids=${qIdsString}&props=labels&languages=en&format=json`;
@@ -56,28 +58,28 @@ async function fetchWikidataContext(entityName: string) {
 
       Object.values(labelsData.entities).forEach((qEntity: any) => {
         const label = qEntity.labels?.en?.value?.toLowerCase();
-        // Фильтр мусора
         if (label && !COMMON_STOP_WORDS.has(label) && label.length > 2) {
           tags.add(label);
         }
       });
     }
 
-    // 5. FALLBACK: Если тегов мало, берем саммари из Википедии для "вкуса"
+    // 5. FALLBACK: Википедия для "вкуса"
     if (tags.size < 3) {
       try {
         const wikiUrl = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(entityName)}`;
         const wikiRes = await fetch(wikiUrl);
         if (wikiRes.ok) {
           const wikiData = await wikiRes.json();
-          // Берем первые 15 слов из описания
           const descWords = (wikiData.extract || "").split(/\s+/).slice(0, 15);
-          descWords.forEach(w => {
+          descWords.forEach((w: string) => {
             const clean = w.replace(/[^a-z]/gi, '').toLowerCase();
             if (clean.length > 3 && !COMMON_STOP_WORDS.has(clean)) tags.add(clean);
           });
         }
-      } catch (e) { /* Игнорируем ошибки википедии */ }
+      } catch (e) { 
+        console.error("[WIKI SUMMARY ERROR]", e);
+      }
     }
 
     return Array.from(tags);
@@ -89,7 +91,7 @@ async function fetchWikidataContext(entityName: string) {
 }
 
 // ==========================================
-// 🧠 ЛОГИКА СИНТЕЗА ВАЙБА (Умная сборка)
+// 🧠 ЛОГИКА СИНТЕЗА ВАЙБА
 // ==========================================
 
 function generateVibeFromTags(title: string, tags: string[] | null) {
@@ -104,7 +106,6 @@ function generateVibeFromTags(title: string, tags: string[] | null) {
 
   const lowerTags = tags.map(t => t.toLowerCase());
   
-  // Категоризация
   const isMusic = lowerTags.some(t => ['rock', 'jazz', 'punk', 'music', 'band', 'guitarist', 'singer', 'electronic', 'hip hop'].some(g => t.includes(g)));
   const isScience = lowerTags.some(t => ['physicist', 'scientist', 'mathematics', 'astronomy', 'chemistry'].some(s => t.includes(s)));
   const isCinema = lowerTags.some(t => ['film', 'actor', 'director', 'movie', 'cinema'].some(c => t.includes(c)));
@@ -113,7 +114,6 @@ function generateVibeFromTags(title: string, tags: string[] | null) {
   let coreConcept = "";
   let styleSuffix = "aesthetic"; 
 
-  // Выбор стиля на основе категории
   if (isMusic) {
     coreConcept = lowerTags.find(t => ['rock', 'jazz', 'punk', 'metal', 'electronic'].includes(t)) || "music";
     styleSuffix = "vintage concert photography poster";
@@ -128,12 +128,9 @@ function generateVibeFromTags(title: string, tags: string[] | null) {
     styleSuffix = "masterpiece gallery texture";
   }
 
-  // СБОРКА ЗАПРОСА: [Имя] [Жанр/Профессия] [Стиль]
-  // Максимум 5-6 слов для лучшего поиска
   const queryParts = [cleanTitle];
   if (coreConcept) queryParts.push(coreConcept);
   
-  // Добавляем 1-2 самых уникальных тега, если они не вошли в coreConcept
   const uniqueTags = lowerTags.filter(t => 
     t !== cleanTitle.toLowerCase() && 
     t !== coreConcept && 
@@ -146,7 +143,6 @@ function generateVibeFromTags(title: string, tags: string[] | null) {
 
   const searchQuery = queryParts.join(' ').trim();
 
-  // ГЕНЕРАЦИЯ НАЗВАНИЯ ВАЙБА
   const vibeWords = [];
   if (isMusic) vibeWords.push("SONIC");
   else if (isScience) vibeWords.push("ATOMIC");
@@ -163,4 +159,51 @@ function generateVibeFromTags(title: string, tags: string[] | null) {
   const displayVibe = vibeWords.join(' ');
 
   return { searchQuery, displayVibe };
+}
+
+// ==========================================
+// 🚀 API ROUTE
+// ==========================================
+
+export async function POST(req: Request) {
+  try {
+    const body = await req.json();
+    const { image_url, title } = body;
+
+    // Если ты передаешь concept (в старом коде), проверяем и его
+    const targetTitle = title || body.concept || (image_url ? image_url.split('/').pop() : "");
+
+    if (!targetTitle) {
+      return NextResponse.json({ error: "Title or Image URL required" }, { status: 400 });
+    }
+
+    console.log(`[MUTATE] Starting Knowledge Graph extraction for: "${targetTitle}"`);
+
+    let tags = null;
+    if (targetTitle && targetTitle.length > 2) {
+       tags = await fetchWikidataContext(targetTitle);
+       if (tags) {
+         console.log(`[MUTATE] Wikidata found tags:`, tags);
+       }
+    }
+
+    const result = generateVibeFromTags(targetTitle, tags);
+
+    console.log(`[MUTATE] Generated -> Query: "${result.searchQuery}", Display: "${result.displayVibe}"`);
+
+    return NextResponse.json({
+      success: true,
+      smartQuery: result.searchQuery,
+      displayVibe: result.displayVibe,
+      source: tags ? 'wikidata' : 'fallback-heuristic'
+    });
+
+  } catch (error: any) {
+    console.error("[MUTATE CRITICAL ERROR]", error);
+    return NextResponse.json({ 
+      error: "Mutation failed", 
+      smartQuery: "aesthetic vintage high quality", 
+      displayVibe: "SYSTEM ERROR" 
+    }, { status: 500 });
+  }
 }

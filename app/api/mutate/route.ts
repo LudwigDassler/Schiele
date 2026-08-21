@@ -1,164 +1,166 @@
-import { NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase';
-import { analyzeImageWithNvidia } from '@/lib/vision-analyzer';
+// ==========================================
+// 🕸 ЯДРО: WIKIDATA KNOWLEDGE GRAPH PARSER
+// ==========================================
 
-// Утилита для жесткой очистки JSON от любого мусора
-function cleanLLMJSON(text: string): string {
-  if (!text) return "{}";
-  let cleaned = text.trim();
-  const jsonStart = cleaned.indexOf('{');
-  const jsonEnd = cleaned.lastIndexOf('}');
-  if (jsonStart !== -1 && jsonEnd !== -1) {
-    cleaned = cleaned.substring(jsonStart, jsonEnd + 1);
-  }
-  return cleaned || "{}";
-}
+const COMMON_STOP_WORDS = new Set([
+  'human', 'male', 'female', 'work', 'image', 'file', 'common', 
+  'wikimedia', 'instance', 'property', 'item', 'country', 'world'
+]);
 
-// 🔥 Единый текстовый мозг: УМНЫЙ, БЕСПЛАТНЫЙ, СТАБИЛЬНЫЙ
-async function callSmartTextBrain(prompt: string) {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 20000); // 20 секунд
-
+async function fetchWikidataContext(entityName: string) {
   try {
-    const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        // Используем 70-миллиардную модель. Она гениальна, не льет воду и работает бесплатно.
-        model: "meta-llama/llama-3.3-70b-instruct:free",
-        messages: [{ role: "user", content: prompt }],
-        temperature: 0.7
-      }),
-      signal: controller.signal
-    });
+    // 1. Поиск сущности (получаем Q-ID)
+    const searchUrl = `https://www.wikidata.org/w/api.php?action=wbsearchentities&search=${encodeURIComponent(entityName)}&language=en&format=json&limit=1`;
+    const searchRes = await fetch(searchUrl);
+    const searchData = await searchRes.json();
 
-    clearTimeout(timeoutId);
+    if (!searchData.search || searchData.search.length === 0) return null;
+    
+    const entityId = searchData.search[0].id;
+    console.log(`[GRAPH] Found entity: ${entityId} (${entityName})`);
 
-    if (!res.ok) {
-      const errText = await res.text().catch(() => "Unknown error");
-      throw new Error(`OpenRouter Error: ${res.status} ${errText}`);
+    // 2. Получаем полные данные сущности
+    const detailsUrl = `https://www.wikidata.org/wiki/Special:EntityData/${entityId}.json`;
+    const detailsRes = await fetch(detailsUrl);
+    const detailsData = await detailsRes.json();
+    const entity = detailsData.entities[entityId];
+    if (!entity) return null;
+
+    // 3. Сбор Q-кодов из ключевых свойств
+    const qIdsToFetch = new Set<string>();
+    
+    const extractQIds = (propertyCode: string) => {
+      if (entity.claims[propertyCode]) {
+        entity.claims[propertyCode].forEach((claim: any) => {
+          const id = claim.mainsnak?.datavalue?.value?.id;
+          if (id && !qIdsToFetch.has(id)) qIdsToFetch.add(id);
+        });
+      }
+    };
+
+    extractQIds('P31');  // Instance of
+    extractQIds('P106'); // Occupation
+    extractQIds('P136'); // Genre
+    extractQIds('P178'); // Developer (для игр/софта)
+    extractQIds('P577'); // Publication date (можно распарсить год отдельно)
+
+    let tags = new Set<string>();
+    tags.add(entityName.toLowerCase());
+
+    // 4. ПАКЕТНЫЙ ЗАПРОС ЛЕЙБЛОВ (если есть что переводить)
+    if (qIdsToFetch.size > 0) {
+      const qIdsString = Array.from(qIdsToFetch).join('|');
+      const labelsUrl = `https://www.wikidata.org/w/api.php?action=wbgetentities&ids=${qIdsString}&props=labels&languages=en&format=json`;
+      const labelsRes = await fetch(labelsUrl);
+      const labelsData = await labelsRes.json();
+
+      Object.values(labelsData.entities).forEach((qEntity: any) => {
+        const label = qEntity.labels?.en?.value?.toLowerCase();
+        // Фильтр мусора
+        if (label && !COMMON_STOP_WORDS.has(label) && label.length > 2) {
+          tags.add(label);
+        }
+      });
     }
 
-    const data = await res.json();
-    const rawContent = data.choices?.[0]?.message?.content || "{}";
-    return JSON.parse(cleanLLMJSON(rawContent));
-  } catch (error: any) {
-    clearTimeout(timeoutId);
-    throw error;
-  }
-}
-
-export async function POST(req: Request) {
-  try {
-    const body = await req.json();
-
-    // ==========================================
-    // ВЕТКА 3: ВИЗУАЛЬНАЯ МУТАЦИЯ (Nvidia + Умная Llama 70B)
-    // ==========================================
-    if (body.image_url) {
-      console.log(`[MUTATE] Step 1: Nvidia scanning artifact: ${body.image_url}`);
-
-      // 1. Глаза: Nvidia безотказно собирает факты
-      let analysis = await analyzeImageWithNvidia(body.image_url);
-
-      if (!analysis) {
-        console.warn("[MUTATE] Warning: Nvidia analysis failed (bad JSON). Using fallback.");
-        analysis = {
-          mood: "mysterious",
-          style: "vintage photography",
-          colors: ["#000000", "#FFFFFF"],
-          contains_text: false,
-          description: "Vintage historical artifact",
-          tags: ["vintage", "history"]
-        };
-      }
-
-      console.log(`[MUTATE] Step 2: OpenRouter 70B Brain translating facts... History length:`, Array.isArray(body.history) ? body.history.length : 0);
-
-      const historyText = Array.isArray(body.history) && body.history.length > 0 
-        ? `\nПРЕДЫДУЩИЕ ВАЙБЫ (КАТЕГОРИЧЕСКИ НЕ ПОВТОРЯЙ ИХ, ищи новые ассоциации): ${JSON.stringify(body.history)}` 
-        : "";
-
-      // 2. Мозг: Жесткий промпт для 70B модели
-      const prompt = `
-        Ты — элитный арт-директор, историк искусств и куратор приложения Schiele.
-        Проанализируй сырые технические данные с картинки и создай концепт.
-
-        ЖЕСТКИЕ ПРАВИЛА:
-        1. УЗНАВАЙ КОНТЕКСТ: Если в описании есть известный человек (например, Оппенгеймер, Дэвид Боуи), историческая эпоха или бренд — ИСПОЛЬЗУЙ ЭТО. Никакой абстрактной воды вроде "Whispers of the unknown".
-        2. ФАКТУРА: Вайб должен быть материальным и точным. Пример: для старого фото ученого с сигаретой — "Atomic Era Noir", "Manhattan Project" или "Mid-Century Intellectual".
-        3. ИСТОРИЯ: Учитывай предыдущие мутации и не повторяйся: ${historyText}
-
-        Сырые данные от визуального анализатора: ${JSON.stringify(analysis)}
-
-        Сгенерируй СТРОГО JSON (без маркдауна и лишних слов) с двумя полями:
-        1. "searchQuery": точный запрос для поиска картинок (4-6 слов). Например: "1940s scientist vintage portrait photography".
-        2. "displayVibe": эстетичное, хлесткое название вайба для интерфейса (2-4 слова, на английском).
-
-        Формат ответа СТРОГО: {"searchQuery": "...", "displayVibe": "..."}
-      `;
-
+    // 5. FALLBACK: Если тегов мало, берем саммари из Википедии для "вкуса"
+    if (tags.size < 3) {
       try {
-        const curated = await callSmartTextBrain(prompt);
-        
-        const finalSearchQuery = curated.searchQuery || curated.query || `${analysis.mood} ${analysis.style}`;
-        const finalDisplayVibe = curated.displayVibe || curated.vibe || "VINTAGE AURA";
-
-        console.log(`[MUTATE] AI Decision -> Query: "${finalSearchQuery}", Display: "${finalDisplayVibe}"`);
-
-        return NextResponse.json({ 
-          success: true, 
-          smartQuery: finalSearchQuery, 
-          displayVibe: finalDisplayVibe 
-        });
-
-      } catch (brainError) {
-        console.error("[MUTATE] Text Brain failed, falling back...", brainError);
-        return NextResponse.json({ 
-          success: true, 
-          smartQuery: "aesthetic vintage portrait", 
-          displayVibe: "SIGNAL RECOVERED" 
-        });
-      }
+        const wikiUrl = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(entityName)}`;
+        const wikiRes = await fetch(wikiUrl);
+        if (wikiRes.ok) {
+          const wikiData = await wikiRes.json();
+          // Берем первые 15 слов из описания
+          const descWords = (wikiData.extract || "").split(/\s+/).slice(0, 15);
+          descWords.forEach(w => {
+            const clean = w.replace(/[^a-z]/gi, '').toLowerCase();
+            if (clean.length > 3 && !COMMON_STOP_WORDS.has(clean)) tags.add(clean);
+          });
+        }
+      } catch (e) { /* Игнорируем ошибки википедии */ }
     }
 
-    // ==========================================
-    // ВЕТКА 1: НОВЫЙ ФОРМАТ (Mutation Chamber)
-    // ==========================================
-    if (body.memory_id) {
-      const { memory_id, rating, is_curated, mutate_direction, current_palette } = body;
+    return Array.from(tags);
 
-      if ((rating !== undefined || is_curated !== undefined) && process.env.NEXT_PUBLIC_SUPABASE_URL) {
-        const updatePayload: any = {};
-        if (rating !== undefined) updatePayload.user_rating = rating;
-        if (is_curated !== undefined) updatePayload.is_curated = is_curated;
-        await supabase.from('synth_memory').update(updatePayload).eq('id', memory_id);
-      }
-
-      if (mutate_direction && current_palette) {
-        const systemPrompt = `Ты — колорист-мутатор Aesthetic Nexus. Текущая палитра: ${JSON.stringify(current_palette)}. Смести эту палитру в сторону направления: "${mutate_direction}". Верни СТРОГО JSON: { "dominant": "#HEX", "accent": "#HEX", "ambient_fog": "#HEX", "style_shift": "описание" }`;
-        const mutated = await callSmartTextBrain(systemPrompt);
-        return NextResponse.json({ mutated });
-      }
-      return NextResponse.json({ success: true, message: "Память обновлена" });
-    }
-
-    // ==========================================
-    // ВЕТКА 2: СТАРЫЙ ФОРМАТ (Кнопка Mutate)
-    // ==========================================
-    if (body.concept) {
-      const systemPrompt = `Ты креативный генератор идей. Концепт: "${body.concept}". Предложи 3 новых вектора. Ответь СТРОГО в JSON: { "mutations": ["вектор 1", "вектор 2", "вектор 3"] }`;
-      const result = await callSmartTextBrain(systemPrompt);
-      return NextResponse.json(result);
-    }
-
-    return NextResponse.json({ error: "Invalid payload format." }, { status: 400 });
-
-  } catch (error: any) {
-    console.error("API Route Critical Error:", error.message);
-    return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
+  } catch (error) {
+    console.error("[WIKIDATA ERROR]", error);
+    return null;
   }
+}
+
+// ==========================================
+// 🧠 ЛОГИКА СИНТЕЗА ВАЙБА (Умная сборка)
+// ==========================================
+
+function generateVibeFromTags(title: string, tags: string[] | null) {
+  const cleanTitle = title.replace(/[^a-zA-Z0-9\s]/g, '').trim();
+
+  if (!tags || tags.length === 0) {
+    return {
+      searchQuery: `${cleanTitle} aesthetic high quality`,
+      displayVibe: "UNKNOWN RESONANCE"
+    };
+  }
+
+  const lowerTags = tags.map(t => t.toLowerCase());
+  
+  // Категоризация
+  const isMusic = lowerTags.some(t => ['rock', 'jazz', 'punk', 'music', 'band', 'guitarist', 'singer', 'electronic', 'hip hop'].some(g => t.includes(g)));
+  const isScience = lowerTags.some(t => ['physicist', 'scientist', 'mathematics', 'astronomy', 'chemistry'].some(s => t.includes(s)));
+  const isCinema = lowerTags.some(t => ['film', 'actor', 'director', 'movie', 'cinema'].some(c => t.includes(c)));
+  const isArt = lowerTags.some(t => ['painter', 'artist', 'sculptor', 'art movement'].some(a => t.includes(a)));
+
+  let coreConcept = "";
+  let styleSuffix = "aesthetic"; 
+
+  // Выбор стиля на основе категории
+  if (isMusic) {
+    coreConcept = lowerTags.find(t => ['rock', 'jazz', 'punk', 'metal', 'electronic'].includes(t)) || "music";
+    styleSuffix = "vintage concert photography poster";
+  } else if (isScience) {
+    coreConcept = "science history";
+    styleSuffix = "vintage portrait archive";
+  } else if (isCinema) {
+    coreConcept = "cinema";
+    styleSuffix = "film still cinematography";
+  } else if (isArt) {
+    coreConcept = lowerTags.find(t => t.includes('art') || t.includes('ism')) || "art";
+    styleSuffix = "masterpiece gallery texture";
+  }
+
+  // СБОРКА ЗАПРОСА: [Имя] [Жанр/Профессия] [Стиль]
+  // Максимум 5-6 слов для лучшего поиска
+  const queryParts = [cleanTitle];
+  if (coreConcept) queryParts.push(coreConcept);
+  
+  // Добавляем 1-2 самых уникальных тега, если они не вошли в coreConcept
+  const uniqueTags = lowerTags.filter(t => 
+    t !== cleanTitle.toLowerCase() && 
+    t !== coreConcept && 
+    !COMMON_STOP_WORDS.has(t) &&
+    t.length > 4
+  ).slice(0, 2);
+  
+  queryParts.push(...uniqueTags);
+  queryParts.push(styleSuffix);
+
+  const searchQuery = queryParts.join(' ').trim();
+
+  // ГЕНЕРАЦИЯ НАЗВАНИЯ ВАЙБА
+  const vibeWords = [];
+  if (isMusic) vibeWords.push("SONIC");
+  else if (isScience) vibeWords.push("ATOMIC");
+  else if (isCinema) vibeWords.push("CINEMATIC");
+  else if (isArt) vibeWords.push("AESTHETIC");
+  else vibeWords.push("VISUAL");
+
+  if (coreConcept && coreConcept !== "music" && coreConcept !== "science" && coreConcept !== "cinema") {
+    vibeWords.push(coreConcept.split(' ')[0].toUpperCase());
+  } else {
+    vibeWords.push("RESONANCE");
+  }
+
+  const displayVibe = vibeWords.join(' ');
+
+  return { searchQuery, displayVibe };
 }

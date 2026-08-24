@@ -1,65 +1,13 @@
 /**
  * ==========================================
- * ТРОИЦА: 1. OVERSEER CORE (Бог-Отец)
+ * OVERSEER CORE: Математическое Сито
  * ==========================================
- * Логистика, парсинг сырья и Байесовская TCP-Гильотина.
+ * Отвечает исключительно за расчет Байесовской вероятности,
+ * энтропии Шеннона и аппаратный обрыв TCP-сокетов (Гильотина).
  */
 
 export class OverseerCore {
   
-  /**
-   * Запуск Рейда.
-   * @param query Текстовый запрос для парсера
-   * @param targetEnergy Идеальная яркость (0.0 - тьма, 1.0 - свет)
-   * @param targetChaos Идеальная текстура (0.0 - градиент/вектор, 1.0 - шум/зерно)
-   */
-  static async executeRaid(query: string, targetEnergy: number, targetChaos: number): Promise<string[]> {
-    console.log(`[OVERSEER] Рейд начат: "${query}". Вектор цели -> Энергия: ${targetEnergy}, Хаос: ${targetChaos}`);
-    
-    // 1. Сбор сырья и инъекция Котельникова
-    const rawUrls = await this.scrapeAndDownsample(query);
-    console.log(`[OVERSEER] Извлечено ссылок: ${rawUrls.length}. Запуск Байесовской Гильотины...`);
-
-    // 2. Многомерный триаж (Убийство в полете)
-    const survivors = await this.bayesianGuillotine(rawUrls, targetEnergy, targetChaos);
-    console.log(`[OVERSEER] Гильотина отсекла мусор. Выжило элиты: ${survivors.length}`);
-
-    // Возвращаем выжившие ссылки для передачи Питону
-    return survivors;
-  }
-
-  /**
-   * Скрапер DuckDuckGo + Теорема Котельникова (сжатие на лету)
-   */
-  private static async scrapeAndDownsample(query: string): Promise<string[]> {
-    const searchUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
-    
-    try {
-      // Идем в поисковик, маскируясь под обычный браузер
-      const res = await fetch(searchUrl, {
-        headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)' }
-      });
-      const html = await res.text();
-      
-      const imgRegex = /src="(\/\/external-content\.duckduckgo\.com\/iu\/\?u=[^"]+)"/g;
-      let match;
-      const urls: string[] = [];
-      
-      while ((match = imgRegex.exec(html)) !== null && urls.length < 50) {
-        let url = match[1].startsWith('//') ? 'https:' + match[1] : match[1];
-        
-        // Котельников: Принудительное сжатие спектра.
-        // Заставляем сервера-доноры отдавать нам микро-превью.
-        url = url.replace(/([?&])w=\d+/g, '$1w=128').replace(/([?&])h=\d+/g, '$1h=128');
-        urls.push(url);
-      }
-      return urls;
-    } catch (e) {
-      console.error("[OVERSEER] Ошибка слепого рейда:", e);
-      return [];
-    }
-  }
-
   /**
    * Априорная вероятность источника P(S)
    */
@@ -98,14 +46,16 @@ export class OverseerCore {
   }
 
   /**
-   * Многомерный Байесовский Триаж (Математическое Сито)
+   * Многомерный Байесовский Триаж (TCP-Гильотина)
+   * Теперь PUBLIC, чтобы твой route.ts мог передавать сюда сырые ссылки из DDG.
    */
-  private static async bayesianGuillotine(urls: string[], targetEnergy: number, targetChaos: number): Promise<string[]> {
+  public static async bayesianGuillotine(urls: string[], targetEnergy: number, targetChaos: number): Promise<string[]> {
     const survivors: string[] = [];
     
+    // Асинхронно выстреливаем по всем URL сразу
     const promises = urls.map(async (url) => {
       const prior = this.getPriorProbability(url);
-      if (prior < 0.1) return; // Мгновенная смерть для мусорных доменов
+      if (prior < 0.1) return; // Мгновенная смерть для мусорных доменов, даже не открываем сокет
 
       const controller = new AbortController();
       try {
@@ -115,42 +65,44 @@ export class OverseerCore {
         const reader = response.body.getReader();
         const { value: chunk, done } = await reader.read(); 
         
-        // УБИЙСТВО В ПОЛЕТЕ: Нам нужен только первый пакет данных.
+        // УБИЙСТВО В ПОЛЕТЕ: Мы прочитали первые килобайты. 
+        // Немедленно рвем сокет, чтобы не грузить память и процессор.
         reader.cancel();
         controller.abort(); 
 
         if (!done && chunk) {
-          // Физика первого чанка
+          // 1. Извлекаем физику первого чанка
           let energySum = 0;
           for (let i = 0; i < chunk.length; i++) energySum += chunk[i];
           
           const chunkEnergy = (energySum / chunk.length) / 255.0; 
           const chunkEntropy = this.calculateShannon(chunk);      
 
-          // Правдоподобие P(E|S)
+          // 2. Считаем Правдоподобие P(E|S)
           const energyLikelihood = Math.max(0, 1.0 - Math.abs(chunkEnergy - targetEnergy));
           const chaosLikelihood = Math.max(0, 1.0 - Math.abs(chunkEntropy - targetChaos));
           
           // Текстура (хаос) имеет больший вес (0.7), чем сырая яркость (0.3)
           const likelihood = (energyLikelihood * 0.3) + (chaosLikelihood * 0.7);
 
-          // Байесовское обновление P(S|E)
+          // 3. Байесовское обновление P(S|E) = Likelihood * Prior
           const posterior = likelihood * prior;
 
-          // Ожидаемая полезность: EU = P(S|E) * Value - Cost
+          // 4. Ожидаемая полезность (Теория Игр)
           // Стоимость обработки на Питоне (0.25). Ценность успеха (1.0).
           const expectedUtility = (posterior * 1.0) - 0.25;
 
+          // Пропускаем только те активы, чья математическая ставка сыграла в плюс
           if (expectedUtility > 0.3) {
             survivors.push(url);
           }
         }
       } catch (e) {
-        // Сетевое прерывание прошло успешно или ссылка мертва. Забываем про нее.
+        // Ошибка сети или успешный аппаратный abort(). Молча списываем актив.
       }
     });
 
-    // Распараллеливаем удары гильотины. 
+    // Ждем, пока отработают все обрывы сокетов
     await Promise.all(promises);
     return survivors;
   }

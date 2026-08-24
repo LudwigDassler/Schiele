@@ -1,4 +1,4 @@
-﻿import { NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import * as cheerio from "cheerio";
 import { kashmir } from "../../../lib/kashmir";
 import { classifyIntent } from "../../../lib/intentRouter";
@@ -16,9 +16,6 @@ function cacheKey(query: string, page: number) {
   return `${query.trim().toLowerCase()}::p${page}`;
 }
 
-// Кэш — это оптимизация и подушка безопасности, а не критичный путь.
-// Любая ошибка здесь тихо проглатывается: лучше живой поиск без кэша,
-// чем упавший запрос из-за того, что таблица кэша не настроена.
 async function readCache(key: string, allowStale = false): Promise<any[] | null> {
   try {
     const { data } = await supabase.from("search_cache").select("results, created_at").eq("query_key", key).maybeSingle();
@@ -37,9 +34,6 @@ async function writeCache(key: string, results: any[]) {
   } catch (e) {}
 }
 
-// Основной источник — DDG, качество выдачи лучше. Пагинация через смещение `s`
-// (в прежней версии было жёстко зашито `p=1` — это НЕ параметр пагинации
-// картиночного API DDG, поэтому лента переставала расти после первого экрана).
 async function searchDuckDuckGo(query: string, page: number) {
   const headers = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -84,8 +78,6 @@ async function searchDuckDuckGo(query: string, page: number) {
   }
 }
 
-// Фоллбэк на Bing — включается только когда DDG молчит. Тот же Hydra-прокси,
-// пагинация через `first` (Bing нумерует результаты с 1, а не со смещения 0).
 async function searchBing(query: string, page: number) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 15000);
@@ -136,6 +128,39 @@ async function searchBing(query: string, page: number) {
   }
 }
 
+// 🔥 НОВЫЙ БЛОК: Безопасный поиск по твоей базе (заполненной Nvidia)
+async function searchInternalDatabase(query: string, page: number) {
+  try {
+    const offset = (page - 1) * PAGE_SIZE;
+    
+    // ИСПРАВЛЕНО: Фильтр .or() записан в ОДНУ СТРОКУ без пробелов после запятых.
+    // Поиск идет по текстовым полям (description, vibe), куда AI дублирует все теги и распознанный текст.
+    // Это надежно работает с фразами типа "Pink Floyd".
+    const { data, error } = await supabase
+      .from('images')
+      .select('*')
+      .or(`image_description.ilike.%${query}%,core_vibe.ilike.%${query}%,title.ilike.%${query}%`)
+      .order('created_at', { ascending: false })
+      .range(offset, offset + PAGE_SIZE - 1);
+
+    if (error) throw error;
+    if (!data) return [];
+
+    // Приводим к общему формату карточек для фронтенда
+    return data.map((img: any) => ({
+      id: `schiele-db-${img.id}`,
+      src: img.src || img.image_url,
+      thumb: img.src || img.image_url,
+      title: img.core_vibe ? `[Schiele] ${img.core_vibe}` : (img.title || query),
+      link: img.src || img.image_url,
+      isInternal: true // Флаг для подсветки "своих" картинок
+    }));
+  } catch (error: any) {
+    console.error("[INTERNAL DB ERROR]", error.message);
+    return []; // Если база недоступна, возвращаем пустоту, чтобы не положить общий поиск
+  }
+}
+
 export async function GET(req: Request) {
   try {
     const url = new URL(req.url);
@@ -143,6 +168,9 @@ export async function GET(req: Request) {
     const userId = url.searchParams.get("userId") || "anon";
     const explicitMode = url.searchParams.get("mode");
     const page = Math.max(1, parseInt(url.searchParams.get("page") || "1", 10) || 1);
+
+    // СЕКРЕТНЫЙ ТУМБЛЕР: Слияние работает только если передать &mix=true
+    const mixWithInternal = url.searchParams.get("mix") === "true";
 
     const isExplicitOverride = !!explicitMode && explicitMode !== "classic";
     const intent = isExplicitOverride ? "kashmir" : classifyIntent(rawQuery);
@@ -163,42 +191,63 @@ export async function GET(req: Request) {
     }
 
     console.log(`[KASHMIR] Vibe formulated: "${optimizedQuery}"`);
-
     const key = cacheKey(optimizedQuery, page);
 
-    // 1. Свежий кэш — мгновенный ответ, скраперы вообще не трогаем
+    // 🔥 ПАРАЛЛЕЛЬНЫЙ ЗАПУСК: Ищем в своей базе одновременно с DDG
+    const internalSearchPromise = mixWithInternal 
+      ? searchInternalDatabase(optimizedQuery, page) 
+      : Promise.resolve([]);
+
+    // --- БЛОК ВНЕШНЕГО ПОИСКА ---
+    let externalArtifacts: any[] = [];
+    
     const cached = await readCache(key);
     if (cached && cached.length > 0) {
       console.log(`[KASHMIR CACHE] Hit for "${optimizedQuery}" (page ${page})`);
-      return NextResponse.json({ data: cached });
-    }
+      externalArtifacts = cached;
+    } else {
+      externalArtifacts = await searchDuckDuckGo(optimizedQuery, page);
+      let source = "ddg";
 
-    // 2. DDG — основной источник
-    let artifacts = await searchDuckDuckGo(optimizedQuery, page);
-    let source = "ddg";
-
-    // 3. DDG промолчал — тихо, без ошибки для юзера, пробуем Bing
-    if (artifacts.length === 0) {
-      console.warn(`[KASHMIR] DDG вернул пусто, пробуем Bing...`);
-      artifacts = await searchBing(optimizedQuery, page);
-      source = "bing";
-    }
-
-    // 4. Оба движка легли одновременно — последний шанс: протухший кэш лучше пустой ленты
-    if (artifacts.length === 0) {
-      const stale = await readCache(key, true);
-      if (stale && stale.length > 0) {
-        console.warn(`[KASHMIR] DDG и Bing недоступны, отдаём протухший кэш для "${optimizedQuery}"`);
-        return NextResponse.json({ data: stale });
+      if (externalArtifacts.length === 0) {
+        console.warn(`[KASHMIR] DDG вернул пусто, пробуем Bing...`);
+        externalArtifacts = await searchBing(optimizedQuery, page);
+        source = "bing";
       }
-      throw new Error("DuckDuckGo и Bing одновременно ничего не вернули");
+
+      if (externalArtifacts.length === 0) {
+        const stale = await readCache(key, true);
+        if (stale && stale.length > 0) {
+          console.warn(`[KASHMIR] DDG и Bing недоступны, отдаём протухший кэш для "${optimizedQuery}"`);
+          externalArtifacts = stale;
+        }
+      } else {
+        console.log(`[KASHMIR] Successfully extracted ${externalArtifacts.length} artifacts via ${source}.`);
+        await writeCache(key, externalArtifacts);
+      }
     }
 
-    console.log(`[KASHMIR] Successfully extracted ${artifacts.length} artifacts via ${source}.`);
+    // --- ФАЗА СЛИЯНИЯ ---
+    const internalArtifacts = await internalSearchPromise;
 
-    await writeCache(key, artifacts);
+    // Если тумблер выключен или наша база ничего не нашла — отдаем стандартную ленту
+    if (!mixWithInternal || internalArtifacts.length === 0) {
+      if (externalArtifacts.length === 0) throw new Error("DuckDuckGo и Bing одновременно ничего не вернули");
+      return NextResponse.json({ data: externalArtifacts });
+    }
 
-    return NextResponse.json({ data: artifacts });
+    // АЛГОРИТМ "МОЛНИЯ" (Через один)
+    const mixedData = [];
+    const maxLength = Math.max(externalArtifacts.length, internalArtifacts.length);
+    
+    for (let i = 0; i < maxLength; i++) {
+      if (internalArtifacts[i]) mixedData.push(internalArtifacts[i]); // Своя
+      if (externalArtifacts[i]) mixedData.push(externalArtifacts[i]); // Чужая
+    }
+
+    console.log(`[KASHMIR] Mixed ${internalArtifacts.length} internal + ${externalArtifacts.length} external artifacts.`);
+    return NextResponse.json({ data: mixedData });
+
   } catch (error: any) {
     console.error("[KASHMIR FATAL ERROR]", error.message);
     return NextResponse.json({ error: error.message || "Failed to extract visual vibe", data: [] }, { status: 500 });

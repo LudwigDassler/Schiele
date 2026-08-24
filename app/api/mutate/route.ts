@@ -1,112 +1,65 @@
 import { NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase';
-
-// Утилита для безопасной очистки JSON от маркдауна
-function cleanLLMJSON(text: string): string {
-  if (!text) return "{}";
-  let cleaned = text.trim();
-  // Удаляем обертки ```json ... ``` или ``` ... ```
-  cleaned = cleaned.replace(/^```(json)?\s*/, "").replace(/```$/, "").trim();
-  return cleaned;
-}
-
-// Единая функция вызова Groq с таймаутом и обработкой ошибок
-async function callGroq(prompt: string) {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 8000); // Таймаут 8 секунд
-
-  try {
-    const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${process.env.GROQ_API_KEY}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        model: process.env.GROQ_MODEL || "llama-3.1-70b-versatile",
-        messages: [{ role: "user", content: prompt }],
-        response_format: { type: "json_object" },
-        temperature: 0.7
-      }),
-      signal: controller.signal
-    });
-
-    clearTimeout(timeoutId);
-
-    if (!res.ok) {
-      const errText = await res.text().catch(() => "Unknown error");
-      throw new Error(`Groq API Error: ${res.status} ${errText}`);
-    }
-
-    const data = await res.json();
-    const rawContent = data.choices?.[0]?.message?.content || "{}";
-    
-    return JSON.parse(cleanLLMJSON(rawContent));
-  } catch (error: any) {
-    if (error.name === 'AbortError') {
-      throw new Error("AI request timed out (8s limit)");
-    }
-    console.error("Groq Internal Error:", error.message);
-    throw error;
-  }
-}
 
 export async function POST(req: Request) {
   try {
     const body = await req.json();
+    const { image_url, title } = body;
 
-    // ==========================================
-    // ВЕТКА 1: НОВЫЙ ФОРМАТ (Mutation Chamber)
-    // ==========================================
-    if (body.memory_id) {
-      const { memory_id, rating, is_curated, mutate_direction, current_palette } = body;
-
-      // 1. Обновление рейтинга/кураторства
-      if ((rating !== undefined || is_curated !== undefined) && process.env.NEXT_PUBLIC_SUPABASE_URL) {
-        const updatePayload: any = {};
-        if (rating !== undefined) updatePayload.user_rating = rating;
-        if (is_curated !== undefined) updatePayload.is_curated = is_curated;
-
-        await supabase
-          .from('synth_memory')
-          .update(updatePayload)
-          .eq('id', memory_id);
-      }
-
-      // 2. Мутация палитры
-      if (mutate_direction && current_palette) {
-        const systemPrompt = `Ты — колорист-мутатор Aesthetic Nexus. 
-        Текущая палитра: ${JSON.stringify(current_palette)}.
-        Смести эту палитру в сторону направления: "${mutate_direction}".
-        Верни СТРОГО валидный JSON: { "dominant": "#HEX", "accent": "#HEX", "ambient_fog": "#HEX", "style_shift": "описание сдвига" }`;
-
-        const mutated = await callGroq(systemPrompt);
-        return NextResponse.json({ mutated });
-      }
-
-      return NextResponse.json({ success: true, message: "Память обновлена" });
+    if (!image_url) {
+      return NextResponse.json({ error: "Image URL is strictly required for Tensor Mutation" }, { status: 400 });
     }
 
-    // ==========================================
-    // ВЕТКА 2: СТАРЫЙ ФОРМАТ (Кнопка Mutate)
-    // ==========================================
-    if (body.concept) {
-      const systemPrompt = `Ты креативный генератор идей. Концепт: "${body.concept}". 
-      Предложи 3 новых вектора развития этого вайба.
-      Ответь СТРОГО в JSON: { "mutations": ["вектор 1", "вектор 2", "вектор 3"] }`;
+    // 1. Очищаем заголовок от мусора еще до отправки в Питон
+    const rawTitle = title || body.concept || image_url.split('/').pop() || "";
+    const cleanTitle = rawTitle
+        .replace(/[-_]/g, ' ')          // Меняем дефисы на пробелы
+        .replace(/\d+/g, '')            // Убираем цифры (типа 1977 или 1548)
+        .replace(/\.jpg|\.png|\.jpeg|\.webp/i, '') // Убираем расширения
+        .replace(/\s+/g, ' ')           // Убираем двойные пробелы
+        .trim();
 
-      const result = await callGroq(systemPrompt);
-      return NextResponse.json(result);
+    console.log(`[MUTATE] Трансляция пикселей в Риманово пространство: ${image_url}`);
+    console.log(`[MUTATE] Идентифицирован субъект: "${cleanTitle}"`);
+
+    try {
+      // 2. Отправляем запрос в твое облако на Render
+      const oracleResponse = await fetch('https://kashmir-oracle.onrender.com/mutate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          image_url: image_url, 
+          title: cleanTitle 
+        }),
+        signal: AbortSignal.timeout(5000)
+      });
+
+      if (oracleResponse.ok) {
+        const data = await oracleResponse.json();
+        console.log(`[MUTATE] Обратная проекция успешна: ${data.smartQuery}`);
+        return NextResponse.json(data);
+      } else {
+        throw new Error(`Oracle HTTP error: ${oracleResponse.status}`);
+      }
+    } catch (oracleError) {
+      console.warn("[MUTATE] Оракул оффлайн или отверг пиксели. Активируем фоллбэк.", oracleError);
+      
+      // 3. Фоллбэк: если Питон упал, просто ищем по очищенному субъекту
+      const fallbackQuery = cleanTitle ? `${cleanTitle} aesthetic high quality` : "aesthetic vintage high quality";
+
+      return NextResponse.json({ 
+        success: true, 
+        smartQuery: fallbackQuery, 
+        displayVibe: "FALLBACK RESONANCE",
+        source: "heuristic"
+      });
     }
-
-    return NextResponse.json({ error: "Invalid payload format." }, { status: 400 });
 
   } catch (error: any) {
-    // Не возвращаем детали ошибки клиенту (безопасность)
-    console.error("API Route Critical Error:", error);
-    return NextResponse.json(
-      { error: "Internal Server Error", details: process.env.NODE_ENV === 'development' ? error.message : undefined }, 
-      { status: 500 }
-    );
+    console.error("[MUTATE CRITICAL ERROR]", error);
+    return NextResponse.json({ 
+      error: "Mutation failed", 
+      smartQuery: "aesthetic vintage high quality", 
+      displayVibe: "SYSTEM ERROR" 
+    }, { status: 500 });
   }
 }

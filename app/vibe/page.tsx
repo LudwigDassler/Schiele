@@ -141,11 +141,25 @@ function VibeContent() {
     if (isMutating || !src) return;
     setIsMutating(true);
     try {
+      // Передаем и текущий вайб, и ОРИГИНАЛЬНЫЙ поисковый запрос для сохранения контекста
       const concept = (activeVibe && activeVibe !== "Scanning..." ? activeVibe : title).slice(0, 120);
-      const res = await fetch("/api/mutate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ concept, userId: identity }) });
+      const originalQuery = currentQueryRef.current || title; // Сохраняем память о том, что искали изначально
+      
+      console.log(`[MUTATE UI] Отправка контекста: concept="${concept}", originalQuery="${originalQuery}"`);
+      
+      const res = await fetch("/api/mutate", { 
+        method: "POST", 
+        headers: { "Content-Type": "application/json" }, 
+        body: JSON.stringify({ 
+          concept, 
+          originalQuery, // Критически важно для защиты от CDN-мусора
+          userId: identity 
+        }) 
+      });
       const data = await res.json();
-      const newQuery = data.mutated_query;
+      const newQuery = data.mutated_query || data.smartQuery;
       if (newQuery) {
+        console.log(`[MUTATE UI] Получен новый запрос: "${newQuery}"`);
         setRelatedPhotos([]);
         setRelatedPage(1);
         setRelatedHasMore(true);

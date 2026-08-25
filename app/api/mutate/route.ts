@@ -1,13 +1,12 @@
 import { NextResponse } from 'next/server';
 
-// Идеальный экстрактор: режет параметры, расширения и символы
 function extractSubjectFromUrl(url: string): string {
   try {
-    const cleanUrl = url.split('?')[0]; // Отрезаем ?v=1566941362
+    const cleanUrl = url.split('?')[0]; 
     const filename = cleanUrl.split('/').pop() || "";
     const subject = filename
-      .replace(/\.[^/.]+$/, "") // Убираем .jpg/.png
-      .replace(/[-_]/g, ' ')    // Заменяем - и _ на пробелы
+      .replace(/\.[^/.]+$/, "") 
+      .replace(/[-_]/g, ' ')    
       .trim();
     return subject || "unknown entity";
   } catch {
@@ -18,24 +17,26 @@ function extractSubjectFromUrl(url: string): string {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { imageUrl } = body;
+    
+    // БРОНЕБОЙНЫЙ ПЕРЕХВАТ: ищем URL во всех возможных вариантах
+    const targetUrl = body.imageUrl || body.image_url || body.url || body.src;
 
-    if (!imageUrl) {
+    if (!targetUrl) {
+      console.error("[MUTATE API] Ошибка: Фронтенд не прислал URL. Тело запроса:", body);
       return NextResponse.json({ error: "No image URL provided" }, { status: 400 });
     }
 
-    console.log(`[MUTATE] Трансляция пикселей: ${imageUrl}`);
+    console.log(`[MUTATE] Трансляция пикселей: ${targetUrl}`);
 
-    // URL твоего Оракула на Render (проверь, чтобы в .env лежал правильный)
     const oracleUrl = process.env.ORACLE_URL || "https://schiele.onrender.com";
     
     try {
       const oracleRes = await fetch(`${oracleUrl}/api/mutate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageUrl }),
-        // Ограничиваем ожидание Оракула до 5 секунд
-        signal: AbortSignal.timeout(5000) 
+        // Дублируем ключи, чтобы Python гарантированно их прочитал
+        body: JSON.stringify({ imageUrl: targetUrl, image_url: targetUrl }),
+        signal: AbortSignal.timeout(8000) // Чуть увеличили таймаут для OpenCV
       });
 
       if (!oracleRes.ok) {
@@ -43,7 +44,7 @@ export async function POST(request: Request) {
       }
 
       const oracleData = await oracleRes.json();
-      console.log(`[MUTATE] Оракул распознал стиль: "${oracleData.style}"`);
+      console.log(`[MUTATE] Успех. Оракул распознал стиль: "${oracleData.style}"`);
       
       return NextResponse.json({ 
         subject: oracleData.style,
@@ -51,15 +52,13 @@ export async function POST(request: Request) {
       });
 
     } catch (error: any) {
-      console.log(`[MUTATE] Оракул недоступен или сработал таймаут. Активация эвристического фоллбэка. Error: ${error.message}`);
+      console.log(`[MUTATE] Оракул недоступен или сработал таймаут. Фоллбэк. Error: ${error.message}`);
       
-      // Фоллбэк активируется только если Python-сервер упал/не ответил
-      const cleanSubject = extractSubjectFromUrl(imageUrl);
-      console.log(`[MUTATE] Кристаллизованный субъект: "${cleanSubject}"`);
+      const cleanSubject = extractSubjectFromUrl(targetUrl);
       
       return NextResponse.json({ 
         subject: `${cleanSubject} aesthetic high quality`,
-        tensor: [0.5, 0.5, 0.5, 0.5, 0.5] // Нейтральный тензор
+        tensor: [0.5, 0.5, 0.5, 0.5, 0.5] 
       });
     }
 

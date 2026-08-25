@@ -9,20 +9,40 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Image URL is strictly required for Tensor Mutation" }, { status: 400 });
     }
 
-    // 1. Очищаем заголовок от мусора еще до отправки в Питон
-    const rawTitle = title || body.concept || image_url.split('/').pop() || "";
-    const cleanTitle = rawTitle
-        .replace(/[-_]/g, ' ')          // Меняем дефисы на пробелы
-        .replace(/\d+/g, '')            // Убираем цифры (типа 1977 или 1548)
-        .replace(/\.jpg|\.png|\.jpeg|\.webp/i, '') // Убираем расширения
-        .replace(/\s+/g, ' ')           // Убираем двойные пробелы
+    // 1. Пытаемся взять нормальный заголовок
+    let rawTitle = title || body.concept || "";
+
+    // Если заголовка нет, берем из URL, но пропускаем через жесткий фильтр
+    if (!rawTitle && image_url) {
+      const filename = image_url.split('/').pop() || "";
+      
+      // Ловушка для хэшей Pinterest и CDN. 
+      // Если имя длиннее 18 символов и в нем нет дефисов/подчеркиваний — это 100% криптографический мусор.
+      if (filename.length > 18 && !filename.includes('-') && !filename.includes('_')) {
+        rawTitle = ""; 
+      } else {
+        rawTitle = filename;
+      }
+    }
+
+    // 2. Очищаем от цифр, расширений и спецсимволов
+    let cleanTitle = rawTitle
+        .replace(/[-_]/g, ' ')          
+        .replace(/\d+/g, '')            
+        .replace(/\.jpg|\.png|\.jpeg|\.webp/i, '') 
+        .replace(/\s+/g, ' ')           
         .trim();
 
+    // 3. Финальная защита (если какая-то абракадабра всё же проскочила)
+    if (cleanTitle.length > 15 && !cleanTitle.includes(' ')) {
+      cleanTitle = "";
+    }
+
     console.log(`[MUTATE] Трансляция пикселей в Риманово пространство: ${image_url}`);
-    console.log(`[MUTATE] Идентифицирован субъект: "${cleanTitle}"`);
+    console.log(`[MUTATE] Идентифицирован субъект: "${cleanTitle || 'СУБЪЕКТ ОТСУТСТВУЕТ (ЧИСТЫЙ ВАЙБ)'}"`);
 
     try {
-      // 2. Отправляем запрос в твое облако на Render
+      // 4. Отправляем в Пекло (наш Python-сервер)
       const oracleResponse = await fetch('https://kashmir-oracle.onrender.com/mutate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -43,7 +63,7 @@ export async function POST(req: Request) {
     } catch (oracleError) {
       console.warn("[MUTATE] Оракул оффлайн или отверг пиксели. Активируем фоллбэк.", oracleError);
       
-      // 3. Фоллбэк: если Питон упал, просто ищем по очищенному субъекту
+      // 5. Фоллбэк: если Питон упал, ищем просто эстетику
       const fallbackQuery = cleanTitle ? `${cleanTitle} aesthetic high quality` : "aesthetic vintage high quality";
 
       return NextResponse.json({ 

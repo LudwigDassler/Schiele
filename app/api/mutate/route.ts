@@ -3,83 +3,81 @@ import { NextResponse } from 'next/server';
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { image_url, title } = body;
+    
+    // Извлекаем URL, системный title и concept (кристально чистый оригинальный запрос)
+    const { image_url, title, concept } = body;
 
     if (!image_url) {
       return NextResponse.json({ error: "Image URL is strictly required for Tensor Mutation" }, { status: 400 });
     }
 
-    // 1. Пытаемся взять нормальный заголовок
-    let rawTitle = title || body.concept || "";
+    // ==========================================
+    // 1. ИЕРАРХИЯ ПАМЯТИ
+    // Если фронтенд передал изначальный запрос (concept), он становится абсолютным приоритетом.
+    // Если его нет, пытаемся вытащить смысл из title или хотя бы из URL.
+    // ==========================================
+    let rawSubject = concept || title || image_url.split('/').pop() || "";
 
-    // Если заголовка нет, берем из URL, но пропускаем через жесткий фильтр
-    if (!rawTitle && image_url) {
-      const filename = image_url.split('/').pop() || "";
-      
-      // Ловушка для хэшей Pinterest и CDN. 
-      // Если имя длиннее 18 символов и в нем нет дефисов/подчеркиваний — это 100% криптографический мусор.
-      if (filename.length > 18 && !filename.includes('-') && !filename.includes('_')) {
-        rawTitle = ""; 
-      } else {
-        rawTitle = filename;
-      }
-    }
-
-    // 2. Очищаем от цифр, расширений и спецсимволов
-    let cleanTitle = rawTitle
-        .replace(/[-_]/g, ' ')          
-        .replace(/\d+/g, '')            
-        .replace(/\.jpg|\.png|\.jpeg|\.webp/i, '') 
-        .replace(/\s+/g, ' ')           
+    // ==========================================
+    // 2. ГИЛЬОТИНА ДЛЯ SEO-МУСОРА И ХЭШЕЙ
+    // Порядок критически важен для правильного парсинга слипшихся строк
+    // ==========================================
+    let cleanSubject = rawSubject
+        .replace(/[-_]/g, ' ') // 1. Дефисы и подчеркивания в пробелы
+        .replace(/\.(jpg|jpeg|png|webp|gif)/gi, '') // 2. Уничтожаем расширения
+        .replace(/[0-9a-fA-F]{10,}/g, ' ') // 3. Вырезаем крипто-хэши до обработки цифр
+        .replace(/\d+/g, ' ') // 4. Цифры в пробелы (чтобы "1080xN" распалось на " " и "xN")
+        .replace(/\b(original|movie|film|poster|hd|hq|hqdefault|maxresdefault|wallpaper|size|large|il|xn|hotj|buy|shop)\b/gi, ' ') // 5. Точечный расстрел SEO-спама
+        .replace(/\s+/g, ' ') // 6. Схлопываем образовавшиеся пустоты
         .trim();
 
-    // 3. Финальная защита (если какая-то абракадабра всё же проскочила)
-    if (cleanTitle.length > 15 && !cleanTitle.includes(' ')) {
-      cleanTitle = "";
+    // ==========================================
+    // 3. СЕМАНТИЧЕСКИЙ ДЕДУПЛИКАТОР
+    // Убираем спам-повторения: "Pink Floyd The Wall Pink Floyd" -> "pink floyd the wall"
+    // ==========================================
+    if (cleanSubject) {
+        const words = cleanSubject.split(' ').filter(w => w.length > 1); // Убиваем висящие буквы
+        const uniqueWords = [...new Set(words.map(w => w.toLowerCase()))];
+        cleanSubject = uniqueWords.join(' ');
     }
 
-    console.log(`[MUTATE] Трансляция пикселей в Риманово пространство: ${image_url}`);
-    console.log(`[MUTATE] Идентифицирован субъект: "${cleanTitle || 'СУБЪЕКТ ОТСУТСТВУЕТ (ЧИСТЫЙ ВАЙБ)'}"`);
+    // Если после всех зачисток осталась пустота, отдаем управление чистой математике
+    if (cleanSubject.length < 3) {
+      cleanSubject = "";
+    }
 
+    console.log(`[MUTATE] Трансляция пикселей: ${image_url}`);
+    console.log(`[MUTATE] Кристаллизованный субъект: "${cleanSubject || 'АБСТРАКТНАЯ МАТЕМАТИКА'}"`);
+
+    // ==========================================
+    // 4. ТРАНСЛЯЦИЯ В ТЕНЗОРНОЕ ПРОСТРАНСТВО (ОРАКУЛ)
+    // ==========================================
     try {
-      // 4. Отправляем в Пекло (наш Python-сервер)
       const oracleResponse = await fetch('https://kashmir-oracle.onrender.com/mutate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          image_url: image_url, 
-          title: cleanTitle 
-        }),
-        signal: AbortSignal.timeout(5000)
+        body: JSON.stringify({ image_url: image_url, title: cleanSubject }),
+        signal: AbortSignal.timeout(6000) // 6 секунд таймаута для тяжелых визуальных артефактов
       });
 
       if (oracleResponse.ok) {
         const data = await oracleResponse.json();
-        console.log(`[MUTATE] Обратная проекция успешна: ${data.smartQuery}`);
         return NextResponse.json(data);
       } else {
         throw new Error(`Oracle HTTP error: ${oracleResponse.status}`);
       }
     } catch (oracleError) {
-      console.warn("[MUTATE] Оракул оффлайн или отверг пиксели. Активируем фоллбэк.", oracleError);
-      
-      // 5. Фоллбэк: если Питон упал, ищем просто эстетику
-      const fallbackQuery = cleanTitle ? `${cleanTitle} aesthetic high quality` : "aesthetic vintage high quality";
-
+      console.warn("[MUTATE] Оракул недоступен или сработал таймаут. Активация эвристического фоллбэка.", oracleError);
+      // МЯГКИЙ ФОЛЛБЭК: Фронтенд не падает, а генерирует запрос на лету
+      const fallbackQuery = cleanSubject ? `${cleanSubject} aesthetic high quality` : "aesthetic vintage high quality";
       return NextResponse.json({ 
         success: true, 
         smartQuery: fallbackQuery, 
-        displayVibe: "FALLBACK RESONANCE",
-        source: "heuristic"
+        displayVibe: "RESONANCE: FALLBACK", 
+        source: "heuristic" 
       });
     }
-
   } catch (error: any) {
-    console.error("[MUTATE CRITICAL ERROR]", error);
-    return NextResponse.json({ 
-      error: "Mutation failed", 
-      smartQuery: "aesthetic vintage high quality", 
-      displayVibe: "SYSTEM ERROR" 
-    }, { status: 500 });
+    return NextResponse.json({ error: "Mutation failed" }, { status: 500 });
   }
 }

@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import json
 import numpy as np
 import os
@@ -13,7 +13,7 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # Разрешает запросы с фронтенда
+    allow_origins=["*"], 
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -52,7 +52,6 @@ except FileNotFoundError:
 # 4. ЯДРО СИНТЕЗА И АНАЛИЗА
 # ==========================================
 def get_vibe_from_text(prompt: str) -> np.ndarray:
-    """Переводит текст в 5D-тензор."""
     if not prompt:
         return np.array([0.5, 0.5, 0.5, 0.5, 0.5])
     clean_prompt = "".join([c if c.isalnum() or c.isspace() else " " for c in prompt])
@@ -63,12 +62,7 @@ def get_vibe_from_text(prompt: str) -> np.ndarray:
         return np.array([0.5, 0.5, 0.5, 0.5, 0.5])
     return np.mean(tensors, axis=0)
 
-def extract_physics_from_image(image_path_or_bytes) -> np.ndarray:
-    """(Заглушка) Извлечение физики из картинки."""
-    return np.array([0.5, 0.5, 0.5, 0.5, 0.5])
-
 def mutate_image(img_tensor: np.ndarray) -> str:
-    """Находит ближайший стиль из базового лексикона."""
     best_style = "default"
     min_dist = float('inf')
     for style_name, style_tensor in LEXICON.items():
@@ -78,18 +72,14 @@ def mutate_image(img_tensor: np.ndarray) -> str:
             best_style = style_name
     return best_style
 
-def calculate_resonance(tensor_a: np.ndarray, tensor_b: np.ndarray) -> float:
-    """Считает процент совпадения двух 5D-тензоров."""
-    dist = np.linalg.norm(tensor_a - tensor_b)
-    max_dist = math.sqrt(5)
-    resonance = max(0.0, 1.0 - (dist / max_dist))
-    return round(resonance, 4)
-
 # ==========================================
 # 5. API ЭНДПОИНТЫ
 # ==========================================
 class TextQuery(BaseModel):
     prompt: str
+
+class ImageQuery(BaseModel):
+    imageUrl: str = Field(alias="image_url", default="") # Поддержка и camelCase, и snake_case
 
 @app.get("/")
 def health_check():
@@ -98,5 +88,23 @@ def health_check():
 @app.post("/api/vibe")
 def analyze_text(query: TextQuery):
     tensor = get_vibe_from_text(query.prompt)
-    # Numpy массивы нужно переводить в обычные списки для выдачи JSON
     return {"tensor": [round(float(x), 4) for x in tensor]}
+
+# НОВЫЙ ЭНДПОИНТ ДЛЯ МУТАЦИИ КАРТИНОК
+@app.post("/api/mutate")
+def mutate_endpoint(query: ImageQuery):
+    try:
+        url = query.imageUrl if query.imageUrl else query.image_url
+        
+        # Здесь в будущем будет реальный анализ пикселей OpenCV
+        # Пока возвращаем заглушку, чтобы роутер не падал с 404
+        dummy_tensor = np.array([0.5, 0.5, 0.5, 0.5, 0.5])
+        style = mutate_image(dummy_tensor)
+        
+        return {
+            "status": "success",
+            "style": style,
+            "tensor": [round(float(x), 4) for x in dummy_tensor]
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}

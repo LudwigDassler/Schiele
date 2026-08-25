@@ -18,7 +18,7 @@ export async function POST(request: Request) {
   try {
     const body = await request.json();
     
-    // БРОНЕБОЙНЫЙ ПЕРЕХВАТ: ищем URL во всех возможных вариантах
+    // Бронебойный перехват URL
     const targetUrl = body.imageUrl || body.image_url || body.url || body.src;
 
     if (!targetUrl) {
@@ -34,9 +34,9 @@ export async function POST(request: Request) {
       const oracleRes = await fetch(`${oracleUrl}/api/mutate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        // Дублируем ключи, чтобы Python гарантированно их прочитал
         body: JSON.stringify({ imageUrl: targetUrl, image_url: targetUrl }),
-        signal: AbortSignal.timeout(8000) // Чуть увеличили таймаут для OpenCV
+        // ЖДЕМ 30 СЕКУНД: защита от холодного старта Render и долгих загрузок
+        signal: AbortSignal.timeout(30000) 
       });
 
       if (!oracleRes.ok) {

@@ -31,13 +31,13 @@ export async function POST(req: Request) {
         .replace(/\s+/g, ' ') // 6. Схлопываем образовавшиеся пустоты
         .trim();
 
-    // ==========================================
+  // ==========================================
     // 3. СЕМАНТИЧЕСКИЙ ДЕДУПЛИКАТОР
-    // Убираем спам-повторения: "Pink Floyd The Wall Pink Floyd" -> "pink floyd the wall"
     // ==========================================
     if (cleanSubject) {
-        const words = cleanSubject.split(' ').filter(w => w.length > 1); // Убиваем висящие буквы
-        const uniqueWords = [...new Set(words.map(w => w.toLowerCase()))];
+        // Явно указываем TypeScript, что w - это строка (w: string)
+        const words = String(cleanSubject).split(' ').filter((w: string) => w.length > 1); 
+        const uniqueWords = [...new Set(words.map((w: string) => w.toLowerCase()))];
         cleanSubject = uniqueWords.join(' ');
     }
 

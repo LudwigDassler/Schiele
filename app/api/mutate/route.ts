@@ -68,7 +68,8 @@ export async function POST(req: Request) {
       const arrayBuffer = await imageRes.arrayBuffer();
       console.log(`[PARSER] Файл захвачен (${Math.round(arrayBuffer.byteLength / 1024)}KB). Инъекция в Оракул...`);
 
-      const oracleUrl = process.env.ORACLE_URL || "https://schiele.onrender.com";
+  // Разрываем Уробороса: жестко направляем поток в Python-мозг
+const oracleUrl = "https://schiele.onrender.com";
       
       // 🔥 УВЕЛИЧЕН ТАЙМАУТ: 50 сек на случай холодного старта Render
       const oracleResponse = await fetch(`${oracleUrl}/api/mutate`, {

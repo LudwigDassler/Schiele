@@ -48,8 +48,7 @@ export async function POST(req: Request) {
     let tensor = [0.5, 0.5, 0.5, 0.5, 0.5]; 
 
     // 🔥 ПЕРЕНЕСЛИ СЮДА: Теперь переменная живет во всей функции
-    const oracleUrl = "https://schiele.onrender.com"; 
-
+ const oracleUrl = "https://kashmir-oracle.onrender.com";
     try {
       // Парсер скачивает файл сам
       const imageRes = await fetch(imageUrl, {

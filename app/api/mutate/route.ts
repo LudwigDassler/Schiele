@@ -47,6 +47,9 @@ export async function POST(req: Request) {
     let baseVibe = "aesthetic"; 
     let tensor = [0.5, 0.5, 0.5, 0.5, 0.5]; 
 
+    // 🔥 ПЕРЕНЕСЛИ СЮДА: Теперь переменная живет во всей функции
+    const oracleUrl = "https://schiele.onrender.com"; 
+
     try {
       // Парсер скачивает файл сам
       const imageRes = await fetch(imageUrl, {
@@ -69,10 +72,6 @@ export async function POST(req: Request) {
       const arrayBuffer = await imageRes.arrayBuffer();
       console.log(`[PARSER] Файл захвачен. Байт: ${arrayBuffer.byteLength}. Отправка в Оракул...`);
 
-      // 🔥 КРИТИЧЕСКИЙ ФИКС: ЖЕСТКИЙ URL
-      // Замени "https://schiele.onrender.com" на РЕАЛЬНЫЙ адрес твоего Python сервиса на Render
-      const oracleUrl = "https://schiele.onrender.com"; 
-      
       if (!oracleUrl || oracleUrl.includes("your-")) {
         throw new Error("ORACLE_URL не настроен! Укажите реальный адрес Python сервиса.");
       }

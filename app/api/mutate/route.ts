@@ -9,7 +9,7 @@ const LINGUISTIC_NOISE = new Set([
   "image", "images", "photo", "photos", "pic", "picture", "pictures", "screen",
   "art", "artwork", "vector", "svg", "png", "jpg", "jpeg", "comp", "render",
   "free", "download", "stock", "gallery", "music", "bands", "promo", "official",
-  "clipart", "royalty", "live", "concert", "poster" // Добавил частые слова-паразиты
+  "clipart", "royalty", "live", "concert", "poster"
 ]);
 
 function extractSemanticCore(imageUrl: string): string {
@@ -23,6 +23,12 @@ function extractSemanticCore(imageUrl: string): string {
     // 3. Удаляем расширение файла
     const withoutExt = filename.replace(/\.[a-zA-Z0-9]+$/, "");
     
+    // 🔥 ЭТАП 2: ЗАЩИТА ОТ ХЭШЕЙ (Pinterest/CDN мусор)
+    // Если имя файла - это просто длинная строка из букв и цифр без пробелов
+    if (/^[a-f0-9]{10,}$/i.test(withoutExt) || /^[a-zA-Z0-9_-]{15,}$/.test(withoutExt)) {
+      return ""; // Это машинный идентификатор, а не смысл. Убиваем.
+    }
+
     // 4. Чистка: убираем разделители, ВСЕ цифры и одиночные 'x' (спасает от "2048x2048")
     const textOnly = withoutExt
       .replace(/[-_+]/g, " ")       // Заменяем разделители на пробелы
@@ -82,9 +88,12 @@ export async function POST(req: Request) {
       console.warn(`[PARSER] Не удалось скачать картинку для анализа: ${e.message}. Используем фоллбэк.`);
       // Если картинка не скачалась, возвращаем хотя бы чистый субъект
       return NextResponse.json({
-        query: coreSubject || "aesthetic vintage",
+        success: true,
+        query: coreSubject ? `${coreSubject} aesthetic vintage` : "aesthetic vintage high quality",
+        smartQuery: coreSubject ? `${coreSubject} aesthetic vintage` : "aesthetic vintage high quality",
         tensor: [0.5, 0.5, 0.5, 0.5, 0.5],
         style: "unknown",
+        displayVibe: coreSubject ? coreSubject.toUpperCase() : "AESTHETIC",
         source: "semantic_only"
       });
     }
@@ -114,9 +123,12 @@ export async function POST(req: Request) {
       // Фоллбэк: просто возвращаем субъект + дефолтный стиль
       const fallbackVibe = coreSubject ? `${coreSubject} aesthetic` : "vintage aesthetic high quality";
       return NextResponse.json({
+        success: true,
         query: fallbackVibe,
+        smartQuery: fallbackVibe,
         tensor: [0.5, 0.5, 0.5, 0.5, 0.5],
         style: "fallback",
+        displayVibe: "HEURISTIC MODE",
         source: "heuristic_fallback"
       });
     }
@@ -134,11 +146,11 @@ export async function POST(req: Request) {
 
     return NextResponse.json({
       success: true,
-      query: finalQuery,          // Для совместимости с текущим фронтендом
-      smartQuery: finalQuery,     // На всякий случай дублируем
+      query: finalQuery,          // Для совместимости
+      smartQuery: finalQuery,     // Дубль
       tensor: oracleData.tensor,
       style: oracleData.style,
-      displayVibe: oracleData.style.toUpperCase(), // Для UI
+      displayVibe: (oracleData.style || "UNKNOWN").toUpperCase(), // Для UI
       source: "oracle_math_core"
     });
 
@@ -148,7 +160,7 @@ export async function POST(req: Request) {
       error: error.message, 
       query: "aesthetic vintage", 
       smartQuery: "aesthetic vintage",
-      displayVibe: "ERROR"
+      displayVibe: "SYSTEM ERROR"
     }, { status: 500 });
   }
 }

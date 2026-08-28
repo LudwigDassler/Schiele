@@ -1,123 +1,163 @@
-import { supabase } from '@/lib/supabase';
+// lib/overseer.ts
+// Байесовская Гильотина + Семантический Очиститель (Semantic Cleaver)
 
-// Улучшенная утилита для очистки JSON от маркдауна и мусора
-function cleanLLMJSON(text: string): string {
-  if (!text) return "{}";
-  
-  let cleaned = text.trim();
-  
-  // Удаляем блоки кода с любым языком (json, js, etc.)
-  cleaned = cleaned.replace(/^```(?:json|js|typescript)?\s*/, "");
-  cleaned = cleaned.replace(/```$/, "");
-  
-  // Пытаемся найти первую '{' и последнюю '}', если есть лишний текст
-  const firstBrace = cleaned.indexOf('{');
-  const lastBrace = cleaned.lastIndexOf('}');
-  
-  if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
-    return cleaned.substring(firstBrace, lastBrace + 1);
-  }
-  
-  return cleaned.trim() || "{}";
+const TRUSTED_DOMAINS = [
+  "pinterest.com", "tumblr.com", "behance.net", 
+  "artstation.com", "flickr.com", "deviantart.com", 
+  "unsplash.com", "pxhere.com", "wallhaven.cc", "reddit.com"
+];
+
+const TRASH_DOMAINS = [
+  "shutterstock.com", "istockphoto.com", "alamy.com", 
+  "123rf.com", "vectorstock.com", "dreamstime.com", 
+  "depositphotos.com", "gettyimages.com", "freepik.com",
+  "pngtree.com", "cleanpng.com"
+];
+
+const SEO_NOISE_REGEX = /(hd|4k|8k|download|free|stock|wallpaper|vector|clipart)/i;
+const HONEST_FORMATS_REGEX = /\.(png|webp)$/i; 
+const VECTOR_TRAP_REGEX = /\.(eps|ai|svg)$/i;  
+
+// ==========================================
+// СЛОВАРЬ ЛИНГВИСТИЧЕСКОГО МУСОРА ДЛЯ ОЧИСТКИ ТАЙТЛОВ
+// ==========================================
+const LINGUISTIC_NOISE = new Set([
+  "hd", "4k", "8k", "hq", "high", "quality", "resolution", "1080p", "fullhd",
+  "wallpaper", "wallpapers", "background", "backgrounds", "desktop", "mobile", 
+  "image", "images", "photo", "photos", "pic", "picture", "pictures", "screen",
+  "art", "artwork", "vector", "svg", "png", "jpg", "jpeg", "comp", "render",
+  "free", "download", "stock", "gallery", "music", "bands", "promo", "official",
+  "clipart", "royalty"
+]);
+
+export interface ArtifactMetrics {
+  prior: number;
+  likelihood: number;
+  entropyPenalty: number;
+  finalScore: number;
 }
 
-export class Overseer {
-  private readonly timeoutMs = 5000; // Таймаут 5 секунд, чтобы не висло
+function calculateShannonEntropy(str: string): number {
+  if (!str) return 0;
+  const len = str.length;
+  const freq: Record<string, number> = {};
+  
+  for (let i = 0; i < len; i++) {
+    const char = str[i];
+    freq[char] = (freq[char] || 0) + 1;
+  }
 
-  async evaluateAndMutate(draftResult: any, trackContext: string) {
-    const apiKey = process.env.GROQ_API_KEY;
-    const model = process.env.GROQ_MODEL || "llama-3.1-70b-versatile"; // Дефолт на более мощную Llama
+  let entropy = 0;
+  for (const char in freq) {
+    const p = freq[char] / len;
+    entropy -= p * Math.log2(p);
+  }
+  return entropy;
+}
 
-    if (!apiKey) {
-      console.warn("Overseer: GROQ_API_KEY missing. Returning draft as-is.");
-      return draftResult; 
+// Семантический хирург: вырезает суть из грязного названия
+function purifyTitle(rawTitle: string): string {
+  if (!rawTitle) return "Aesthetic";
+
+  // 1. Убиваем суффиксы после разделителей (обычно это названия сайтов вроде " | Pinterest")
+  let cleanStr = rawTitle.split(/\||—| - | ~ /)[0].trim();
+
+  // 2. Убираем спецсимволы и цифры, оставляя только текст
+  cleanStr = cleanStr.replace(/[-_+,]/g, " ").replace(/[0-9]+/g, " ");
+  
+  // 3. Токенизируем
+  const tokens = cleanStr.toLowerCase().split(/\s+/).filter(w => w.length > 0);
+  if (tokens.length === 0) return "Aesthetic";
+
+  // 4. Откусываем SEO-мусор СЛЕВА (Префиксы)
+  let startIndex = 0;
+  while (startIndex < tokens.length && LINGUISTIC_NOISE.has(tokens[startIndex])) {
+    startIndex++;
+  }
+
+  // 5. Откусываем SEO-мусор СПРАВА (Суффиксы)
+  let endIndex = tokens.length - 1;
+  while (endIndex >= startIndex && LINGUISTIC_NOISE.has(tokens[endIndex])) {
+    endIndex--;
+  }
+
+  const coreTokens = tokens.slice(startIndex, endIndex + 1);
+  if (coreTokens.length === 0) return "Aesthetic";
+
+  // Возвращаем с заглавной буквы для красоты
+  return coreTokens.map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+}
+
+export function bayesianGuillotine(artifacts: any[]): any[] {
+  const POSTERIOR_THRESHOLD = 0.30;
+
+  // Используем reduce, чтобы одновременно фильтровать мусор и мутировать (очищать) выживших
+  return artifacts.reduce((survivors: any[], artifact) => {
+    const url = artifact.link || artifact.src || "";
+    const lowerUrl = url.toLowerCase();
+    const rawTitle = artifact.title || "";
+    const lowerTitle = rawTitle.toLowerCase();
+    
+    const metrics: ArtifactMetrics = {
+      prior: 0.5,
+      likelihood: 0.8,
+      entropyPenalty: 1.0,
+      finalScore: 0
+    };
+
+    // ФАКТОР 1: PRIOR
+    const domainMatch = lowerUrl.match(/(?:https?:\/\/)?(?:www\.)?([^\/]+)/);
+    const baseDomain = domainMatch ? domainMatch[1] : "";
+
+    if (TRUSTED_DOMAINS.some(d => baseDomain.includes(d))) {
+      metrics.prior = 0.9; 
+      metrics.likelihood = 0.9; 
+    } else if (TRASH_DOMAINS.some(d => baseDomain.includes(d))) {
+      metrics.prior = 0.1; 
+      metrics.likelihood = 0.1;
+    } else if (baseDomain.includes('blogspot') || baseDomain.includes('wordpress')) {
+      metrics.prior = 0.6; 
     }
 
-    try {
-      // 1. Получаем контекст памяти (быстро и только нужные поля)
-      const { data: memory, error: memError } = await supabase
-        .from('synth_memory')
-        .select('track_title, visual_style, dominant_color, psychological_insight')
-        .eq('is_curated', true)
-        .order('created_at', { ascending: false })
-        .limit(3);
+    // ФАКТОР 2: LIKELIHOOD
+    if (metrics.prior >= 0.9) {
+      if (VECTOR_TRAP_REGEX.test(lowerUrl)) metrics.likelihood = 0.2; 
+    } else {
+      if (SEO_NOISE_REGEX.test(lowerTitle) || SEO_NOISE_REGEX.test(lowerUrl)) {
+        metrics.likelihood = 0.2; 
+      }
+      if (HONEST_FORMATS_REGEX.test(lowerUrl)) {
+        metrics.likelihood = Math.min(1.0, metrics.likelihood + 0.2);
+      }
+      if (VECTOR_TRAP_REGEX.test(lowerUrl)) {
+        metrics.likelihood = 0.1;
+      }
+    }
 
-      if (memError) console.warn("Overseer: Failed to load memory", memError);
+    // ФАКТОР 3: ENTROPY
+    const urlEntropy = calculateShannonEntropy(baseDomain.split('.')[0]);
+    if (urlEntropy > 3.8) {
+      metrics.entropyPenalty = 0.5; 
+    }
 
-      const memoryContext = memory && memory.length > 0 
-        ? `Опирайся на прошлые эталонные разборы:\n${memory.map(m => `- "${m.track_title}": стиль "${m.visual_style}", цвет ${m.dominant_color}. Инсайт: "${m.psychological_insight}"`).join('\n')}`
-        : 'У тебя пока нет долгосрочной памяти. Опираться только на глубокий анализ текущего запроса.';
+    // СУД
+    metrics.finalScore = metrics.prior * metrics.likelihood * metrics.entropyPenalty;
 
-      // 2. Формируем промпт
-      const prompt = `Ты — Надзиратель (Overseer), элитный ИИ-критик системы Aesthetic Nexus.
-      Твоя задача: улучшить черновик синестезии, сделав инсайт глубже, палитру сложнее, а стиль точнее.
+    if (process.env.NODE_ENV === 'development' && metrics.finalScore < POSTERIOR_THRESHOLD) {
+      console.log(`[GUILLOTINE] ❌ Казнь: ${baseDomain} | Score: ${metrics.finalScore.toFixed(3)}`);
+    }
+
+    // ЕСЛИ ВЫЖИЛ — ОЧИЩАЕМ И ПУСКАЕМ В ЛЕНТУ
+    if (metrics.finalScore >= POSTERIOR_THRESHOLD) {
+      // Подменяем грязный тайтл на кристально чистый
+      const aestheticTitle = purifyTitle(rawTitle);
       
-      ${memoryContext}
-      
-      Текущий черновик для запроса "${trackContext}":
-      ${JSON.stringify(draftResult)}
-      
-      Верни ТОЛЬКО валидный JSON в точно таком же формате, как входной черновик. Никаких пояснений, никакого текста вне JSON.`;
-
-      // 3. Настройка запроса с таймаутом
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), this.timeoutMs);
-
-      const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${apiKey}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          model: model,
-          messages: [
-            { role: "system", content: "You are a strict JSON generator. Output ONLY valid JSON." },
-            { role: "user", content: prompt }
-          ],
-          response_format: { type: "json_object" },
-          temperature: 0.4, // Чуть ниже для стабильности формата
-          max_tokens: 1024
-        }),
-        signal: controller.signal
+      survivors.push({
+        ...artifact,
+        title: aestheticTitle // Передаем на фронт красоту
       });
-
-      clearTimeout(timeoutId);
-
-      if (!groqRes.ok) {
-        if (groqRes.status === 429) {
-           console.warn("Overseer: Rate limit hit. Skipping mutation.");
-           return draftResult;
-        }
-        throw new Error(`Groq API error: ${groqRes.statusText}`);
-      }
-
-      const data = await groqRes.json();
-      const rawContent = data.choices?.[0]?.message?.content;
-
-      if (!rawContent) return draftResult;
-
-      // 4. Безопасный парсинг
-      const cleanedJson = cleanLLMJSON(rawContent);
-      try {
-        const mutatedResult = JSON.parse(cleanedJson);
-        // Простая валидация: если ключей нет, возвращаем черновик
-        if (Object.keys(mutatedResult).length === 0) return draftResult;
-        return mutatedResult;
-      } catch (parseError) {
-        console.error("Overseer: Failed to parse LLM JSON response", parseError);
-        return draftResult;
-      }
-
-    } catch (error: any) {
-      if (error.name === 'AbortError') {
-        console.warn("Overseer: Request timed out. Returning draft.");
-      } else {
-        console.error("Overseer Critical Error:", error);
-      }
-      return draftResult; 
     }
-  }
-}
 
-export { Overseer as OverseerCore };
+    return survivors;
+  }, []);
+}

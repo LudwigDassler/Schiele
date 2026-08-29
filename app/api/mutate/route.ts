@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import Tesseract from 'tesseract.js';
 
 // ==========================================
 // SEMANTIC ENGINE: УБИЙЦА МУСОРА В URL
@@ -49,7 +48,7 @@ function extractSemanticCore(input: string): string {
     const coreTokens = tokens.slice(startIndex, endIndex + 1);
     if (coreTokens.length === 0) return "";
 
-    // Убиваем дубликаты слов (например: Pink Floyd ... Pink Floyd)
+    // Убиваем дубликаты слов
     const uniqueTokens = Array.from(new Set(coreTokens));
     return uniqueTokens.map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(" ");
   } catch (e) {
@@ -101,53 +100,27 @@ export async function POST(req: Request) {
       });
     }
 
-    console.log(`[PARSER] Файл захвачен. Байт: ${imageBuffer.byteLength}. Параллельный запуск OCR и Оракула...`);
+    console.log(`[PARSER] Файл захвачен. Байт: ${imageBuffer.byteLength}. Отправка в монолит Оракула...`);
 
     // ==========================================
-    // 3. ПАРАЛЛЕЛЬНОЕ ВЫПОЛНЕНИЕ: OCR (Node) + TENSOR (Python)
+    // 3. ОТПРАВКА В ПИТОН (ТЕПЕРЬ ОН ДЕЛАЕТ ВСЁ)
     // ==========================================
+    const ORACLE_URL = process.env.ORACLE_URL || "https://kashmir-oracle.onrender.com/api/mutate";
     
-    // ПОТОК А: Распознавание текста (Tesseract.js)
-    const ocrPromise = Tesseract.recognize(Buffer.from(imageBuffer), 'eng')
-      .then(({ data: { text } }) => {
-        const cleanText = text.replace(/[^a-zA-Z\s]/g, ' ').replace(/\s+/g, ' ').trim();
-        const words = cleanText.split(' ').filter(w => w.length > 2).slice(0, 3);
-        if (words.length === 0) return "";
-        const readText = words.map(w => w.charAt(0).toUpperCase() + w.toLowerCase().slice(1)).join(" ");
-        console.log(`[OCR] Символический Глаз прочитал: "${readText}"`);
-        return readText;
-      })
-      .catch(e => {
-        console.warn("[OCR ERROR] Сбой распознавания:", e.message);
-        return "";
+    let oracleData: any;
+    try {
+      const oracleRes = await fetch(ORACLE_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/octet-stream" },
+        body: imageBuffer,
+        signal: AbortSignal.timeout(15000) // 15 секунд на физику + OCR
       });
 
-    // ПОТОК Б: Математика Оракула (Python)
-    const ORACLE_URL = process.env.ORACLE_URL || "https://kashmir-oracle.onrender.com/api/mutate";
-    const oraclePromise = fetch(ORACLE_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/octet-stream" },
-      body: imageBuffer,
-      signal: AbortSignal.timeout(15000)
-    }).then(res => {
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return res.json();
-    });
-
-    // Дожидаемся обоих процессов
-    let ocrText = "";
-    let oracleData: any = null;
-
-    try {
-      const results = await Promise.allSettled([ocrPromise, oraclePromise]);
-      ocrText = results[0].status === 'fulfilled' ? results[0].value : "";
+      if (!oracleRes.ok) throw new Error(`Oracle HTTP ${oracleRes.status}`);
       
-      if (results[1].status === 'fulfilled') {
-        oracleData = results[1].value;
-        if (oracleData.status === "error") throw new Error(oracleData.message);
-      } else {
-        throw new Error(results[1].reason);
-      }
+      oracleData = await oracleRes.json();
+      if (oracleData.status === "error") throw new Error(oracleData.message || "Oracle logic error");
+
     } catch (e: any) {
       console.warn(`[ORACLE] Ошибка Питона: ${e.message}. Фоллбэк.`);
       const fallbackVibe = coreSubject ? `${coreSubject} aesthetic` : "vintage aesthetic";
@@ -156,6 +129,12 @@ export async function POST(req: Request) {
         tensor: Array(14).fill(0.5), style: "fallback",
         displayVibe: "CONNECTION LOST", source: "heuristic_fallback"
       });
+    }
+
+    // Забираем прочитанный текст от Питона
+    const ocrText = oracleData.extracted_text || "";
+    if (ocrText) {
+      console.log(`[ORACLE OCR] Символический Глаз прочитал: "${ocrText}"`);
     }
 
     // ==========================================
@@ -167,7 +146,7 @@ export async function POST(req: Request) {
     // Гравитация (защита от падения старого API)
     const gravity = (oracleData.tensor && oracleData.tensor.length > 10) ? oracleData.tensor[10] : 0.5; 
 
-    // 🔥 АБСОЛЮТНЫЙ ЯКОРЬ: Семантика -> Гарпун -> Прочитанный Текст
+    // 🔥 АБСОЛЮТНЫЙ ЯКОРЬ: Семантика -> Гарпун -> Прочитанный Текст из Питона
     const finalSubject = coreSubject || ocrText;
 
     let finalQuery = oracleVibe;

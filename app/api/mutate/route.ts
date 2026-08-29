@@ -9,25 +9,32 @@ const LINGUISTIC_NOISE = new Set([
   "image", "images", "photo", "photos", "pic", "picture", "pictures", "screen",
   "art", "artwork", "vector", "svg", "png", "jpg", "jpeg", "comp", "render",
   "free", "download", "stock", "gallery", "music", "bands", "promo", "official",
-  "clipart", "royalty", "live", "concert", "poster"
+  "clipart", "royalty", "live", "concert", "poster", "archives", "credit"
 ]);
 
 function extractSemanticCore(input: string): string {
   if (!input) return "";
   
   try {
-    // Если это URL — декодируем и чистим
+    // 1. Если это URL — вытаскиваем имя файла
     let text = input.startsWith("http") 
       ? decodeURIComponent(input).split('/').pop()?.split(/[?#]/)[0] || ""
       : input;
 
     const withoutExt = text.replace(/\.[a-zA-Z0-9]+$/, "");
     
-    // БРОНЯ ОТ ХЭШ-ШИЗОФРЕНИИ (Pinterest, CDN)
-    if (/^[a-f0-9]{10,}$/i.test(withoutExt) || /^[a-zA-Z0-9_-]{15,}$/.test(withoutExt)) {
+    // 🔥 ИСПРАВЛЕННАЯ БРОНЯ ОТ ХЭШ-ШИЗОФРЕНИИ
+    // Удаляем ТОЛЬКО если это сплошной hex-хэш (a-f + 0-9) без тире.
+    // Сначала убираем разделители для проверки.
+    const cleanForCheck = withoutExt.replace(/[-_]/g, '');
+    
+    // Если строка > 10 символов и состоит ТОЛЬКО из hex-символов (0-9, a-f) — это мусорный хэш.
+    // Наличие букв g-z автоматически спасает строку (это настоящие слова).
+    if (cleanForCheck.length > 10 && /^[a-f0-9]+$/i.test(cleanForCheck)) {
       return ""; 
     }
 
+    // 2. Чистка: убираем разделители, цифры и одиночные 'x'
     const textOnly = withoutExt
       .replace(/[-_+]/g, " ")
       .replace(/[0-9]+/g, " ")
@@ -36,11 +43,13 @@ function extractSemanticCore(input: string): string {
     const tokens = textOnly.toLowerCase().split(/\s+/).filter(w => w.length > 0);
     if (tokens.length === 0) return "";
 
+    // 3. Откусываем SEO-мусор СЛЕВА
     let startIndex = 0;
     while (startIndex < tokens.length && LINGUISTIC_NOISE.has(tokens[startIndex])) {
       startIndex++;
     }
 
+    // 4. Откусываем SEO-мусор СПРАВА
     let endIndex = tokens.length - 1;
     while (endIndex >= startIndex && LINGUISTIC_NOISE.has(tokens[endIndex])) {
       endIndex--;
@@ -49,6 +58,7 @@ function extractSemanticCore(input: string): string {
     const coreTokens = tokens.slice(startIndex, endIndex + 1);
     if (coreTokens.length === 0) return "";
 
+    // Возвращаем с Заглавной Буквы
     return coreTokens.map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(" ");
   } catch (e) {
     console.error("[SEMANTIC ENGINE ERROR]", e);
@@ -71,10 +81,10 @@ export async function POST(req: Request) {
 
     console.log(`[MUTATE] Трансляция пикселей: ${imageUrl}`);
 
-    // 1. ПЕРВИЧНЫЙ ЗАХВАТ СУБЪЕКТА ИЗ URL
+    // 1. Пытаемся вытащить субъект из URL (теперь умно)
     let coreSubject = extractSemanticCore(imageUrl);
     
-    // 🔥 DOM-ГАРПУН: Если URL слепой (цифры/хэши), пытаемся вытащить смысл из alt-текста
+    // 2. DOM-ГАРПУН: Если URL слепой, используем alt-текст
     if (!coreSubject && altText) {
       console.log(`[MUTATE] URL слепой. Активирую Гарпун по alt-тексту: "${altText}"`);
       coreSubject = extractSemanticCore(altText); 
@@ -82,7 +92,7 @@ export async function POST(req: Request) {
 
     console.log(`[MUTATE] Идентифицирован субъект: "${coreSubject || "СУБЪЕКТ ОТСУТСТВУЕТ (АБСТРАКЦИЯ)"}"`);
 
-    // 2. СКАЧИВАНИЕ КАРТИНКИ (С ЗАЩИТОЙ ОТ ПЕРЕПОЛНЕНИЯ ПАМЯТИ)
+    // 3. СКАЧИВАНИЕ КАРТИНКИ (С ЗАЩИТОЙ ОТ ПЕРЕПОЛНЕНИЯ ПАМЯТИ)
     let imageBuffer: ArrayBuffer;
     try {
       const imageRes = await fetch(imageUrl, {
@@ -91,7 +101,7 @@ export async function POST(req: Request) {
       
       if (!imageRes.ok) throw new Error(`HTTP ${imageRes.status}`);
 
-      // 🔥 ТИТАНОВЫЙ ЩИТ: Отсекаем картинки тяжелее 5 МБ до загрузки в память
+      // 🔥 ТИТАНОВЫЙ ЩИТ: Отсекаем картинки тяжелее 5 МБ
       const contentLength = imageRes.headers.get('content-length');
       if (contentLength && parseInt(contentLength, 10) > 5 * 1024 * 1024) {
         throw new Error("Image is too massive (>5MB). Oracle refuses to parse.");
@@ -113,7 +123,6 @@ export async function POST(req: Request) {
 
     console.log(`[PARSER] Файл захвачен. Байт: ${imageBuffer.byteLength}. Отправка в Оракул...`);
 
-    // 3. ОТПРАВКА В ПИТОН
     const ORACLE_URL = process.env.ORACLE_URL || "https://kashmir-oracle.onrender.com/api/mutate";
     let oracleData: any;
     
@@ -143,10 +152,9 @@ export async function POST(req: Request) {
       });
     }
 
-    // 4. СИНТЕЗ ФИНАЛЬНОГО ЗАПРОСА
     const oracleVibe = oracleData.refined_query || oracleData.style || "aesthetic";
     
-    // Формируем Display Vibe из первых двух слов (например, "NEON GLOWING")
+    // Формируем красивый заголовок для UI (первые 2 слова)
     const vibeWords = oracleVibe.split(" ").slice(0, 2).join(" ");
     const displayVibe = vibeWords.toUpperCase();
 
@@ -158,9 +166,11 @@ export async function POST(req: Request) {
     let finalQuery = oracleVibe;
     if (coreSubject) {
       if (gravity > 0.6) {
+        // ВЫСОКАЯ ГРАВИТАЦИЯ: Жесткая фиксация субъекта
         finalQuery = `"${coreSubject}" ${oracleVibe}`;
         console.log(`[ORACLE] Высокая гравитация (${gravity.toFixed(2)}). Субъект зафиксирован.`);
       } else {
+        // НИЗКАЯ ГРАВИТАЦИЯ: Мягкое слияние
         finalQuery = `${coreSubject} ${oracleVibe}`;
         console.log(`[ORACLE] Низкая гравитация (${gravity.toFixed(2)}). Мягкое слияние.`);
       }

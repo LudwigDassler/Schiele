@@ -9,32 +9,26 @@ const LINGUISTIC_NOISE = new Set([
   "image", "images", "photo", "photos", "pic", "picture", "pictures", "screen",
   "art", "artwork", "vector", "svg", "png", "jpg", "jpeg", "comp", "render",
   "free", "download", "stock", "gallery", "music", "bands", "promo", "official",
-  "clipart", "royalty", "live", "concert", "poster", "archives", "credit"
+  "clipart", "royalty", "live", "concert", "poster", "credit", "archives", "wp-content"
 ]);
 
 function extractSemanticCore(input: string): string {
   if (!input) return "";
   
   try {
-    // 1. Если это URL — вытаскиваем имя файла
+    // Если это URL, вытаскиваем имя файла
     let text = input.startsWith("http") 
       ? decodeURIComponent(input).split('/').pop()?.split(/[?#]/)[0] || ""
       : input;
 
     const withoutExt = text.replace(/\.[a-zA-Z0-9]+$/, "");
     
-    // 🔥 ИСПРАВЛЕННАЯ БРОНЯ ОТ ХЭШ-ШИЗОФРЕНИИ
-    // Удаляем ТОЛЬКО если это сплошной hex-хэш (a-f + 0-9) без тире.
-    // Сначала убираем разделители для проверки.
-    const cleanForCheck = withoutExt.replace(/[-_]/g, '');
-    
-    // Если строка > 10 символов и состоит ТОЛЬКО из hex-символов (0-9, a-f) — это мусорный хэш.
-    // Наличие букв g-z автоматически спасает строку (это настоящие слова).
-    if (cleanForCheck.length > 10 && /^[a-f0-9]+$/i.test(cleanForCheck)) {
+    // БРОНЯ ОТ ХЭШ-ШИЗОФРЕНИИ (но пропускаем осмысленные длинные названия)
+    // Убиваем только если это сплошной 16-ричный хэш (a-f, 0-9) без тире
+    if (/^[a-f0-9]{10,}$/i.test(withoutExt.replace(/[-_]/g, '')) && !/[g-z]/i.test(withoutExt.replace(/[-_]/g, ''))) {
       return ""; 
     }
 
-    // 2. Чистка: убираем разделители, цифры и одиночные 'x'
     const textOnly = withoutExt
       .replace(/[-_+]/g, " ")
       .replace(/[0-9]+/g, " ")
@@ -43,23 +37,24 @@ function extractSemanticCore(input: string): string {
     const tokens = textOnly.toLowerCase().split(/\s+/).filter(w => w.length > 0);
     if (tokens.length === 0) return "";
 
-    // 3. Откусываем SEO-мусор СЛЕВА
     let startIndex = 0;
     while (startIndex < tokens.length && LINGUISTIC_NOISE.has(tokens[startIndex])) {
       startIndex++;
     }
 
-    // 4. Откусываем SEO-мусор СПРАВА
     let endIndex = tokens.length - 1;
     while (endIndex >= startIndex && LINGUISTIC_NOISE.has(tokens[endIndex])) {
       endIndex--;
     }
 
-    const coreTokens = tokens.slice(startIndex, endIndex + 1);
+    let coreTokens = tokens.slice(startIndex, endIndex + 1);
     if (coreTokens.length === 0) return "";
 
-    // Возвращаем с Заглавной Буквы
-    return coreTokens.map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(" ");
+    // 🔥 ИСПРАВЛЕНИЕ 1: УБИРАЕМ ДУБЛИКАТЫ СЛОВ
+    // Превращает "Pink Floyd ... Pink Floyd" в "Pink Floyd"
+    const uniqueTokens = Array.from(new Set(coreTokens));
+
+    return uniqueTokens.map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(" ");
   } catch (e) {
     console.error("[SEMANTIC ENGINE ERROR]", e);
     return "";
@@ -81,10 +76,9 @@ export async function POST(req: Request) {
 
     console.log(`[MUTATE] Трансляция пикселей: ${imageUrl}`);
 
-    // 1. Пытаемся вытащить субъект из URL (теперь умно)
     let coreSubject = extractSemanticCore(imageUrl);
     
-    // 2. DOM-ГАРПУН: Если URL слепой, используем alt-текст
+    // 🔥 DOM-ГАРПУН: Если URL слепой, используем alt-текст
     if (!coreSubject && altText) {
       console.log(`[MUTATE] URL слепой. Активирую Гарпун по alt-тексту: "${altText}"`);
       coreSubject = extractSemanticCore(altText); 
@@ -92,7 +86,7 @@ export async function POST(req: Request) {
 
     console.log(`[MUTATE] Идентифицирован субъект: "${coreSubject || "СУБЪЕКТ ОТСУТСТВУЕТ (АБСТРАКЦИЯ)"}"`);
 
-    // 3. СКАЧИВАНИЕ КАРТИНКИ (С ЗАЩИТОЙ ОТ ПЕРЕПОЛНЕНИЯ ПАМЯТИ)
+    // 2. СКАЧИВАНИЕ КАРТИНКИ (С ЗАЩИТОЙ ОТ ПЕРЕПОЛНЕНИЯ ПАМЯТИ)
     let imageBuffer: ArrayBuffer;
     try {
       const imageRes = await fetch(imageUrl, {
@@ -154,25 +148,26 @@ export async function POST(req: Request) {
 
     const oracleVibe = oracleData.refined_query || oracleData.style || "aesthetic";
     
-    // Формируем красивый заголовок для UI (первые 2 слова)
     const vibeWords = oracleVibe.split(" ").slice(0, 2).join(" ");
     const displayVibe = vibeWords.toUpperCase();
 
-    // ФИЗИКА ГРАВИТАЦИИ
+    // 🔥 ИСПРАВЛЕНИЕ 2: ЗАКОН КОРОТКОГО ПОВОДКА
     const gravity = (oracleData.tensor && oracleData.tensor.length > 10) 
       ? oracleData.tensor[10] 
       : 0.5; 
 
     let finalQuery = oracleVibe;
     if (coreSubject) {
-      if (gravity > 0.6) {
-        // ВЫСОКАЯ ГРАВИТАЦИЯ: Жесткая фиксация субъекта
+      const subjectWordCount = coreSubject.split(" ").length;
+
+      // Прибиваем гвоздями (кавычками) ТОЛЬКО если гравитация высокая И субъект короткий (до 3 слов)
+      if (gravity > 0.6 && subjectWordCount <= 3) {
         finalQuery = `"${coreSubject}" ${oracleVibe}`;
-        console.log(`[ORACLE] Высокая гравитация (${gravity.toFixed(2)}). Субъект зафиксирован.`);
+        console.log(`[ORACLE] Высокая гравитация. Короткий субъект (${subjectWordCount} сл.) зафиксирован.`);
       } else {
-        // НИЗКАЯ ГРАВИТАЦИЯ: Мягкое слияние
+        // Если гравитация низкая ИЛИ субъект слишком длинный — оставляем мягкий поиск без кавычек
         finalQuery = `${coreSubject} ${oracleVibe}`;
-        console.log(`[ORACLE] Низкая гравитация (${gravity.toFixed(2)}). Мягкое слияние.`);
+        console.log(`[ORACLE] Гравитация: ${gravity.toFixed(2)}, Слов: ${subjectWordCount}. Мягкое слияние (без кавычек).`);
       }
     }
 

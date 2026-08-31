@@ -452,7 +452,7 @@ export default function Home() {
                     <div className="mt-4 text-[9px] md:text-[10px] text-purple-400 uppercase tracking-widest">0 Artifacts</div>
                   </div>
                   <div className="archive-card">
-                    <div class="font-mono text-[10px] md:text-[11px] tracking-widest text-white mb-2 md:mb-3 uppercase font-bold">Embroidery JEFs</div>
+                 <div className="font-mono text-[10px] md:text-[11px] tracking-widest text-white mb-2 md:mb-3 uppercase font-bold">Embroidery JEFs</div>
                     <div className="text-[8px] md:text-[9px] text-neutral-500 uppercase tracking-widest">AcuStitch / Janome</div>
                     <div className="mt-4 text-[9px] md:text-[10px] text-purple-400 uppercase tracking-widest">0 Artifacts</div>
                   </div>

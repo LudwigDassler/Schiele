@@ -10,7 +10,6 @@ import ResonanceEngine from "../components/ResonanceEngine";
 
 const DEFAULT_TAGS = ["Dark Academia", "Siberian Punk", "Liminal Space", "Analog 35mm"];
 
-// 🔥 ИСПРАВЛЕНО: Добавлен rank?: string
 type Photo = { id: string; src: string; thumb: string; title: string; link: string; isNsfw?: boolean; rank?: string };
 type Board = { id: string; name: string; description?: string };
 type Pin = { id: string; image_url: string; title: string; board_id?: string; source_url?: string };
@@ -290,15 +289,9 @@ export default function Home() {
     setNewBoardName(""); setNewBoardDesc(""); setShowNewBoard(false); 
   }
 
-  // 🔥 ИСПРАВЛЕНО: Добавлен дефолтный ранг для закешированных/сохраненных пинов
   const displayPhotos = showSaved ? pins.map(p => ({ 
-    id: p.id, 
-    src: p.image_url, 
-    thumb: p.image_url, 
-    title: p.title || "", 
-    link: p.source_url || "", 
-    isNsfw: checkNsfw(p.title || ""),
-    rank: 'S' 
+    id: p.id, src: p.image_url, thumb: p.image_url, title: p.title || "", link: p.source_url || "", 
+    isNsfw: checkNsfw(p.title || ""), rank: 'S' 
   })) : photos;
   
   const userAvatar = user?.user_metadata?.avatar_url || ""; 
@@ -316,8 +309,6 @@ export default function Home() {
         .font-mono { font-family: 'Space Mono', monospace; }
         ::-webkit-scrollbar { width: 4px; } ::-webkit-scrollbar-track { background: var(--bg-void); } ::-webkit-scrollbar-thumb { background: #333; border-radius: 4px; } ::-webkit-scrollbar-thumb:hover { background: #a855f7; }
         
-        #math-canvas { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 0; pointer-events: none; transition: all 2s cubic-bezier(0.16, 1, 0.3, 1); }
-        .results-active #math-canvas { opacity: 0.25; transform: scale(1.1) translateY(-5%); filter: blur(8px) saturate(1.2); }
         #ui-layer { position: relative; z-index: 10; min-height: 100vh; display: flex; flex-direction: column; }
         header { opacity: 0; pointer-events: none; transform: translateY(-20px); transition: all 1s; }
         .results-active header { opacity: 1; pointer-events: auto; transform: translateY(0); }
@@ -354,9 +345,21 @@ export default function Home() {
         .vector-btn.active::after { left: 0; right: 0; }
         .vector-btn.sonic-mode.active::after { background: #10b981; }
 
-        .content-area { opacity: 0; pointer-events: none; transform: translateY(40px); transition: all 1.2s cubic-bezier(0.16, 1, 0.3, 1); transition-delay: 0.3s; margin-top: 150px; padding: 0 16px 80px; }
-        @media (min-width: 768px) { .content-area { margin-top: 180px; padding: 0 32px 80px; } }
-        .results-active .content-area { opacity: 1; pointer-events: auto; transform: translateY(0); }
+        /* 🔥 ИСПРАВЛЕНИЕ: Вырываем контент из потока до начала анимации */
+        .content-area { 
+          position: absolute; visibility: hidden; width: 100%;
+          opacity: 0; pointer-events: none; transform: translateY(40px); 
+          transition: all 1.2s cubic-bezier(0.16, 1, 0.3, 1); transition-delay: 0.3s; 
+          padding: 0 16px 80px; 
+        }
+        @media (min-width: 768px) { .content-area { padding: 0 32px 80px; } }
+        
+        .results-active .content-area { 
+          position: relative; visibility: visible;
+          opacity: 1; pointer-events: auto; transform: translateY(0); 
+          margin-top: 150px; 
+        }
+        @media (min-width: 768px) { .results-active .content-area { margin-top: 180px; } }
 
         .section-title { font-family: 'Space Mono', monospace; font-size: 9px; text-transform: uppercase; letter-spacing: 2px; color: var(--text-muted); margin-bottom: 16px; border-bottom: 1px solid var(--glass-border); padding-bottom: 8px; display: flex; justify-content: space-between; align-items: flex-end; }
         @media (min-width: 768px) { .section-title { font-size: 10px; letter-spacing: 4px; margin-bottom: 24px; padding-bottom: 12px; } }
@@ -397,11 +400,9 @@ export default function Home() {
         @media (min-width: 768px) { .icon-btn svg { width: 14px; height: 14px; } }
       `}} />
 
-      {/* ФОНОВЫЙ МАТЕМАТИЧЕСКИЙ ДВИЖОК */}
       <ResonanceEngine mode={searchMode} isActive={isResultsActive} />
 
       <div id="ui-layer">
-        {/* HEADER */}
         <header className="w-full px-4 md:px-8 py-4 md:py-6 flex justify-between items-center fixed top-0 z-50 bg-[#020104]/80 backdrop-blur-md border-b border-white/5">
           <div className="font-mono text-xs md:text-sm tracking-[4px] font-bold text-white cursor-pointer" onClick={resetUI}>
             GELBET <span className="text-neutral-600">[]</span>
@@ -423,7 +424,6 @@ export default function Home() {
           </div>
         </header>
 
-        {/* CENTER CONSOLE */}
         <div className="search-container">
           <form className="search-input-wrapper w-full" onSubmit={(e) => handleSearch(e)}>
             <input type="text" id="searchInput" className="search-input" placeholder={searchMode === 'sonic' ? "AWAITING AUDIO STREAM..." : "DEFINE VECTOR..."} autoComplete="off" value={search} onChange={(e) => setSearch(e.target.value)} />
@@ -441,10 +441,7 @@ export default function Home() {
           </div>
         </div>
 
-        {/* MAIN CONTENT */}
         <div className="content-area max-w-[1800px] mx-auto w-full">
-          
-          {/* Archives Section */}
           <div className="mb-10 md:mb-14">
             <div className="section-title">
               <span>My Archives</span>
@@ -478,7 +475,6 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Feed Section */}
           <div>
             <div className="section-title">
               <span>{showSaved ? "Saved Resonance" : "Resonance Feed"}</span>

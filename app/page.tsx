@@ -10,6 +10,7 @@ import ResonanceEngine from "../components/ResonanceEngine";
 
 const DEFAULT_TAGS = ["Dark Academia", "Siberian Punk", "Liminal Space", "Analog 35mm"];
 
+// 🔥 ИСПРАВЛЕНО: Добавлен rank?: string
 type Photo = { id: string; src: string; thumb: string; title: string; link: string; isNsfw?: boolean; rank?: string };
 type Board = { id: string; name: string; description?: string };
 type Pin = { id: string; image_url: string; title: string; board_id?: string; source_url?: string };
@@ -23,7 +24,6 @@ export default function Home() {
   const [searchQuery, setSearchQuery] = useState("Aesthetic");
   const [userTags, setUserTags] = useState<string[]>([]);
   
-  // Состояния нового интерфейса
   const [isResultsActive, setIsResultsActive] = useState(false);
   const [searchMode, setSearchMode] = useState<'visual' | 'sonic'>('visual');
   const [matchScore, setMatchScore] = useState(98.4);
@@ -51,7 +51,6 @@ export default function Home() {
   const isSynthSessionRef = useRef(false);
   const abortControllerRef = useRef<AbortController | null>(null);
 
-  // Синхронизация состояния CSS-классов с Next.js
   useEffect(() => {
     if (isResultsActive) document.body.classList.add("results-active");
     else document.body.classList.remove("results-active");
@@ -114,7 +113,6 @@ export default function Home() {
         setActiveUserId(urlUserId);
     } catch (e) {}
 
-    // Инициализируем ленту, но не поднимаем поиск вверх
     if(mounted) {
         setSearchQuery(initialQuery);
         fetchPhotos(initialQuery, 1, true, urlMode, urlUserId);
@@ -168,7 +166,7 @@ export default function Home() {
             thumb: p.thumb || p.thumbnail || p.image || mappedSrc,
             link: p.link || p.url || p.source_url || mappedSrc,
             isNsfw: isNsfwQuery || checkNsfw(p.title || ""),
-            rank: Math.random() > 0.7 ? 'S' : 'A' // Визуализация ранга
+            rank: Math.random() > 0.7 ? 'S' : 'A'
           };
         })
         .filter((p: any) => p.src && p.src.startsWith("http"));
@@ -181,7 +179,6 @@ export default function Home() {
       });
       setHasMore(fetched.length > 0);
       
-      // Динамически меняем процент совпадения эстетики
       if (reset) setMatchScore(parseFloat((85 + Math.random() * 14).toFixed(1)));
       
     } catch (e: any) { 
@@ -226,7 +223,6 @@ export default function Home() {
 
     if (searchMode === 'sonic') {
       try {
-        // Оракул (Аудио)
         const res = await fetch("/api/oracle", { 
           method: "POST", 
           headers: { "Content-Type": "application/json" }, 
@@ -294,7 +290,17 @@ export default function Home() {
     setNewBoardName(""); setNewBoardDesc(""); setShowNewBoard(false); 
   }
 
-  const displayPhotos = showSaved ? pins.map(p => ({ id: p.id, src: p.image_url, thumb: p.image_url, title: p.title || "", link: p.source_url || "", isNsfw: checkNsfw(p.title || "") })) : photos;
+  // 🔥 ИСПРАВЛЕНО: Добавлен дефолтный ранг для закешированных/сохраненных пинов
+  const displayPhotos = showSaved ? pins.map(p => ({ 
+    id: p.id, 
+    src: p.image_url, 
+    thumb: p.image_url, 
+    title: p.title || "", 
+    link: p.source_url || "", 
+    isNsfw: checkNsfw(p.title || ""),
+    rank: 'S' 
+  })) : photos;
+  
   const userAvatar = user?.user_metadata?.avatar_url || ""; 
   const userName = user?.user_metadata?.full_name || user?.email || "Ludwig";
   const tagsToDisplay = userTags.length > 0 ? userTags.slice(0, 4) : DEFAULT_TAGS;
@@ -425,7 +431,7 @@ export default function Home() {
           
           <div className="quick-tags">
             {tagsToDisplay.map(tag => (
-              <button key={tag} className="tag-pill" onClick={() => handleTagClick(tag)}>{tag}</button>
+              <button key={tag} type="button" className="tag-pill" onClick={() => handleTagClick(tag)}>{tag}</button>
             ))}
           </div>
 
@@ -452,7 +458,7 @@ export default function Home() {
                     <div className="mt-4 text-[9px] md:text-[10px] text-purple-400 uppercase tracking-widest">0 Artifacts</div>
                   </div>
                   <div className="archive-card">
-                 <div className="font-mono text-[10px] md:text-[11px] tracking-widest text-white mb-2 md:mb-3 uppercase font-bold">Embroidery JEFs</div>
+                    <div className="font-mono text-[10px] md:text-[11px] tracking-widest text-white mb-2 md:mb-3 uppercase font-bold">Embroidery JEFs</div>
                     <div className="text-[8px] md:text-[9px] text-neutral-500 uppercase tracking-widest">AcuStitch / Janome</div>
                     <div className="mt-4 text-[9px] md:text-[10px] text-purple-400 uppercase tracking-widest">0 Artifacts</div>
                   </div>
@@ -514,7 +520,7 @@ export default function Home() {
         </div>
       </div>
 
-      {/* МОДАЛЬНЫЕ ОКНА В ЕДИНОМ СТИЛЕ */}
+      {/* МОДАЛЬНЫЕ ОКНА */}
       {showNewBoard && (
         <div className="fixed inset-0 z-[600] bg-black/80 flex items-center justify-center p-4 backdrop-blur-md" onClick={() => setShowNewBoard(false)}>
           <div onClick={e => e.stopPropagation()} className="bg-[#0a0a0c]/90 border border-white/10 rounded-xl p-8 max-w-md w-full flex flex-col gap-6 shadow-2xl backdrop-blur-xl">

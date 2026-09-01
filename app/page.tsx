@@ -5,7 +5,6 @@ import { supabase } from "../lib/supabase";
 import type { User } from "@supabase/supabase-js";
 import { checkNsfw } from "../lib/nsfw";
 import { useTasteProfile } from "./hooks/useTasteProfile";
-import { getAnonId } from "../lib/identity";
 import ResonanceEngine from "../components/ResonanceEngine";
 
 const DEFAULT_TAGS = ["Dark Academia", "Siberian Punk", "Liminal Space", "Analog 35mm"];
@@ -20,7 +19,7 @@ export default function Home() {
   
   const [user, setUser] = useState<User | null>(null);
   const [search, setSearch] = useState("");
-  const [searchQuery, setSearchQuery] = useState("Aesthetic");
+  const [searchQuery, setSearchQuery] = useState("");
   const [userTags, setUserTags] = useState<string[]>([]);
   
   const [isResultsActive, setIsResultsActive] = useState(false);
@@ -40,84 +39,86 @@ export default function Home() {
   const [nsfwAllowed, setNsfwAllowed] = useState(false);
   const [newBoardName, setNewBoardName] = useState("");
   const [newBoardDesc, setNewBoardDesc] = useState("");
-  
-  const [activeMode, setActiveMode] = useState("classic");
-  const [activeUserId, setActiveUserId] = useState<string | null>(null);
+
+  // Socials & UI States
+  const [localLikes, setLocalLikes] = useState<Record<string, boolean>>({});
+  const [toastMsg, setToastMsg] = useState("");
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const observerRef = useRef<IntersectionObserver | null>(null);
   const loadingRef = useRef(false);
-  const isSynthSessionRef = useRef(false);
   const abortControllerRef = useRef<AbortController | null>(null);
+
+  const showToast = (msg: string) => {
+    setToastMsg(msg);
+    setTimeout(() => setToastMsg(""), 3000);
+  };
 
   useEffect(() => {
     if (isResultsActive) document.body.classList.add("results-active");
     else document.body.classList.remove("results-active");
   }, [isResultsActive]);
 
+  // ==========================================
+  // INITIALIZATION & HISTORY SYNC
+  // ==========================================
   useEffect(() => {
     let mounted = true;
     
     supabase.auth.getSession().then(({ data }) => { 
-        if(mounted) {
-            setUser(data.session?.user ?? null); 
-            if (data.session?.user) {
-                fetchUserData(data.session.user.id);
-                if (!isSynthSessionRef.current) setActiveUserId(data.session.user.id);
-            }
+        if(mounted && data.session?.user) {
+            setUser(data.session.user); 
+            fetchUserData(data.session.user.id);
         }
     });
     
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_, session) => { 
-        if(mounted) {
-            setUser(session?.user ?? null); 
-            if (session?.user) {
-                fetchUserData(session.user.id);
-                if (!isSynthSessionRef.current) setActiveUserId(session.user.id);
-            }
+        if(mounted && session?.user) {
+            setUser(session.user); 
+            fetchUserData(session.user.id);
         }
     });
     
-    let initialQuery = "Aesthetic";
-    let urlMode = "classic";
-    let urlUserId: string | null = null;
-    
     try { 
         const savedTags = localStorage.getItem("gelbet_user_tags"); 
-        if (savedTags) {
-            const parsed = JSON.parse(savedTags);
-            setUserTags(parsed);
-            if (parsed.length > 0) initialQuery = parsed[0];
-        }
-        
-        const allowedNsfw = localStorage.getItem("gelbet_nsfw_18plus"); 
-        if (allowedNsfw === "true") setNsfwAllowed(true); 
+        if (savedTags) setUserTags(JSON.parse(savedTags));
+        if (localStorage.getItem("gelbet_nsfw_18plus") === "true") setNsfwAllowed(true); 
 
+        // Парсим URL для сохранения состояния при возврате "Назад"
         const urlParams = new URLSearchParams(window.location.search);
         const qFromUrl = urlParams.get("q");
-        const modeFromUrl = urlParams.get("mode");
-        const userIdFromUrl = urlParams.get("userId");
+        const modeFromUrl = urlParams.get("mode") as 'visual' | 'sonic';
         
-        if (qFromUrl) initialQuery = qFromUrl;
-        if (modeFromUrl) urlMode = modeFromUrl;
-        
-        if (userIdFromUrl) {
-            urlUserId = userIdFromUrl;
-            isSynthSessionRef.current = true;
-        } else {
-            urlUserId = getAnonId();
+        if (modeFromUrl) setSearchMode(modeFromUrl);
+
+        if (qFromUrl) {
+            setSearch(qFromUrl);
+            setSearchQuery(qFromUrl);
+            setIsResultsActive(true);
+            fetchPhotos(qFromUrl, 1, true, modeFromUrl || 'visual');
         }
-        
-        setActiveMode(urlMode);
-        setActiveUserId(urlUserId);
     } catch (e) {}
 
-    if(mounted) {
-        setSearchQuery(initialQuery);
-        fetchPhotos(initialQuery, 1, true, urlMode, urlUserId);
-    }
+    // Поддержка кнопок вперед/назад в браузере
+    const handlePopState = () => {
+      const urlParams = new URLSearchParams(window.location.search);
+      const qFromUrl = urlParams.get("q");
+      if (qFromUrl) {
+        setSearch(qFromUrl);
+        setSearchQuery(qFromUrl);
+        setIsResultsActive(true);
+        fetchPhotos(qFromUrl, 1, true);
+      } else {
+        resetUI();
+      }
+    };
+    window.addEventListener('popstate', handlePopState);
 
-    return () => { mounted = false; subscription.unsubscribe(); };
+    return () => { 
+      mounted = false; 
+      subscription.unsubscribe(); 
+      window.removeEventListener('popstate', handlePopState);
+    };
   }, []); 
 
   async function fetchUserData(userId: string) {
@@ -126,14 +127,18 @@ export default function Home() {
         fetch(`/api/pins?user_id=${userId}`).catch(() => null), 
         fetch(`/api/boards?user_id=${userId}`).catch(() => null) 
       ]);
-      
       if (pinsRes?.ok) { const d = await pinsRes.json(); setPins(d.pins || d.data || []); }
       if (boardsRes?.ok) { const d = await boardsRes.json(); setBoards(d.boards || d.data || []); }
     } catch (e) {}
   }
 
-  const fetchPhotos = useCallback(async (queryParam: string, pageNum: number, reset: boolean, modeOverride?: string, userIdOverride?: string | null) => {
+  // ==========================================
+  // FETCH CORE
+  // ==========================================
+  const fetchPhotos = useCallback(async (queryParam: string, pageNum: number, reset: boolean, modeOverride?: string) => {
+    if (!queryParam) return;
     if (!reset && loadingRef.current) return;
+    
     loadingRef.current = true; 
     setLoading(true);
     
@@ -143,10 +148,9 @@ export default function Home() {
     }
     
     try {
-      const params = new URLSearchParams({ page: String(pageNum) });
-      if (queryParam) params.set("query", queryParam);
-      if (modeOverride ?? activeMode) params.set("mode", modeOverride ?? activeMode);
-      if (userIdOverride !== undefined ? userIdOverride : activeUserId) params.set("userId", (userIdOverride !== undefined ? userIdOverride : activeUserId) as string);
+      const params = new URLSearchParams({ page: String(pageNum), query: queryParam });
+      if (modeOverride ?? searchMode) params.set("mode", modeOverride ?? searchMode);
+      if (user) params.set("userId", user.id);
       
       const res = await fetch(`/api/search?${params}`, { signal: abortControllerRef.current?.signal });
       if (!res.ok) throw new Error("Fetch failed");
@@ -165,7 +169,7 @@ export default function Home() {
             thumb: p.thumb || p.thumbnail || p.image || mappedSrc,
             link: p.link || p.url || p.source_url || mappedSrc,
             isNsfw: isNsfwQuery || checkNsfw(p.title || ""),
-            rank: Math.random() > 0.7 ? 'S' : 'A'
+            rank: Math.random() > 0.8 ? 'S' : (Math.random() > 0.4 ? 'A' : 'B')
           };
         })
         .filter((p: any) => p.src && p.src.startsWith("http"));
@@ -178,23 +182,26 @@ export default function Home() {
       });
       setHasMore(fetched.length > 0);
       
-      if (reset) setMatchScore(parseFloat((85 + Math.random() * 14).toFixed(1)));
+      if (reset) {
+        const hash = queryParam.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+        setMatchScore(parseFloat((85 + (hash % 14) + Math.random()).toFixed(1)));
+      }
       
     } catch (e: any) { 
-        console.error("Search fetch error:", e);
+        if (e.name !== 'AbortError') console.error("Search fetch error:", e);
     } finally { 
         if (!(reset && abortControllerRef.current?.signal.aborted)) { 
             setLoading(false); 
             loadingRef.current = false; 
         } 
     }
-  }, [activeMode, activeUserId]);
+  }, [searchMode, user]);
 
   useEffect(() => {
     if (!bottomRef.current) return;
     observerRef.current?.disconnect();
     observerRef.current = new IntersectionObserver(entries => { 
-      if (entries[0].isIntersecting && hasMore && !loadingRef.current) { 
+      if (entries[0].isIntersecting && hasMore && !loadingRef.current && searchQuery) { 
         const next = page + 1; 
         setPage(next); 
         fetchPhotos(searchQuery, next, false); 
@@ -213,19 +220,21 @@ export default function Home() {
     }); 
   }
 
+  // ==========================================
+  // ACTIONS
+  // ==========================================
   async function handleSearch(e?: React.FormEvent, forceQuery?: string) { 
     if (e) e.preventDefault(); 
     const query = (forceQuery || search).trim();
     if (!query) return; 
 
     setIsResultsActive(true);
+    window.history.pushState({}, '', `/?q=${encodeURIComponent(query)}&mode=${searchMode}`);
 
     if (searchMode === 'sonic') {
       try {
         const res = await fetch("/api/oracle", { 
-          method: "POST", 
-          headers: { "Content-Type": "application/json" }, 
-          body: JSON.stringify({ trackInput: query }) 
+          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ trackInput: query }) 
         });
         if (!res.ok) throw new Error("Oracle API Error");
         const data = await res.json();
@@ -233,9 +242,7 @@ export default function Home() {
         setSearchQuery(hiddenQuery); 
         setPage(1); setHasMore(true); setPhotos([]); 
         await fetchPhotos(hiddenQuery, 1, true);
-      } catch (err) {
-        console.warn(err);
-      }
+      } catch (err) { console.warn(err); }
       return;
     }
 
@@ -253,37 +260,53 @@ export default function Home() {
   function resetUI() {
     setIsResultsActive(false);
     setSearch("");
+    setSearchQuery("");
     setShowSaved(false);
+    window.history.pushState({}, '', '/');
   }
 
   async function savePin(photo: Photo) { 
-    if (!user) { window.location.href = "/auth"; return; } 
+    if (!user) { router.push("/auth"); return; } 
+    if (isPinned(photo)) {
+        showToast("Already in archives");
+        return;
+    }
     try { 
       const res = await fetch("/api/pins", { 
-        method: "POST", 
-        headers: { "Content-Type": "application/json" }, 
+        method: "POST", headers: { "Content-Type": "application/json" }, 
         body: JSON.stringify({ user_id: user.id, image_url: photo.src, title: photo.title, board_id: null, source_url: photo.link }) 
       }); 
       if (res.ok) { 
         const data = await res.json(); 
         if (data.pin || data.data) setPins(prev => [data.pin || data.data, ...prev]); 
+        showToast("Artifact secured");
       } 
     } catch (e) {} 
   }
 
   function isPinned(photo: Photo) { return pins.some(p => p.image_url === photo.src); }
 
+  const toggleLike = (photoId: string) => {
+    setLocalLikes(prev => ({ ...prev, [photoId]: !prev[photoId] }));
+    if (!localLikes[photoId]) showToast("Resonance logged");
+  };
+
+  const copyLink = (link: string) => {
+    navigator.clipboard.writeText(link);
+    showToast("Coordinates copied");
+  };
+
   async function createBoard() { 
     if (!newBoardName || !user) return; 
     try { 
       const res = await fetch("/api/boards", { 
-        method: "POST", 
-        headers: { "Content-Type": "application/json" }, 
+        method: "POST", headers: { "Content-Type": "application/json" }, 
         body: JSON.stringify({ user_id: user.id, name: newBoardName, description: newBoardDesc }) 
       }); 
       if (res.ok) { 
         const data = await res.json(); 
         if (data.board || data.data) setBoards(prev => [data.board || data.data, ...prev]); 
+        showToast("Archive initialized");
       } 
     } catch (e) {} 
     setNewBoardName(""); setNewBoardDesc(""); setShowNewBoard(false); 
@@ -315,9 +338,10 @@ export default function Home() {
         .nav-link { font-size: 11px; text-transform: uppercase; letter-spacing: 2px; color: var(--text-muted); transition: color 0.3s; cursor: pointer; }
         .nav-link:hover, .nav-link.active { color: #fff; }
 
-        .search-container { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 100%; max-width: 650px; padding: 0 16px; transition: all 1.2s cubic-bezier(0.16, 1, 0.3, 1); display: flex; flex-direction: column; align-items: center; }
+        .search-container { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 100%; max-width: 650px; padding: 0 16px; transition: all 1.5s cubic-bezier(0.16, 1, 0.3, 1); display: flex; flex-direction: column; align-items: center; }
         @media (min-width: 768px) { .search-container { padding: 0 24px; } }
-        .results-active .search-container { top: 90px; transform: translate(-50%, 0); max-width: 800px; }
+        /* Фиксируем поиск и экватор сферы на 35vh при активации */
+        .results-active .search-container { top: 35vh; transform: translate(-50%, -50%); max-width: 800px; }
 
         .search-input-wrapper { display: flex; align-items: center; width: 100%; border-bottom: 2px solid rgba(255,255,255,0.4); transition: all 0.4s ease; padding-bottom: 8px; }
         .search-input-wrapper:focus-within { border-bottom-color: rgba(255,255,255,1); box-shadow: 0 15px 40px -10px var(--pf-prism-glow); }
@@ -345,7 +369,7 @@ export default function Home() {
         .vector-btn.active::after { left: 0; right: 0; }
         .vector-btn.sonic-mode.active::after { background: #10b981; }
 
-        /* 🔥 ИСПРАВЛЕНИЕ: Вырываем контент из потока до начала анимации */
+        /* Изолируем сетку от документа, пока она скрыта */
         .content-area { 
           position: absolute; visibility: hidden; width: 100%;
           opacity: 0; pointer-events: none; transform: translateY(40px); 
@@ -357,9 +381,8 @@ export default function Home() {
         .results-active .content-area { 
           position: relative; visibility: visible;
           opacity: 1; pointer-events: auto; transform: translateY(0); 
-          margin-top: 150px; 
+          margin-top: 45vh; /* Фиксированный отступ под сферой */
         }
-        @media (min-width: 768px) { .results-active .content-area { margin-top: 180px; } }
 
         .section-title { font-family: 'Space Mono', monospace; font-size: 9px; text-transform: uppercase; letter-spacing: 2px; color: var(--text-muted); margin-bottom: 16px; border-bottom: 1px solid var(--glass-border); padding-bottom: 8px; display: flex; justify-content: space-between; align-items: flex-end; }
         @media (min-width: 768px) { .section-title { font-size: 10px; letter-spacing: 4px; margin-bottom: 24px; padding-bottom: 12px; } }
@@ -390,17 +413,25 @@ export default function Home() {
         .save-btn { background: rgba(255,255,255,0.1); backdrop-filter: blur(4px); color: #fff; border: 1px solid rgba(255,255,255,0.3); padding: 6px 12px; font-family: 'Space Mono', monospace; font-size: 8px; text-transform: uppercase; letter-spacing: 2px; border-radius: 4px; cursor: pointer; transition: all 0.3s; }
         @media (min-width: 768px) { .save-btn { font-size: 9px; padding: 6px 16px; } }
         .save-btn:hover { background: #fff; color: #000; }
+        .save-btn.saved { background: #fff; color: #000; border-color: #fff; }
 
         .pin-actions { display: flex; gap: 6px; }
         @media (min-width: 768px) { .pin-actions { gap: 8px; } }
         .icon-btn { width: 28px; height: 28px; border-radius: 50%; background: rgba(255,255,255,0.1); backdrop-filter: blur(4px); border: 1px solid rgba(255,255,255,0.2); display: flex; align-items: center; justify-content: center; color: #fff; cursor: pointer; transition: all 0.3s; }
         @media (min-width: 768px) { .icon-btn { width: 32px; height: 32px; } }
         .icon-btn:hover { background: #fff; color: #000; transform: translateY(-2px); }
-        .icon-btn svg { width: 12px; height: 12px; }
+        .icon-btn.liked { color: #ef4444; border-color: #ef4444; background: rgba(239,68,68,0.1); }
+        .icon-btn.liked svg { fill: #ef4444; }
+        .icon-btn svg { width: 12px; height: 12px; transition: fill 0.3s; }
         @media (min-width: 768px) { .icon-btn svg { width: 14px; height: 14px; } }
+
+        .toast-popup { position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.8); border: 1px solid rgba(255,255,255,0.1); backdrop-filter: blur(10px); padding: 12px 24px; border-radius: 99px; font-family: 'Space Mono', monospace; font-size: 10px; text-transform: uppercase; letter-spacing: 2px; color: #fff; z-index: 9999; animation: floatUp 0.3s ease-out; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+        @keyframes floatUp { from { opacity: 0; transform: translate(-50%, 20px); } to { opacity: 1; transform: translate(-50%, 0); } }
       `}} />
 
-      <ResonanceEngine mode={searchMode} isActive={isResultsActive} />
+      <div style={{ position: 'fixed', inset: 0, zIndex: 0, transform: isResultsActive ? 'translateY(-15vh)' : 'none', transition: 'transform 1.5s cubic-bezier(0.16, 1, 0.3, 1)' }}>
+         <ResonanceEngine mode={searchMode} isActive={isResultsActive} />
+      </div>
 
       <div id="ui-layer">
         <header className="w-full px-4 md:px-8 py-4 md:py-6 flex justify-between items-center fixed top-0 z-50 bg-[#020104]/80 backdrop-blur-md border-b border-white/5">
@@ -410,7 +441,7 @@ export default function Home() {
           
           <div className="gap-8 absolute left-1/2 -translate-x-1/2 hidden md:flex">
             <div className={`nav-link ${!showSaved ? 'active' : ''}`} onClick={() => setShowSaved(false)}>Resonance</div>
-            <div className={`nav-link ${showSaved ? 'active' : ''}`} onClick={() => setShowSaved(true)}>Saved</div>
+            <div className={`nav-link ${showSaved ? 'active' : ''}`} onClick={() => { setShowSaved(true); setIsResultsActive(true); }}>Saved</div>
           </div>
 
           <div className="flex items-center gap-3 md:gap-5">
@@ -442,38 +473,35 @@ export default function Home() {
         </div>
 
         <div className="content-area max-w-[1800px] mx-auto w-full">
-          <div className="mb-10 md:mb-14">
-            <div className="section-title">
-              <span>My Archives</span>
-            </div>
-            <div className="archives-grid">
-              {boards.length === 0 ? (
-                <>
-                  <div className="archive-card">
-                    <div className="font-mono text-[10px] md:text-[11px] tracking-widest text-white mb-2 md:mb-3 uppercase font-bold">Web Deployment</div>
-                    <div className="text-[8px] md:text-[9px] text-neutral-500 uppercase tracking-widest">React / Next.js</div>
-                    <div className="mt-4 text-[9px] md:text-[10px] text-purple-400 uppercase tracking-widest">0 Artifacts</div>
-                  </div>
-                  <div className="archive-card">
-                    <div className="font-mono text-[10px] md:text-[11px] tracking-widest text-white mb-2 md:mb-3 uppercase font-bold">Embroidery JEFs</div>
-                    <div className="text-[8px] md:text-[9px] text-neutral-500 uppercase tracking-widest">AcuStitch / Janome</div>
-                    <div className="mt-4 text-[9px] md:text-[10px] text-purple-400 uppercase tracking-widest">0 Artifacts</div>
-                  </div>
-                </>
-              ) : (
-                boards.map(board => (
-                  <div key={board.id} className="archive-card">
-                    <div className="font-mono text-[10px] md:text-[11px] tracking-widest text-white mb-2 md:mb-3 uppercase font-bold">{board.name}</div>
-                    <div className="text-[8px] md:text-[9px] text-neutral-500 uppercase tracking-widest">{board.description || "Collection"}</div>
-                    <div className="mt-4 text-[9px] md:text-[10px] text-purple-400 uppercase tracking-widest">{pins.filter(p => p.board_id === board.id).length} Artifacts</div>
-                  </div>
-                ))
-              )}
-              <div className="archive-card flex flex-col items-center justify-center border-dashed border-neutral-800 hover:border-neutral-500 bg-transparent min-h-[100px]" onClick={() => setShowNewBoard(true)}>
-                <div className="font-mono text-[9px] md:text-[10px] text-neutral-400 uppercase tracking-widest">+ Establish Archive</div>
+          {!showSaved && (
+            <div className="mb-10 md:mb-14">
+              <div className="section-title">
+                <span>My Archives</span>
+              </div>
+              <div className="archives-grid">
+                {boards.length === 0 ? (
+                  <>
+                    <div className="archive-card">
+                      <div className="font-mono text-[10px] md:text-[11px] tracking-widest text-white mb-2 md:mb-3 uppercase font-bold">Web Deployment</div>
+                      <div className="text-[8px] md:text-[9px] text-neutral-500 uppercase tracking-widest">React / Next.js</div>
+                      <div className="mt-4 text-[9px] md:text-[10px] text-purple-400 uppercase tracking-widest">0 Artifacts</div>
+                    </div>
+                  </>
+                ) : (
+                  boards.map(board => (
+                    <div key={board.id} className="archive-card">
+                      <div className="font-mono text-[10px] md:text-[11px] tracking-widest text-white mb-2 md:mb-3 uppercase font-bold">{board.name}</div>
+                      <div className="text-[8px] md:text-[9px] text-neutral-500 uppercase tracking-widest">{board.description || "Collection"}</div>
+                      <div className="mt-4 text-[9px] md:text-[10px] text-purple-400 uppercase tracking-widest">{pins.filter(p => p.board_id === board.id).length} Artifacts</div>
+                    </div>
+                  ))
+                )}
+                <div className="archive-card flex flex-col items-center justify-center border-dashed border-neutral-800 hover:border-neutral-500 bg-transparent min-h-[100px]" onClick={() => setShowNewBoard(true)}>
+                  <div className="font-mono text-[9px] md:text-[10px] text-neutral-400 uppercase tracking-widest">+ Establish Archive</div>
+                </div>
               </div>
             </div>
-          </div>
+          )}
 
           <div>
             <div className="section-title">
@@ -484,6 +512,9 @@ export default function Home() {
             <div className="masonry">
               {displayPhotos.map((photo, i) => {
                 const isBlurred = photo.isNsfw && !nsfwAllowed;
+                const isLiked = localLikes[photo.id] || false;
+                const saved = isPinned(photo);
+
                 return (
                   <div key={`${photo.id}-${i}`} className="pin-card" onClick={() => {
                     feedLocalAI(photo.src, photo.id);
@@ -494,14 +525,22 @@ export default function Home() {
                     <div className="pin-overlay">
                       <div className="flex justify-between items-start w-full">
                         <span className="font-mono text-[8px] md:text-[9px] text-white/50 tracking-widest uppercase">Rank: {photo.rank || 'A'}</span>
-                        <button className="save-btn" onClick={(e) => { e.stopPropagation(); savePin(photo); }}>{isPinned(photo) ? 'Saved' : 'Save'}</button>
+                        <button className={`save-btn ${saved ? 'saved' : ''}`} onClick={(e) => { e.stopPropagation(); savePin(photo); }}>
+                          {saved ? 'Secured' : 'Save'}
+                        </button>
                       </div>
                       <div className="flex justify-between items-end w-full mt-auto">
                         <div className="font-mono text-[8px] md:text-[10px] text-white tracking-widest uppercase font-bold drop-shadow-md">ID: {photo.id.substring(0,6).toUpperCase()}</div>
                         <div className="pin-actions">
-                          <button className="icon-btn" title="Like" onClick={(e) => e.stopPropagation()}><svg fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"/></svg></button>
-                          <button className="icon-btn" title="Comment" onClick={(e) => e.stopPropagation()}><svg fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg></button>
-                          <button className="icon-btn" title="Share" onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(photo.link || photo.src); alert("Copied!"); }}><svg fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z"/></svg></button>
+                          <button className={`icon-btn ${isLiked ? 'liked' : ''}`} title="Like" onClick={(e) => { e.stopPropagation(); toggleLike(photo.id); }}>
+                            <svg fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"/></svg>
+                          </button>
+                          <button className="icon-btn" title="Comment" onClick={(e) => { e.stopPropagation(); showToast("Decryption required"); }}>
+                            <svg fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
+                          </button>
+                          <button className="icon-btn" title="Share" onClick={(e) => { e.stopPropagation(); copyLink(photo.link || photo.src); }}>
+                            <svg fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z"/></svg>
+                          </button>
                         </div>
                       </div>
                     </div>
@@ -516,7 +555,8 @@ export default function Home() {
         </div>
       </div>
 
-      {/* МОДАЛЬНЫЕ ОКНА */}
+      {toastMsg && <div className="toast-popup">{toastMsg}</div>}
+
       {showNewBoard && (
         <div className="fixed inset-0 z-[600] bg-black/80 flex items-center justify-center p-4 backdrop-blur-md" onClick={() => setShowNewBoard(false)}>
           <div onClick={e => e.stopPropagation()} className="bg-[#0a0a0c]/90 border border-white/10 rounded-xl p-8 max-w-md w-full flex flex-col gap-6 shadow-2xl backdrop-blur-xl">

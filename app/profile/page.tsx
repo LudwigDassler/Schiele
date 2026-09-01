@@ -42,16 +42,20 @@ export default function ProfilePage() {
           fetch(`/api/pins?user_id=${u.id}`),
           fetch(`/api/boards?user_id=${u.id}`)
         ]);
+        
         if (pinsRes.ok) {
           const pinsData = await pinsRes.json();
-          if (pinsData.pins) setPins(pinsData.pins);
+          // Бронебойная проверка: гарантируем, что в стейт ложится только массив
+          const arr = Array.isArray(pinsData) ? pinsData : (pinsData.pins || pinsData.data || []);
+          setPins(arr);
         }
         if (boardsRes.ok) {
           const boardsData = await boardsRes.json();
-          if (boardsData.boards) setBoards(boardsData.boards);
+          const arr = Array.isArray(boardsData) ? boardsData : (boardsData.boards || boardsData.data || []);
+          setBoards(arr);
         }
       } catch (e) { 
-        console.error(e); 
+        console.error("Data fetch error:", e); 
       }
       
       setLoading(false);
@@ -163,7 +167,7 @@ export default function ProfilePage() {
   // ==========================================
   // ФУНКЦИЯ УДАЛЕНИЯ АРТЕФАКТА (PURGE)
   // ==========================================
-  const deletePin = async (e: React.MouseEvent, pinId: string) => {
+  const deletePin = async (e: React.MouseEvent, pinId: string | number) => {
     e.stopPropagation();
     try {
       const res = await fetch(`/api/pins?id=${pinId}`, { method: "DELETE" });
@@ -243,7 +247,7 @@ export default function ProfilePage() {
         .sync-btn:hover:not(:disabled) { color: #fff; text-shadow: 0 0 10px rgba(255,255,255,0.5); }
         .sync-btn:disabled { opacity: 0.4; cursor: not-allowed; }
         
-        /* ТАБЫ: Исправлено наложение */
+        /* ТАБЫ: Жестко разведены, чтобы не слипались */
         .tab-btn { 
             padding: 12px 24px; border: none; background: transparent; cursor: pointer; 
             font-size: 11px; font-weight: 700; color: #555; white-space: nowrap;
@@ -277,7 +281,7 @@ export default function ProfilePage() {
         .upload-card {
             break-inside: avoid; margin-bottom: 24px; border-radius: 8px;
             border: 1px dashed rgba(255,255,255,0.1); background: rgba(255,255,255,0.02);
-            display: flex; flex-direction: column; items-center; justify-content: center;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
             aspect-ratio: 3/4; cursor: pointer; transition: all 0.3s;
         }
         .upload-card:hover { border-color: rgba(255,255,255,0.4); background: rgba(255,255,255,0.05); }
@@ -425,16 +429,20 @@ export default function ProfilePage() {
                         />
                     </div>
 
-                    {/* ПИНЫ С КНОПКОЙ PURGE */}
+                    {/* ПИНЫ С КНОПКОЙ PURGE (Бронебойный код) */}
                     {pins.map(pin => (
-                      <div key={pin.id} className="masonry-item group" onClick={() => router.push(`/vibe?src=${encodeURIComponent(pin.image_url)}&title=${encodeURIComponent(pin.title || "")}`)}>
-                        <img src={pin.image_url} alt={pin.title} loading="lazy" />
+                      <div 
+                        key={pin.id} 
+                        className="masonry-item group" 
+                        onClick={() => router.push(`/vibe?src=${encodeURIComponent(pin.image_url || pin.src || "")}&title=${encodeURIComponent(pin.title || "")}`)}
+                      >
+                        <img src={pin.image_url || pin.src} alt={pin.title} loading="lazy" />
                         
                         {/* Оверлей для удаления */}
                         <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-end p-4 pointer-events-none">
                             <div className="flex justify-between items-end pointer-events-auto">
                                 <span className="font-mono text-[8px] text-neutral-400 uppercase tracking-widest">
-                                  ID: {pin.id.substring(0,4).toUpperCase()}
+                                  ID: {String(pin.id || "000").substring(0,4).toUpperCase()}
                                 </span>
                                 <button 
                                   onClick={(e) => deletePin(e, pin.id)}

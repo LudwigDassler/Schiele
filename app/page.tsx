@@ -1,4 +1,5 @@
 "use client";
+
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../lib/supabase";
@@ -7,7 +8,12 @@ import { checkNsfw } from "../lib/nsfw";
 import { useTasteProfile } from "./hooks/useTasteProfile";
 import ResonanceEngine from "../components/ResonanceEngine";
 
-const DEFAULT_TAGS = ["Dark Academia", "Siberian Punk", "Liminal Space", "Analog 35mm"];
+const DEFAULT_TAGS = [
+  "Dark Academia", 
+  "Siberian Punk", 
+  "Liminal Space", 
+  "Analog 35mm"
+];
 
 type Photo = { 
   id: string; 
@@ -40,42 +46,37 @@ export default function Home() {
   const [isMounted, setIsMounted] = useState(false);
   const [user, setUser] = useState<User | null>(null);
   
-  // ==========================================
-  // SEARCH & ENGINE STATES
-  // ==========================================
+  // Поисковые стейты
   const [search, setSearch] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [userTags, setUserTags] = useState<string[]>([]);
+  const [hasWiped, setHasWiped] = useState(false); 
   const [isResultsActive, setIsResultsActive] = useState(false);
   const [searchMode, setSearchMode] = useState<'visual' | 'sonic'>('visual');
   const [matchScore, setMatchScore] = useState(98.4);
   
-  // ==========================================
-  // DATA STATES
-  // ==========================================
+  // Данные
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [pins, setPins] = useState<Pin[]>([]);
   const [boards, setBoards] = useState<Board[]>([]);
   
-  // ==========================================
-  // PAGINATION & LOADING STATES
-  // ==========================================
+  // Пагинация и загрузка
   const [loading, setLoading] = useState(false);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
   
-  // ==========================================
-  // UI & MODAL STATES
-  // ==========================================
+  // UI Стейты (Модалки)
   const [showSaved, setShowSaved] = useState(false);
   const [showNewBoard, setShowNewBoard] = useState(false);
   const [showAgeGate, setShowAgeGate] = useState(false);
   const [commentPin, setCommentPin] = useState<Photo | null>(null);
+  const [commentInput, setCommentInput] = useState("");
   const [nsfwAllowed, setNsfwAllowed] = useState(false);
   
   const [newBoardName, setNewBoardName] = useState("");
   const [newBoardDesc, setNewBoardDesc] = useState("");
   const [localLikes, setLocalLikes] = useState<Record<string, boolean>>({});
+  const [localComments, setLocalComments] = useState<Record<string, {sender: string, text: string}[]>>({});
   const [toastMsg, setToastMsg] = useState("");
 
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -88,7 +89,6 @@ export default function Home() {
     setTimeout(() => setToastMsg(""), 3000);
   };
 
-  // Активация глобального класса для CSS-анимаций
   useEffect(() => {
     setIsMounted(true);
     if (isResultsActive) {
@@ -99,33 +99,45 @@ export default function Home() {
   }, [isResultsActive]);
 
   // ==========================================
-  // CACHE & HISTORY RESTORATION (BACK BUTTON)
+  // КЭШ И ВОССТАНОВЛЕНИЕ ИСТОРИИ (BACK BUTTON)
   // ==========================================
   useEffect(() => {
     let mounted = true;
     
-    // Подхватываем сессию Supabase
+    // Auth Session
     supabase.auth.getSession().then(({ data }) => { 
-        if(mounted && data.session?.user) {
+        if (mounted && data.session?.user) {
             setUser(data.session.user); 
             fetchUserData(data.session.user.id);
         }
     });
-    
+
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_, session) => { 
-        if(mounted && session?.user) { 
+        if (mounted && session?.user) { 
           setUser(session.user); 
           fetchUserData(session.user.id); 
         }
     });
     
     try { 
-        // Локальные настройки
-        const savedTags = localStorage.getItem("gelbet_user_tags"); 
-        if (savedTags) setUserTags(JSON.parse(savedTags));
-        if (localStorage.getItem("gelbet_nsfw_18plus") === "true") setNsfwAllowed(true); 
+        // 1. Проверяем флаг зачистки истории
+        const wipedStatus = localStorage.getItem("gelbet_history_wiped");
+        if (wipedStatus === "true") {
+          setHasWiped(true);
+        }
 
-        // Восстановление кэша при возврате с `/vibe`
+        // 2. Достаем теги
+        const savedTags = localStorage.getItem("gelbet_user_tags"); 
+        if (savedTags) {
+          const parsed = JSON.parse(savedTags);
+          setUserTags(parsed);
+        }
+
+        if (localStorage.getItem("gelbet_nsfw_18plus") === "true") {
+          setNsfwAllowed(true); 
+        }
+
+        // 3. Проверяем кэш SessionStorage при возврате назад (с /vibe или /profile)
         const cachedState = sessionStorage.getItem('gelbet_cache');
         if (cachedState) {
             const state = JSON.parse(cachedState);
@@ -137,18 +149,23 @@ export default function Home() {
             setIsResultsActive(state.isResultsActive);
             setPage(state.page);
             
-            // Восстанавливаем позицию скролла
-            setTimeout(() => window.scrollTo({ top: state.scroll, behavior: 'instant' }), 50);
+            setTimeout(() => {
+              window.scrollTo({ top: state.scroll, behavior: 'instant' });
+            }, 50);
+            
             sessionStorage.removeItem('gelbet_cache');
             return; 
         }
 
-        // Если кэша нет, проверяем URL параметры
+        // Если кэша нет, проверяем URL
         const urlParams = new URLSearchParams(window.location.search);
         const qFromUrl = urlParams.get("q");
         const modeFromUrl = urlParams.get("mode") as 'visual' | 'sonic';
         
-        if (modeFromUrl) setSearchMode(modeFromUrl);
+        if (modeFromUrl) {
+          setSearchMode(modeFromUrl);
+        }
+
         if (qFromUrl) {
             setSearch(qFromUrl);
             setSearchQuery(qFromUrl);
@@ -156,10 +173,10 @@ export default function Home() {
             fetchPhotos(qFromUrl, 1, true, modeFromUrl || 'visual');
         }
     } catch (e) {
-        console.warn("Storage access error", e);
+      console.error(e);
     }
 
-    // Слушатель системной кнопки "Назад" в браузере
+    // Обработка системной кнопки "Назад" в браузере
     const handlePopState = () => {
       const urlParams = new URLSearchParams(window.location.search);
       const qFromUrl = urlParams.get("q");
@@ -172,7 +189,7 @@ export default function Home() {
         resetUI();
       }
     };
-    
+
     window.addEventListener('popstate', handlePopState);
 
     return () => { 
@@ -182,31 +199,29 @@ export default function Home() {
     };
   }, []); 
 
-  // ==========================================
-  // SUPABASE USER DATA FETCH
-  // ==========================================
   async function fetchUserData(userId: string) {
     try {
       const [pinsRes, boardsRes] = await Promise.all([ 
         fetch(`/api/pins?user_id=${userId}`).catch(() => null), 
         fetch(`/api/boards?user_id=${userId}`).catch(() => null) 
       ]);
-      
+
       if (pinsRes?.ok) { 
         const d = await pinsRes.json(); 
         setPins(d.pins || d.data || []); 
       }
+
       if (boardsRes?.ok) { 
         const d = await boardsRes.json(); 
         setBoards(d.boards || d.data || []); 
       }
     } catch (e) {
-      console.warn("Failed to fetch user data", e);
+      console.error(e);
     }
   }
 
   // ==========================================
-  // DDG PARSER CORE
+  // ЯДРО ПОИСКА (Отправка в Троицу)
   // ==========================================
   const fetchPhotos = useCallback(async (queryParam: string, pageNum: number, reset: boolean, modeOverride?: string) => {
     if (!queryParam) return;
@@ -214,16 +229,22 @@ export default function Home() {
     
     loadingRef.current = true; 
     setLoading(true);
-    
+
     if (reset) { 
-      if (abortControllerRef.current) abortControllerRef.current.abort(); 
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort(); 
+      }
       abortControllerRef.current = new AbortController(); 
     }
     
     try {
       const params = new URLSearchParams({ page: String(pageNum), query: queryParam });
-      if (modeOverride ?? searchMode) params.set("mode", modeOverride ?? searchMode);
-      if (user) params.set("userId", user.id);
+      if (modeOverride ?? searchMode) {
+        params.set("mode", modeOverride ?? searchMode);
+      }
+      if (user) {
+        params.set("userId", user.id);
+      }
       
       const res = await fetch(`/api/search?${params}`, { signal: abortControllerRef.current?.signal });
       if (!res.ok) throw new Error("Fetch failed");
@@ -253,17 +274,17 @@ export default function Home() {
         combined.forEach((p: any) => map.set(p.src, p)); 
         return Array.from(map.values()); 
       });
-      
+
       setHasMore(fetched.length > 0);
       
-      // Динамическая генерация Match Score на основе хэша запроса
       if (reset) {
         const hash = queryParam.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
         setMatchScore(parseFloat((85 + (hash % 14) + Math.random()).toFixed(1)));
       }
-      
     } catch (e: any) { 
-        if (e.name !== 'AbortError') console.error("Search fetch error:", e);
+        if (e.name !== 'AbortError') {
+          console.error("Search fetch error:", e);
+        }
     } finally { 
         if (!(reset && abortControllerRef.current?.signal.aborted)) { 
           setLoading(false); 
@@ -275,6 +296,7 @@ export default function Home() {
   // INFINITE SCROLL OBSERVER
   useEffect(() => {
     if (!bottomRef.current) return;
+    
     observerRef.current?.disconnect();
     
     observerRef.current = new IntersectionObserver(entries => { 
@@ -284,37 +306,45 @@ export default function Home() {
         fetchPhotos(searchQuery, next, false); 
       } 
     }, { threshold: 0.1 });
-    
+
     observerRef.current.observe(bottomRef.current);
+    
     return () => observerRef.current?.disconnect();
   }, [hasMore, page, searchQuery, fetchPhotos]);
 
   // ==========================================
-  // TAGS & HISTORY MANAGEMENT
+  // ИСТОРИЯ И ОЧИСТКА
   // ==========================================
   function saveUserTag(tag: string) { 
     const formattedTag = tag.trim().charAt(0).toUpperCase() + tag.trim().slice(1); 
+    
     setUserTags(prev => { 
       const updated = [formattedTag, ...prev.filter(t => t.toLowerCase() !== formattedTag.toLowerCase())].slice(0, 8); 
       localStorage.setItem("gelbet_user_tags", JSON.stringify(updated)); 
+      
+      // Сбрасываем флаг очистки, раз пользователь начал искать сам
+      localStorage.setItem("gelbet_history_wiped", "false");
+      setHasWiped(false);
+      
       return updated; 
     }); 
   }
 
   const clearHistory = () => {
     setUserTags([]);
-    localStorage.removeItem("gelbet_user_tags");
+    localStorage.setItem("gelbet_user_tags", "[]"); 
+    localStorage.setItem("gelbet_history_wiped", "true"); 
+    setHasWiped(true);
     showToast("History wiped");
   };
 
   async function handleSearch(e?: React.FormEvent, forceQuery?: string) { 
     if (e) e.preventDefault(); 
+    
     const query = (forceQuery || search).trim();
     if (!query) return; 
 
     setIsResultsActive(true);
-    
-    // Синхронизация с URL для работы системной кнопки "Назад"
     window.history.pushState({}, '', `/?q=${encodeURIComponent(query)}&mode=${searchMode}`);
 
     setSearchQuery(query); 
@@ -339,17 +369,9 @@ export default function Home() {
   }
 
   // ==========================================
-  // NAVIGATION & SOCIAL ACTIONS
+  // НАВИГАЦИЯ (СОХРАНЕНИЕ КЭША)
   // ==========================================
-  const handleNavigateToVibe = (photo: Photo) => {
-    feedLocalAI(photo.src, photo.id); 
-    
-    if (photo.isNsfw && !nsfwAllowed) { 
-      setShowAgeGate(true); 
-      return; 
-    }
-
-    // Сохраняем состояние интерфейса перед мутацией
+  const saveStateAndNavigate = (url: string) => {
     sessionStorage.setItem('gelbet_cache', JSON.stringify({
         photos, 
         search, 
@@ -358,39 +380,69 @@ export default function Home() {
         matchScore, 
         isResultsActive, 
         page, 
+        showSaved, 
         scroll: window.scrollY
     }));
-
-    router.push(`/vibe?src=${encodeURIComponent(photo.src)}&title=${encodeURIComponent(photo.title || "")}&link=${encodeURIComponent(photo.link || "")}`);
+    router.push(url);
   };
 
-  async function savePin(photo: Photo) { 
-    if (!user) { router.push("/auth"); return; } 
-    if (isPinned(photo)) { showToast("Already in archives"); return; }
+  const handleNavigateToVibe = (photo: Photo) => {
+    feedLocalAI(photo.src, photo.id); 
     
-    try { 
-      const res = await fetch("/api/pins", { 
-        method: "POST", 
-        headers: { "Content-Type": "application/json" }, 
-        body: JSON.stringify({ 
-          user_id: user.id, 
-          image_url: photo.src, 
-          title: photo.title, 
-          board_id: null, 
-          source_url: photo.link 
-        }) 
-      }); 
-      
-      if (res.ok) { 
-        const data = await res.json(); 
-        if (data.pin || data.data) {
-          setPins(prev => [data.pin || data.data, ...prev]); 
-        }
-        showToast("Artifact secured");
-      } 
-    } catch (e) {
-      console.error("Save Pin Error", e);
+    if (photo.isNsfw && !nsfwAllowed) { 
+      setShowAgeGate(true); 
+      return; 
+    }
+    saveStateAndNavigate(`/vibe?src=${encodeURIComponent(photo.src)}&title=${encodeURIComponent(photo.title || "")}&link=${encodeURIComponent(photo.link || "")}`);
+  };
+
+  // ==========================================
+  // СОЦИАЛКИ: СОХРАНЕНИЕ / ЛАЙКИ / ШЕР
+  // ==========================================
+  async function toggleSavePin(photo: Photo) { 
+    if (!user) { 
+      router.push("/auth"); 
+      return; 
     } 
+    
+    const existingPin = pins.find(p => p.image_url === photo.src);
+
+    if (existingPin) {
+      // Удаление (Unsave)
+      setPins(prev => prev.filter(p => p.id !== existingPin.id)); 
+      
+      try { 
+        await fetch(`/api/pins?id=${existingPin.id}`, { method: "DELETE" }); 
+        showToast("Artifact removed");
+      } catch (e) { 
+        console.error(e); 
+      }
+    } else {
+      // Сохранение
+      try { 
+        const res = await fetch("/api/pins", { 
+          method: "POST", 
+          headers: { "Content-Type": "application/json" }, 
+          body: JSON.stringify({ 
+            user_id: user.id, 
+            image_url: photo.src, 
+            title: photo.title, 
+            board_id: null, 
+            source_url: photo.link 
+          }) 
+        }); 
+        
+        if (res.ok) { 
+          const data = await res.json(); 
+          if (data.pin || data.data) {
+            setPins(prev => [data.pin || data.data, ...prev]); 
+          }
+          showToast("Artifact secured");
+        } 
+      } catch (e) {
+        console.error(e);
+      } 
+    }
   }
 
   function isPinned(photo: Photo) { 
@@ -399,12 +451,13 @@ export default function Home() {
 
   const toggleLike = (photoId: string) => {
     setLocalLikes(prev => ({ ...prev, [photoId]: !prev[photoId] }));
-    if (!localLikes[photoId]) showToast("Resonance logged");
+    if (!localLikes[photoId]) {
+      showToast("Resonance logged");
+    }
   };
 
   const handleShare = async (photo: Photo) => {
     const vibeUrl = `${window.location.origin}/vibe?src=${encodeURIComponent(photo.src)}&title=${encodeURIComponent(photo.title || "")}&link=${encodeURIComponent(photo.link || "")}`;
-    
     if (navigator.share) {
       try { 
         await navigator.share({ title: 'Gelbet Vector', url: vibeUrl }); 
@@ -421,39 +474,43 @@ export default function Home() {
     showToast("Coordinates copied"); 
   };
 
+  const submitComment = () => {
+    if (!commentInput.trim() || !commentPin) return;
+    
+    const newComment = { 
+      sender: user?.user_metadata?.full_name || "USER", 
+      text: commentInput 
+    };
+    
+    setLocalComments(prev => ({
+      ...prev,
+      [commentPin.id]: [...(prev[commentPin.id] || []), newComment]
+    }));
+    
+    setCommentInput("");
+    showToast("Transmission sent");
+  };
+
   async function createBoard() { 
     if (!newBoardName || !user) return; 
-    
     try { 
       const res = await fetch("/api/boards", { 
         method: "POST", 
         headers: { "Content-Type": "application/json" }, 
-        body: JSON.stringify({ 
-          user_id: user.id, 
-          name: newBoardName, 
-          description: newBoardDesc 
-        }) 
+        body: JSON.stringify({ user_id: user.id, name: newBoardName, description: newBoardDesc }) 
       }); 
-      
       if (res.ok) { 
         const data = await res.json(); 
-        if (data.board || data.data) {
-          setBoards(prev => [data.board || data.data, ...prev]); 
-        }
+        if (data.board || data.data) setBoards(prev => [data.board || data.data, ...prev]); 
         showToast("Archive initialized");
       } 
-    } catch (e) {
-      console.error("Board Creation Error", e);
-    } 
+    } catch (e) {} 
     
     setNewBoardName(""); 
     setNewBoardDesc(""); 
     setShowNewBoard(false); 
   }
 
-  // ==========================================
-  // RENDER PREPARATION
-  // ==========================================
   const displayPhotos = showSaved 
     ? pins.map(p => ({ 
         id: p.id, 
@@ -468,19 +525,20 @@ export default function Home() {
   
   const userAvatar = user?.user_metadata?.avatar_url || ""; 
   const userName = user?.user_metadata?.full_name || user?.email || "Ludwig";
-  const tagsToDisplay = isMounted && userTags.length > 0 ? userTags.slice(0, 4) : DEFAULT_TAGS;
+  
+  // Логика отображения тегов (Без дефолтов, если хистори стерта)
+  const tagsToDisplay = isMounted 
+    ? (userTags.length > 0 ? userTags.slice(0, 4) : (hasWiped ? [] : DEFAULT_TAGS))
+    : [];
 
   return (
     <>
       <style dangerouslySetInnerHTML={{ __html: `
-        /* ==========================================
-           CORE VARIABLES & BASE
-           ========================================== */
-        :root {
+        :root { 
           --bg-void: #020104; 
           --glass-border: rgba(255, 255, 255, 0.05); 
           --text-muted: #888; 
-          --glow-emerald: #10b981;
+          --glow-emerald: #10b981; 
         }
 
         body { 
@@ -497,14 +555,23 @@ export default function Home() {
           font-family: 'Space Mono', monospace; 
         }
 
-        ::-webkit-scrollbar { width: 4px; } 
-        ::-webkit-scrollbar-track { background: var(--bg-void); } 
-        ::-webkit-scrollbar-thumb { background: #333; border-radius: 4px; } 
-        ::-webkit-scrollbar-thumb:hover { background: #666; }
+        ::-webkit-scrollbar { 
+          width: 4px; 
+        } 
+
+        ::-webkit-scrollbar-track { 
+          background: var(--bg-void); 
+        } 
+
+        ::-webkit-scrollbar-thumb { 
+          background: #333; 
+          border-radius: 4px; 
+        } 
+
+        ::-webkit-scrollbar-thumb:hover { 
+          background: #666; 
+        }
         
-        /* ==========================================
-           HEADER & NAVIGATION
-           ========================================== */
         #ui-layer { 
           position: relative; 
           z-index: 10; 
@@ -541,9 +608,6 @@ export default function Home() {
           color: #fff; 
         }
 
-        /* ==========================================
-           CENTER CONSOLE (SEARCH & TAGS)
-           ========================================== */
         .search-container { 
           position: absolute; 
           top: 50%; 
@@ -559,10 +623,11 @@ export default function Home() {
         }
 
         @media (min-width: 768px) { 
-          .search-container { padding: 0 24px; } 
+          .search-container { 
+            padding: 0 24px; 
+          } 
         }
 
-        /* Выстраиваем экватор сферы и поиск по одной линии */
         .results-active .search-container { 
           top: 35vh; 
           transform: translate(-50%, -50%); 
@@ -609,8 +674,12 @@ export default function Home() {
         }
 
         @media (min-width: 768px) { 
-          .search-input { font-size: 28px; } 
-          .search-input::placeholder { letter-spacing: 4px; } 
+          .search-input { 
+            font-size: 28px; 
+          } 
+          .search-input::placeholder { 
+            letter-spacing: 4px; 
+          } 
         }
 
         .results-active .search-input { 
@@ -619,9 +688,6 @@ export default function Home() {
           text-shadow: none; 
         }
 
-        /* ==========================================
-           TAGS & BUTTONS
-           ========================================== */
         .quick-tags { 
           display: flex; 
           gap: 8px; 
@@ -629,10 +695,6 @@ export default function Home() {
           justify-content: center; 
           flex-wrap: wrap; 
           transition: opacity 0.5s; 
-        }
-
-        @media (min-width: 768px) { 
-          .quick-tags { gap: 12px; } 
         }
 
         .results-active .quick-tags { 
@@ -656,7 +718,10 @@ export default function Home() {
         }
 
         @media (min-width: 768px) { 
-          .tag-pill { font-size: 9px; padding: 8px 16px; } 
+          .tag-pill { 
+            font-size: 9px; 
+            padding: 8px 16px; 
+          } 
         }
 
         .tag-pill:hover { 
@@ -673,7 +738,10 @@ export default function Home() {
         }
 
         @media (min-width: 768px) { 
-          .vector-selector { gap: 40px; margin-top: 40px; } 
+          .vector-selector { 
+            gap: 40px; 
+            margin-top: 40px; 
+          } 
         }
 
         .results-active .vector-selector { 
@@ -714,16 +782,14 @@ export default function Home() {
         }
 
         .vector-btn.active::after { 
-          left: 0; right: 0; 
+          left: 0; 
+          right: 0; 
         }
 
         .vector-btn.sonic-mode.active::after { 
           background: #10b981; 
         }
 
-        /* ==========================================
-           MAIN CONTENT AREA & GRIDS
-           ========================================== */
         .content-area { 
           position: absolute; 
           visibility: hidden; 
@@ -737,10 +803,11 @@ export default function Home() {
         }
 
         @media (min-width: 768px) { 
-          .content-area { padding: 0 32px 80px; } 
+          .content-area { 
+            padding: 0 32px 80px; 
+          } 
         }
 
-        /* Выводим контент в поток под экватором */
         .results-active .content-area { 
           position: relative; 
           visibility: visible; 
@@ -765,7 +832,12 @@ export default function Home() {
         }
 
         @media (min-width: 768px) { 
-          .section-title { font-size: 10px; letter-spacing: 4px; margin-bottom: 24px; padding-bottom: 12px; } 
+          .section-title { 
+            font-size: 10px; 
+            letter-spacing: 4px; 
+            margin-bottom: 24px; 
+            padding-bottom: 12px; 
+          } 
         }
 
         .archives-grid { 
@@ -776,7 +848,10 @@ export default function Home() {
         }
 
         @media (min-width: 640px) { 
-          .archives-grid { grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); margin-bottom: 70px; } 
+          .archives-grid { 
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); 
+            margin-bottom: 70px; 
+          } 
         }
 
         .archive-card { 
@@ -797,24 +872,28 @@ export default function Home() {
           box-shadow: 0 10px 30px rgba(0,0,0,0.5); 
         }
 
-        /* ==========================================
-           MASONRY PINS
-           ========================================== */
         .masonry { 
           column-count: 2; 
           column-gap: 12px; 
         }
 
         @media (min-width: 768px) { 
-          .masonry { column-count: 3; column-gap: 16px; } 
+          .masonry { 
+            column-count: 3; 
+            column-gap: 16px; 
+          } 
         }
 
         @media (min-width: 1024px) { 
-          .masonry { column-count: 4; } 
+          .masonry { 
+            column-count: 4; 
+          } 
         }
 
         @media (min-width: 1440px) { 
-          .masonry { column-count: 5; } 
+          .masonry { 
+            column-count: 5; 
+          } 
         }
 
         .pin-card { 
@@ -830,7 +909,9 @@ export default function Home() {
         }
 
         @media (min-width: 768px) { 
-          .pin-card { margin-bottom: 16px; } 
+          .pin-card { 
+            margin-bottom: 16px; 
+          } 
         }
 
         .pin-card img { 
@@ -935,9 +1016,6 @@ export default function Home() {
           transition: fill 0.3s; 
         }
 
-        /* ==========================================
-           TOAST NOTIFICATIONS
-           ========================================== */
         .toast-popup { 
           position: fixed; 
           bottom: 30px; 
@@ -957,13 +1035,24 @@ export default function Home() {
         }
 
         @keyframes floatUp { 
-          from { opacity: 0; transform: translate(-50%, 20px); } 
-          to { opacity: 1; transform: translate(-50%, 0); } 
+          from { 
+            opacity: 0; 
+            transform: translate(-50%, 20px); 
+          } 
+          to { 
+            opacity: 1; 
+            transform: translate(-50%, 0); 
+          } 
         }
       `}} />
 
-      {/* ФИКСАЦИЯ СФЕРЫ НА ЭКВАТОРЕ ПРИ АКТИВАЦИИ ПОИСКА */}
-      <div style={{ position: 'fixed', inset: 0, zIndex: 0, transform: isResultsActive ? 'translateY(-15vh)' : 'none', transition: 'transform 1.5s cubic-bezier(0.16, 1, 0.3, 1)' }}>
+      <div style={{ 
+        position: 'fixed', 
+        inset: 0, 
+        zIndex: 0, 
+        transform: isResultsActive ? 'translateY(-15vh)' : 'none', 
+        transition: 'transform 1.5s cubic-bezier(0.16, 1, 0.3, 1)' 
+      }}>
          <ResonanceEngine mode={searchMode} isActive={isResultsActive} />
       </div>
 
@@ -973,13 +1062,20 @@ export default function Home() {
         {/* HEADER */}
         {/* ========================================== */}
         <header className="w-full px-4 md:px-8 py-4 md:py-6 flex justify-between items-center fixed top-0 z-50 bg-[#020104]/80 backdrop-blur-md border-b border-white/5">
-          <div className="font-mono text-xs md:text-sm tracking-[4px] font-bold text-white cursor-pointer" onClick={resetUI}>
+          <div 
+            className="font-mono text-xs md:text-sm tracking-[4px] font-bold text-white cursor-pointer" 
+            onClick={resetUI}
+          >
             GELBET <span className="text-neutral-600">[]</span>
           </div>
           
           <div className="gap-8 absolute left-1/2 -translate-x-1/2 hidden md:flex">
-            <button className="nav-link active" onClick={resetUI}>Resonance</button>
-            <button className="nav-link" onClick={() => router.push('/profile')}>Saved</button>
+            <button className="nav-link active" onClick={resetUI}>
+              Resonance
+            </button>
+            <button className="nav-link" onClick={() => saveStateAndNavigate('/profile')}>
+              Saved
+            </button>
           </div>
 
           <div className="flex items-center gap-3 md:gap-5">
@@ -987,8 +1083,15 @@ export default function Home() {
               <div className="text-white">Entity: {userName.split(' ')[0]}</div>
               <div>Tensor Aligned</div>
             </div>
-            <button onClick={() => router.push('/profile')} className="w-8 h-8 md:w-9 md:h-9 border border-neutral-700 bg-[#0a0a0c] flex items-center justify-center text-white font-mono text-xs hover:border-white cursor-pointer transition-all shadow-lg hover:shadow-[0_0_15px_rgba(255,255,255,0.2)] rounded-full overflow-hidden">
-              {userAvatar ? <img src={userAvatar} className="w-full h-full object-cover" alt="avatar" /> : (userName[0] || "U").toUpperCase()}
+            <button 
+              onClick={() => saveStateAndNavigate('/profile')} 
+              className="w-8 h-8 md:w-9 md:h-9 border border-neutral-700 bg-[#0a0a0c] flex items-center justify-center text-white font-mono text-xs hover:border-white cursor-pointer transition-all shadow-lg hover:shadow-[0_0_15px_rgba(255,255,255,0.2)] rounded-full overflow-hidden"
+            >
+              {userAvatar ? (
+                <img src={userAvatar} className="w-full h-full object-cover" alt="avatar" />
+              ) : (
+                (userName[0] || "U").toUpperCase()
+              )}
             </button>
           </div>
         </header>
@@ -1011,33 +1114,50 @@ export default function Home() {
           
           <div className="quick-tags relative">
             {tagsToDisplay.map(tag => (
-              <button key={tag} type="button" className="tag-pill" onClick={() => handleTagClick(tag)}>
+              <button 
+                key={tag} 
+                type="button" 
+                className="tag-pill" 
+                onClick={() => handleTagClick(tag)}
+              >
                 {tag}
               </button>
             ))}
+            
             {userTags.length > 0 && (
-              <button onClick={clearHistory} className="ml-2 text-[8px] font-mono text-neutral-600 hover:text-white transition-colors uppercase tracking-widest mt-1">
+              <button 
+                onClick={clearHistory} 
+                className="ml-2 text-[8px] font-mono text-neutral-600 hover:text-white transition-colors uppercase tracking-widest mt-1"
+              >
                 [ Wipe ]
               </button>
             )}
           </div>
 
           <div className="vector-selector">
-            <button type="button" className={`vector-btn ${searchMode === 'visual' ? 'active' : ''}`} onClick={() => setSearchMode('visual')}>
+            <button 
+              type="button" 
+              className={`vector-btn ${searchMode === 'visual' ? 'active' : ''}`} 
+              onClick={() => setSearchMode('visual')}
+            >
               Visual Plane
             </button>
-            <button type="button" className={`vector-btn sonic-mode ${searchMode === 'sonic' ? 'active' : ''}`} onClick={() => setSearchMode('sonic')}>
+            <button 
+              type="button" 
+              className={`vector-btn sonic-mode ${searchMode === 'sonic' ? 'active' : ''}`} 
+              onClick={() => setSearchMode('sonic')}
+            >
               Sonic Resonance
             </button>
           </div>
         </div>
 
         {/* ========================================== */}
-        {/* CONTENT AREA (ARCHIVES & PINS) */}
+        {/* CONTENT AREA */}
         {/* ========================================== */}
         <div className="content-area max-w-[1800px] mx-auto w-full">
           
-          {/* ARCHIVES GRID */}
+          {/* БЛОК АРХИВОВ */}
           {!showSaved && (
             <div className="mb-10 md:mb-14">
               <div className="section-title">
@@ -1051,24 +1171,37 @@ export default function Home() {
                 ) : (
                   boards.map(board => (
                     <div key={board.id} className="archive-card">
-                      <div className="font-mono text-[10px] md:text-[11px] tracking-widest text-white mb-2 md:mb-3 uppercase font-bold">{board.name}</div>
-                      <div className="text-[8px] md:text-[9px] text-neutral-500 uppercase tracking-widest">{board.description || "Collection"}</div>
-                      <div className="mt-4 text-[9px] md:text-[10px] text-neutral-300 uppercase tracking-widest">{pins.filter(p => p.board_id === board.id).length} Artifacts</div>
+                      <div className="font-mono text-[10px] md:text-[11px] tracking-widest text-white mb-2 md:mb-3 uppercase font-bold">
+                        {board.name}
+                      </div>
+                      <div className="text-[8px] md:text-[9px] text-neutral-500 uppercase tracking-widest">
+                        {board.description || "Collection"}
+                      </div>
+                      <div className="mt-4 text-[9px] md:text-[10px] text-neutral-300 uppercase tracking-widest">
+                        {pins.filter(p => p.board_id === board.id).length} Artifacts
+                      </div>
                     </div>
                   ))
                 )}
-                <div className="archive-card flex flex-col items-center justify-center border-dashed border-neutral-800 hover:border-neutral-500 bg-transparent min-h-[100px]" onClick={() => setShowNewBoard(true)}>
-                  <div className="font-mono text-[9px] md:text-[10px] text-neutral-400 uppercase tracking-widest">+ Establish Archive</div>
+                <div 
+                  className="archive-card flex flex-col items-center justify-center border-dashed border-neutral-800 hover:border-neutral-500 bg-transparent min-h-[100px]" 
+                  onClick={() => setShowNewBoard(true)}
+                >
+                  <div className="font-mono text-[9px] md:text-[10px] text-neutral-400 uppercase tracking-widest">
+                    + Establish Archive
+                  </div>
                 </div>
               </div>
             </div>
           )}
 
-          {/* MASONRY FEED */}
+          {/* БЛОК ПИНОВ */}
           <div>
             <div className="section-title">
               <span>{showSaved ? "Saved Resonance" : "Resonance Feed"}</span>
-              <span style={{ color: "rgba(255,255,255,0.4)" }}>Match: {matchScore}%</span>
+              <span style={{ color: "rgba(255,255,255,0.4)" }}>
+                Match: {matchScore}%
+              </span>
             </div>
 
             <div className="masonry">
@@ -1078,8 +1211,11 @@ export default function Home() {
                 const saved = isPinned(photo);
 
                 return (
-                  <div key={`${photo.id}-${i}`} className="pin-card" onClick={() => handleNavigateToVibe(photo)}>
-                    {/* OPTIMIZATION: loading="lazy" */}
+                  <div 
+                    key={`${photo.id}-${i}`} 
+                    className="pin-card" 
+                    onClick={() => handleNavigateToVibe(photo)}
+                  >
                     <img 
                       src={photo.thumb || photo.src} 
                       alt="Artifact" 
@@ -1089,9 +1225,17 @@ export default function Home() {
                     
                     <div className="pin-overlay">
                       <div className="flex justify-between items-start w-full">
-                        <span className="font-mono text-[8px] md:text-[9px] text-white/50 tracking-widest uppercase">Rank: {photo.rank || 'A'}</span>
-                        <button className={`save-btn ${saved ? 'saved' : ''}`} onClick={(e) => { e.stopPropagation(); savePin(photo); }}>
-                          {saved ? 'Secured' : 'Save'}
+                        <span className="font-mono text-[8px] md:text-[9px] text-white/50 tracking-widest uppercase">
+                          Rank: {photo.rank || 'A'}
+                        </span>
+                        <button 
+                          className={`save-btn ${saved ? 'saved' : ''}`} 
+                          onClick={(e) => { 
+                            e.stopPropagation(); 
+                            toggleSavePin(photo); 
+                          }}
+                        >
+                          {saved ? 'Unlink' : 'Save'}
                         </button>
                       </div>
                       
@@ -1099,15 +1243,45 @@ export default function Home() {
                         <div className="font-mono text-[8px] md:text-[10px] text-white tracking-widest uppercase font-bold drop-shadow-md">
                           ID: {photo.id.substring(0,6).toUpperCase()}
                         </div>
+                        
                         <div className="pin-actions">
-                          <button className={`icon-btn ${isLiked ? 'liked' : ''}`} title="Like" onClick={(e) => { e.stopPropagation(); toggleLike(photo.id); }}>
-                            <svg fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"/></svg>
+                          <button 
+                            className={`icon-btn ${isLiked ? 'liked' : ''}`} 
+                            title="Like" 
+                            onClick={(e) => { 
+                              e.stopPropagation(); 
+                              toggleLike(photo.id); 
+                            }}
+                          >
+                            <svg fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                              <path d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"/>
+                            </svg>
                           </button>
-                          <button className="icon-btn" title="Comment" onClick={(e) => { e.stopPropagation(); setCommentPin(photo); }}>
-                            <svg fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
+                          
+                          <button 
+                            className="icon-btn" 
+                            title="Comment" 
+                            onClick={(e) => { 
+                              e.stopPropagation(); 
+                              setCommentPin(photo); 
+                            }}
+                          >
+                            <svg fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                              <path d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
+                            </svg>
                           </button>
-                          <button className="icon-btn" title="Share" onClick={(e) => { e.stopPropagation(); handleShare(photo); }}>
-                            <svg fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z"/></svg>
+                          
+                          <button 
+                            className="icon-btn" 
+                            title="Share" 
+                            onClick={(e) => { 
+                              e.stopPropagation(); 
+                              handleShare(photo); 
+                            }}
+                          >
+                            <svg fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                              <path d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z"/>
+                            </svg>
                           </button>
                         </div>
                       </div>
@@ -1117,25 +1291,41 @@ export default function Home() {
               })}
             </div>
             
-            {/* SPINNER & INTERSECTION OBSERVER TARGET */}
-            {loading && <div className="text-center py-12"><div className="w-6 h-6 border border-white/20 border-t-white rounded-full animate-spin mx-auto"></div></div>}
+            {loading && (
+              <div className="text-center py-12">
+                <div className="w-6 h-6 border border-white/20 border-t-white rounded-full animate-spin mx-auto"></div>
+              </div>
+            )}
+            
             <div ref={bottomRef} style={{ height: 10 }}></div>
           </div>
         </div>
       </div>
 
       {/* ========================================== */}
-      {/* MODALS & NOTIFICATIONS */}
+      {/* MODALS */}
       {/* ========================================== */}
-      {toastMsg && <div className="toast-popup">{toastMsg}</div>}
+      
+      {toastMsg && (
+        <div className="toast-popup">
+          {toastMsg}
+        </div>
+      )}
 
       {/* COMM-LINK MODAL */}
       {commentPin && (
-        <div className="fixed inset-0 z-[600] bg-black/95 backdrop-blur-sm flex items-center justify-center p-6" onClick={() => setCommentPin(null)}>
-          <div onClick={e => e.stopPropagation()} className="bg-[#0a0a0c] border border-[rgba(255,255,255,0.05)] rounded-sm p-8 w-full max-w-md flex flex-col gap-6">
+        <div 
+          className="fixed inset-0 z-[600] bg-black/95 backdrop-blur-sm flex items-center justify-center p-6" 
+          onClick={() => setCommentPin(null)}
+        >
+          <div 
+            onClick={e => e.stopPropagation()} 
+            className="bg-[#0a0a0c] border border-[rgba(255,255,255,0.05)] rounded-sm p-8 w-full max-w-md flex flex-col gap-6"
+          >
             <h2 className="font-mono text-xs font-bold text-white tracking-[4px] uppercase border-b border-white/10 pb-2">
               COMM_LINK: V_{commentPin.id.substring(0,4).toUpperCase()}
             </h2>
+            
             <div className="flex flex-col gap-4 max-h-[40vh] overflow-y-auto pr-2 font-mono text-[10px] text-neutral-400">
                <div className="border-l-2 border-[var(--glow-emerald)] pl-3">
                  <div className="text-[var(--glow-emerald)] mb-1">SYSTEM://DECRYPTION</div>
@@ -1145,10 +1335,29 @@ export default function Home() {
                  <div className="text-neutral-600 mb-1">NODE_0xCC</div>
                  <div>Stabilizing data-stream. Initializing manifold.</div>
                </div>
+               
+               {/* Рендеринг локальных комментариев */}
+               {(localComments[commentPin.id] || []).map((c, idx) => (
+                 <div key={idx} className="border-l-2 border-white/40 pl-3 mt-2">
+                   <div className="text-white mb-1 uppercase tracking-widest">{c.sender}</div>
+                   <div>{c.text}</div>
+                 </div>
+               ))}
             </div>
+            
             <div className="flex gap-2 mt-2 border-t border-white/10 pt-4">
-               <input type="text" className="w-full bg-black/50 border border-white/10 text-white font-mono text-[10px] p-3 outline-none focus:border-white/40 rounded-sm" placeholder="Transmit thought... " />
-               <button className="bg-white/10 border border-white/30 text-white font-mono text-[9px] uppercase px-5 rounded-sm hover:bg-white hover:text-black transition-all" onClick={() => { showToast("Transmission sent"); setCommentPin(null); }}>
+               <input 
+                 type="text" 
+                 value={commentInput}
+                 onChange={(e) => setCommentInput(e.target.value)}
+                 onKeyDown={(e) => e.key === 'Enter' && submitComment()}
+                 className="w-full bg-black/50 border border-white/10 text-white font-mono text-[10px] p-3 outline-none focus:border-white/40 rounded-sm" 
+                 placeholder="Transmit thought... " 
+               />
+               <button 
+                 className="bg-white/10 border border-white/30 text-white font-mono text-[9px] uppercase px-5 rounded-sm hover:bg-white hover:text-black transition-all" 
+                 onClick={submitComment}
+               >
                  Send
                </button>
             </div>
@@ -1158,16 +1367,48 @@ export default function Home() {
 
       {/* NEW BOARD MODAL */}
       {showNewBoard && (
-        <div className="fixed inset-0 z-[600] bg-black/95 backdrop-blur-sm flex items-center justify-center p-6" onClick={() => setShowNewBoard(false)}>
-          <div onClick={e => e.stopPropagation()} className="bg-[#0a0a0c] border border-white/10 rounded-sm p-8 max-w-md w-full flex flex-col gap-6">
-            <h2 className="font-mono text-xs font-bold text-white tracking-[3px] uppercase">Establish Archive</h2>
+        <div 
+          className="fixed inset-0 z-[600] bg-black/95 backdrop-blur-sm flex items-center justify-center p-6" 
+          onClick={() => setShowNewBoard(false)}
+        >
+          <div 
+            onClick={e => e.stopPropagation()} 
+            className="bg-[#0a0a0c] border border-white/10 rounded-sm p-8 max-w-md w-full flex flex-col gap-6"
+          >
+            <h2 className="font-mono text-xs font-bold text-white tracking-[3px] uppercase">
+              Establish Archive
+            </h2>
+            
             <div className="flex flex-col gap-4">
-               <input className="w-full bg-black/50 border border-white/10 text-white font-mono text-xs p-4 outline-none focus:border-white/40 transition-all rounded-sm placeholder-white/30" placeholder="Designation" value={newBoardName} onChange={e => setNewBoardName(e.target.value)} autoFocus />
-               <textarea className="w-full bg-black/50 border border-white/10 text-white font-mono text-xs p-4 outline-none focus:border-white/40 transition-all rounded-sm h-24 resize-none placeholder-white/30" placeholder="Context / Vibe" value={newBoardDesc} onChange={e => setNewBoardDesc(e.target.value)} />
+               <input 
+                 className="w-full bg-black/50 border border-white/10 text-white font-mono text-xs p-4 outline-none focus:border-white/40 transition-all rounded-sm placeholder-white/30" 
+                 placeholder="Designation" 
+                 value={newBoardName} 
+                 onChange={e => setNewBoardName(e.target.value)} 
+                 autoFocus 
+               />
+               <textarea 
+                 className="w-full bg-black/50 border border-white/10 text-white font-mono text-xs p-4 outline-none focus:border-white/40 transition-all rounded-sm h-24 resize-none placeholder-white/30" 
+                 placeholder="Context / Vibe" 
+                 value={newBoardDesc} 
+                 onChange={e => setNewBoardDesc(e.target.value)} 
+               />
             </div>
+            
             <div className="flex gap-4">
-               <button className="flex-1 bg-transparent border border-white/20 text-white/50 font-mono text-[10px] uppercase tracking-widest py-3 rounded-sm hover:bg-white/5 hover:text-white transition-all" onClick={() => setShowNewBoard(false)}>Abort</button>
-               <button className="flex-1 bg-white/10 border border-white/30 text-white font-mono text-[10px] uppercase tracking-widest py-3 rounded-sm hover:bg-white hover:text-black transition-all" disabled={!newBoardName.trim()} onClick={createBoard}>Initialize</button>
+               <button 
+                 className="flex-1 bg-transparent border border-white/20 text-white/50 font-mono text-[10px] uppercase tracking-widest py-3 rounded-sm hover:bg-white/5 hover:text-white transition-all" 
+                 onClick={() => setShowNewBoard(false)}
+               >
+                 Abort
+               </button>
+               <button 
+                 className="flex-1 bg-white/10 border border-white/30 text-white font-mono text-[10px] uppercase tracking-widest py-3 rounded-sm hover:bg-white hover:text-black transition-all" 
+                 disabled={!newBoardName.trim()} 
+                 onClick={createBoard}
+               >
+                 Initialize
+               </button>
             </div>
           </div>
         </div>
@@ -1175,13 +1416,38 @@ export default function Home() {
 
       {/* AGE GATE MODAL */}
       {showAgeGate && (
-        <div className="fixed inset-0 z-[9999] bg-black/95 backdrop-blur-sm flex items-center justify-center p-6" onClick={() => setShowAgeGate(false)}>
-          <div onClick={e => e.stopPropagation()} className="bg-[#0a0a0c] border border-red-500/30 rounded-sm p-8 max-w-md w-full flex flex-col items-center text-center gap-6">
-            <h2 className="font-mono text-xl font-bold text-red-500 tracking-[6px] uppercase">Restricted</h2>
-            <p className="text-neutral-400 text-xs font-mono leading-relaxed uppercase tracking-widest">This sector contains sensitive visual material.<br/>Confirmation of maturity required.</p>
+        <div 
+          className="fixed inset-0 z-[9999] bg-black/95 backdrop-blur-sm flex items-center justify-center p-6" 
+          onClick={() => setShowAgeGate(false)}
+        >
+          <div 
+            onClick={e => e.stopPropagation()} 
+            className="bg-[#0a0a0c] border border-red-500/30 rounded-sm p-8 max-w-md w-full flex flex-col items-center text-center gap-6"
+          >
+            <h2 className="font-mono text-xl font-bold text-red-500 tracking-[6px] uppercase">
+              Restricted
+            </h2>
+            <p className="text-neutral-400 text-xs font-mono leading-relaxed uppercase tracking-widest">
+              This sector contains sensitive visual material.<br/>
+              Confirmation of maturity required.
+            </p>
             <div className="flex w-full gap-4 mt-2">
-               <button className="flex-1 bg-transparent border border-white/20 text-white/50 font-mono text-[10px] uppercase tracking-widest py-3 rounded-sm hover:bg-white/5 transition-all" onClick={() => setShowAgeGate(false)}>Withdraw</button>
-               <button className="flex-1 bg-red-900/50 border border-red-500/50 text-white font-mono text-[10px] uppercase tracking-widest py-3 rounded-sm hover:bg-red-500 transition-all" onClick={() => { setNsfwAllowed(true); localStorage.setItem("gelbet_nsfw_18plus", "true"); setShowAgeGate(false); }}>Proceed</button>
+               <button 
+                 className="flex-1 bg-transparent border border-white/20 text-white/50 font-mono text-[10px] uppercase tracking-widest py-3 rounded-sm hover:bg-white/5 transition-all" 
+                 onClick={() => setShowAgeGate(false)}
+               >
+                 Withdraw
+               </button>
+               <button 
+                 className="flex-1 bg-red-900/50 border border-red-500/50 text-white font-mono text-[10px] uppercase tracking-widest py-3 rounded-sm hover:bg-red-500 transition-all" 
+                 onClick={() => { 
+                   setNsfwAllowed(true); 
+                   localStorage.setItem("gelbet_nsfw_18plus", "true"); 
+                   setShowAgeGate(false); 
+                 }}
+               >
+                 Proceed
+               </button>
             </div>
           </div>
         </div>

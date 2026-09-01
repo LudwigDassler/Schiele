@@ -50,7 +50,9 @@ export default function ProfilePage() {
           const boardsData = await boardsRes.json();
           if (boardsData.boards) setBoards(boardsData.boards);
         }
-      } catch (e) { console.error(e); }
+      } catch (e) { 
+        console.error(e); 
+      }
       
       setLoading(false);
     });
@@ -70,7 +72,6 @@ export default function ProfilePage() {
     reader.readAsDataURL(file);
   }
 
-  // Наполеоновские планы: Функция загрузки своего творчества
   async function handleArtifactUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file || !user) return;
@@ -83,7 +84,6 @@ export default function ProfilePage() {
       const fileName = `${Date.now()}_${Math.random().toString(36).substring(7)}.${ext}`;
       const path = `${user.id}/${fileName}`;
       
-      // Загружаем в бакет "artifacts" (тебе нужно будет создать его в Supabase)
       const { error: uploadError } = await supabase.storage
         .from("artifacts")
         .upload(path, file);
@@ -92,7 +92,6 @@ export default function ProfilePage() {
       
       const { data } = supabase.storage.from("artifacts").getPublicUrl(path);
       
-      // Сохраняем как пин
       const res = await fetch("/api/pins", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -161,6 +160,25 @@ export default function ProfilePage() {
     router.push("/");
   }
 
+  // ==========================================
+  // ФУНКЦИЯ УДАЛЕНИЯ АРТЕФАКТА (PURGE)
+  // ==========================================
+  const deletePin = async (e: React.MouseEvent, pinId: string) => {
+    e.stopPropagation();
+    try {
+      const res = await fetch(`/api/pins?id=${pinId}`, { method: "DELETE" });
+      if (res.ok) {
+        setPins(prev => prev.filter(p => p.id !== pinId));
+        showToast("Artifact purged", "success");
+      } else {
+        throw new Error("Failed to delete from DB");
+      }
+    } catch (error) {
+      console.error("Error deleting pin", error);
+      showToast("Failed to purge artifact", "error");
+    }
+  };
+
   if (loading) return (
     <div className="min-h-screen bg-[#010101] flex items-center justify-center">
       <div className="w-8 h-8 border border-white/20 border-t-white rounded-full animate-spin"></div>
@@ -203,7 +221,6 @@ export default function ProfilePage() {
         } 
         .hbtn:hover { background: rgba(255,255,255,0.05); color: #fff; } 
         
-        /* НОВЫЕ ИНПУТЫ: Призрачные линии */
         .ghost-input {
             width: 100%; padding: 8px 0; background: transparent; 
             border: none; border-bottom: 1px solid transparent; 
@@ -217,7 +234,6 @@ export default function ProfilePage() {
         }
         .ghost-input::placeholder { color: rgba(255,255,255,0.3); font-weight: 300; text-transform: uppercase; letter-spacing: 1px; font-size: 10px; }
 
-        /* Изящная кнопка сейва */
         .sync-btn {
             background: transparent; border: none; color: #666; 
             font-family: 'Syncopate', sans-serif; font-size: 10px; 
@@ -227,10 +243,10 @@ export default function ProfilePage() {
         .sync-btn:hover:not(:disabled) { color: #fff; text-shadow: 0 0 10px rgba(255,255,255,0.5); }
         .sync-btn:disabled { opacity: 0.4; cursor: not-allowed; }
         
-        /* Табы с интегрированными цифрами */
+        /* ТАБЫ: Исправлено наложение */
         .tab-btn { 
             padding: 12px 24px; border: none; background: transparent; cursor: pointer; 
-            font-size: 11px; font-weight: 700; color: #555; 
+            font-size: 11px; font-weight: 700; color: #555; white-space: nowrap;
             transition: all 0.3s; text-transform: uppercase; letter-spacing: 3px; 
             font-family: 'Syncopate', sans-serif; position: relative;
         }
@@ -243,14 +259,13 @@ export default function ProfilePage() {
         .tab-btn.active::after { width: 80%; }
         .tab-btn:hover:not(.active) { color: #aaa; }
 
-        /* НОВАЯ СЕТКА: Masonry (Водопад) вместо квадратов */
         .masonry-grid { column-count: 2; column-gap: 16px; width: 100%; }
         @media (min-width: 640px) { .masonry-grid { column-count: 3; column-gap: 20px; } }
         @media (min-width: 1024px) { .masonry-grid { column-count: 4; column-gap: 24px; } }
         
         .masonry-item { 
             break-inside: avoid; margin-bottom: 16px; border-radius: 8px; overflow: hidden; 
-            position: relative; transition: all 0.4s ease; transform: translateZ(0);
+            position: relative; transition: all 0.4s ease; transform: translateZ(0); cursor: pointer;
         }
         @media (min-width: 640px) { .masonry-item { margin-bottom: 20px; } }
         @media (min-width: 1024px) { .masonry-item { margin-bottom: 24px; } }
@@ -259,7 +274,6 @@ export default function ProfilePage() {
         .masonry-item:hover { transform: translateY(-4px); box-shadow: 0 15px 30px rgba(0,0,0,0.8); z-index: 2; border: 1px solid rgba(255,255,255,0.1); }
         .masonry-item:hover img { filter: grayscale(0%); transform: scale(1.02); }
 
-        /* Плашка загрузки */
         .upload-card {
             break-inside: avoid; margin-bottom: 24px; border-radius: 8px;
             border: 1px dashed rgba(255,255,255,0.1); background: rgba(255,255,255,0.02);
@@ -304,14 +318,13 @@ export default function ProfilePage() {
       </div>
 
       <header className="header">
-        <button onClick={() => router.push("/")} className="hbtn" title="Return to Archive">
+        <button onClick={() => router.back()} className="hbtn" title="Return to Archive">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
         </button>
         <span className="logo" onClick={() => router.push("/")}>GELBET</span>
         <div className="w-10"></div> 
       </header>
 
-      {/* ЖЕСТКИЙ ЦЕНТР */}
       <main className="w-full flex flex-col items-center mt-12 px-6 relative z-10" style={{ animation: "fadeIn 0.6s ease-out" }}>
 
         {/* IDENTITY HEADER */}
@@ -340,9 +353,8 @@ export default function ProfilePage() {
             </div>
         </div>
 
-        {/* ПРИЗРАЧНАЯ ФОРМА */}
+        {/* ФОРМА */}
         <form onSubmit={handleSave} className="flex flex-col items-center gap-6 w-full max-w-sm mb-16">
-            
             <div className="w-full flex flex-col items-center">
                 <input 
                     className="ghost-input" 
@@ -351,7 +363,6 @@ export default function ProfilePage() {
                     onChange={e => setName(e.target.value)} 
                 />
             </div>
-
             <div className="w-full flex flex-col items-center">
                 <input 
                     className="ghost-input" 
@@ -360,7 +371,6 @@ export default function ProfilePage() {
                     onChange={e => setBio(e.target.value)} 
                 />
             </div>
-
             <div className="w-full flex flex-col items-center">
                 <input 
                     className="ghost-input" 
@@ -369,7 +379,6 @@ export default function ProfilePage() {
                     onChange={e => setWebsite(e.target.value)} 
                 />
             </div>
-
             <div className="pt-2 w-full flex justify-center">
                 <button type="submit" disabled={saving} className="sync-btn">
                     {saving ? "SYNCING..." : "[ SYNC IDENTITY ]"}
@@ -377,21 +386,24 @@ export default function ProfilePage() {
             </div>
         </form>
 
-        {/* ТАБЫ (Теперь с интегрированными счетчиками) */}
-        <div className="flex justify-center items-center gap-8 md:gap-16 border-b border-white/5 mb-12 w-full max-w-3xl relative pb-2">
-            <button className={`tab-btn ${tab === "pins" ? "active" : ""}`} onClick={() => setTab("pins")}>
-                Artifacts <span className="text-neutral-600 ml-1">[{pins.length}]</span>
-            </button>
-            <button className={`tab-btn ${tab === "boards" ? "active" : ""}`} onClick={() => setTab("boards")}>
-                Archives <span className="text-neutral-600 ml-1">[{boards.length}]</span>
-            </button>
+        {/* ТАБЫ (С исправленным флексом) */}
+        <div className="flex justify-center items-center mb-12 w-full max-w-3xl relative border-b border-white/5 pb-2">
+            <div className="flex gap-8 md:gap-16">
+              <button className={`tab-btn ${tab === "pins" ? "active" : ""}`} onClick={() => setTab("pins")}>
+                  Artifacts <span className="text-neutral-600 ml-1">[{pins.length}]</span>
+              </button>
+              <button className={`tab-btn ${tab === "boards" ? "active" : ""}`} onClick={() => setTab("boards")}>
+                  Archives <span className="text-neutral-600 ml-1">[{boards.length}]</span>
+              </button>
+            </div>
         </div>
 
-        {/* СЕТКА КОНТЕНТА (Masonry) */}
+        {/* СЕТКА КОНТЕНТА */}
         <div className="pb-16 min-h-[400px] w-full max-w-6xl">
             {tab === "pins" && (
                 <div className="masonry-grid">
-                    {/* КАРТОЧКА ЗАГРУЗКИ СВОЕГО ТВОРЧЕСТВА */}
+                    
+                    {/* КАРТОЧКА ЗАГРУЗКИ */}
                     <div 
                         className="upload-card group flex flex-col items-center justify-center"
                         onClick={() => artifactRef.current?.click()}
@@ -413,10 +425,25 @@ export default function ProfilePage() {
                         />
                     </div>
 
-                    {/* ПИНЫ (Водопадом) */}
+                    {/* ПИНЫ С КНОПКОЙ PURGE */}
                     {pins.map(pin => (
-                      <div key={pin.id} className="masonry-item">
+                      <div key={pin.id} className="masonry-item group" onClick={() => router.push(`/vibe?src=${encodeURIComponent(pin.image_url)}&title=${encodeURIComponent(pin.title || "")}`)}>
                         <img src={pin.image_url} alt={pin.title} loading="lazy" />
+                        
+                        {/* Оверлей для удаления */}
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-end p-4 pointer-events-none">
+                            <div className="flex justify-between items-end pointer-events-auto">
+                                <span className="font-mono text-[8px] text-neutral-400 uppercase tracking-widest">
+                                  ID: {pin.id.substring(0,4).toUpperCase()}
+                                </span>
+                                <button 
+                                  onClick={(e) => deletePin(e, pin.id)}
+                                  className="font-mono text-[9px] text-white bg-black/60 border border-white/20 px-3 py-1.5 hover:bg-red-900/40 hover:border-red-500 hover:text-red-400 transition-all uppercase tracking-widest"
+                                >
+                                  [ Purge ]
+                                </button>
+                            </div>
+                        </div>
                       </div>
                     ))}
                 </div>

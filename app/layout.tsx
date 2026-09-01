@@ -1,10 +1,8 @@
-﻿"use client";
+"use client";
 import { SessionProvider } from "next-auth/react";
 import GelbetLoader from "../components/GelbetLoader";
 import { useState } from "react";
 import "./globals.css";
-
-import KashmirDevMenu from './components/KashmirDevMenu';
 
 export default function RootLayout({
   children,
@@ -19,7 +17,6 @@ export default function RootLayout({
         <SessionProvider>
           {loading ? <GelbetLoader onComplete={() => setLoading(false)} /> : children}
         </SessionProvider>
-        <KashmirDevMenu />
       </body>
     </html>
   );

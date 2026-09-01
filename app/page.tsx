@@ -17,6 +17,7 @@ export default function Home() {
   const router = useRouter();
   const { feedLocalAI } = useTasteProfile();
   
+  const [isMounted, setIsMounted] = useState(false);
   const [user, setUser] = useState<User | null>(null);
   const [search, setSearch] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
@@ -33,14 +34,14 @@ export default function Home() {
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
   
-  const [showSaved, setShowSaved] = useState(false);
   const [showNewBoard, setShowNewBoard] = useState(false);
   const [showAgeGate, setShowAgeGate] = useState(false);
+  const [commentPin, setCommentPin] = useState<Photo | null>(null);
   const [nsfwAllowed, setNsfwAllowed] = useState(false);
+  
   const [newBoardName, setNewBoardName] = useState("");
   const [newBoardDesc, setNewBoardDesc] = useState("");
 
-  // Socials & UI States
   const [localLikes, setLocalLikes] = useState<Record<string, boolean>>({});
   const [toastMsg, setToastMsg] = useState("");
 
@@ -55,12 +56,13 @@ export default function Home() {
   };
 
   useEffect(() => {
+    setIsMounted(true);
     if (isResultsActive) document.body.classList.add("results-active");
     else document.body.classList.remove("results-active");
   }, [isResultsActive]);
 
   // ==========================================
-  // INITIALIZATION & HISTORY SYNC
+  // INITIALIZATION & SESSION CACHE (BACK BUTTON FIX)
   // ==========================================
   useEffect(() => {
     let mounted = true;
@@ -84,7 +86,24 @@ export default function Home() {
         if (savedTags) setUserTags(JSON.parse(savedTags));
         if (localStorage.getItem("gelbet_nsfw_18plus") === "true") setNsfwAllowed(true); 
 
-        // Парсим URL для сохранения состояния при возврате "Назад"
+        // ВОССТАНОВЛЕНИЕ КЭША (Если мы вернулись со страницы картинки)
+        const cachedState = sessionStorage.getItem('gelbet_cache');
+        if (cachedState) {
+            const state = JSON.parse(cachedState);
+            setPhotos(state.photos);
+            setSearch(state.search);
+            setSearchQuery(state.searchQuery);
+            setSearchMode(state.searchMode);
+            setMatchScore(state.matchScore);
+            setIsResultsActive(state.isResultsActive);
+            setPage(state.page);
+            
+            setTimeout(() => window.scrollTo(0, state.scroll || 0), 100);
+            sessionStorage.removeItem('gelbet_cache');
+            return; // Пропускаем обычный fetch, так как данные уже восстановлены
+        }
+
+        // Обычный парсинг URL
         const urlParams = new URLSearchParams(window.location.search);
         const qFromUrl = urlParams.get("q");
         const modeFromUrl = urlParams.get("mode") as 'visual' | 'sonic';
@@ -99,25 +118,9 @@ export default function Home() {
         }
     } catch (e) {}
 
-    // Поддержка кнопок вперед/назад в браузере
-    const handlePopState = () => {
-      const urlParams = new URLSearchParams(window.location.search);
-      const qFromUrl = urlParams.get("q");
-      if (qFromUrl) {
-        setSearch(qFromUrl);
-        setSearchQuery(qFromUrl);
-        setIsResultsActive(true);
-        fetchPhotos(qFromUrl, 1, true);
-      } else {
-        resetUI();
-      }
-    };
-    window.addEventListener('popstate', handlePopState);
-
     return () => { 
       mounted = false; 
       subscription.unsubscribe(); 
-      window.removeEventListener('popstate', handlePopState);
     };
   }, []); 
 
@@ -261,16 +264,30 @@ export default function Home() {
     setIsResultsActive(false);
     setSearch("");
     setSearchQuery("");
-    setShowSaved(false);
     window.history.pushState({}, '', '/');
   }
 
-  async function savePin(photo: Photo) { 
-    if (!user) { router.push("/auth"); return; } 
-    if (isPinned(photo)) {
-        showToast("Already in archives");
+  // ==========================================
+  // SOCIAL & NAVIGATION (MUTATE PAGES FIX)
+  // ==========================================
+  const handleNavigateToVibe = (photo: Photo) => {
+    feedLocalAI(photo.src, photo.id);
+    if (photo.isNsfw && !nsfwAllowed) {
+        setShowAgeGate(true);
         return;
     }
+
+    // 🔥 СОХРАНЯЕМ СТЕЙТ ПЕРЕД УХОДОМ НА ДРУГУЮ СТРАНИЦУ
+    sessionStorage.setItem('gelbet_cache', JSON.stringify({
+        photos, search, searchQuery, searchMode, matchScore, isResultsActive, page, scroll: window.scrollY
+    }));
+
+    router.push(`/vibe?src=${encodeURIComponent(photo.src)}&title=${encodeURIComponent(photo.title || "")}&link=${encodeURIComponent(photo.link || "")}`);
+  };
+
+  async function savePin(photo: Photo) { 
+    if (!user) { router.push("/auth"); return; } 
+    if (isPinned(photo)) { showToast("Already in archives"); return; }
     try { 
       const res = await fetch("/api/pins", { 
         method: "POST", headers: { "Content-Type": "application/json" }, 
@@ -289,6 +306,16 @@ export default function Home() {
   const toggleLike = (photoId: string) => {
     setLocalLikes(prev => ({ ...prev, [photoId]: !prev[photoId] }));
     if (!localLikes[photoId]) showToast("Resonance logged");
+  };
+
+  const handleShare = async (photo: Photo) => {
+    const shareData = { title: photo.title || 'Resonance Artifact', url: photo.link || photo.src };
+    if (navigator.share) {
+        try { await navigator.share(shareData); } 
+        catch (e) { copyLink(photo.link || photo.src); }
+    } else {
+        copyLink(photo.link || photo.src);
+    }
   };
 
   const copyLink = (link: string) => {
@@ -311,36 +338,33 @@ export default function Home() {
     } catch (e) {} 
     setNewBoardName(""); setNewBoardDesc(""); setShowNewBoard(false); 
   }
-
-  const displayPhotos = showSaved ? pins.map(p => ({ 
-    id: p.id, src: p.image_url, thumb: p.image_url, title: p.title || "", link: p.source_url || "", 
-    isNsfw: checkNsfw(p.title || ""), rank: 'S' 
-  })) : photos;
   
   const userAvatar = user?.user_metadata?.avatar_url || ""; 
   const userName = user?.user_metadata?.full_name || user?.email || "Ludwig";
-  const tagsToDisplay = userTags.length > 0 ? userTags.slice(0, 4) : DEFAULT_TAGS;
+  const tagsToDisplay = isMounted && userTags.length > 0 ? userTags.slice(0, 4) : DEFAULT_TAGS;
 
   return (
     <>
       <style dangerouslySetInnerHTML={{ __html: `
         :root {
           --bg-void: #020104; --glass-bg: rgba(10, 10, 12, 0.3); --glass-border: rgba(255, 255, 255, 0.05);
-          --text-muted: #888; --pf-prism-glow: rgba(255, 255, 255, 0.15);
+          --text-muted: #888; --pf-prism-glow: rgba(255, 255, 255, 0.15); --glow-emerald: #10b981;
         }
         body { background-color: var(--bg-void); color: #fff; font-family: 'Inter', sans-serif; margin: 0; overflow-x: hidden; min-height: 100vh; transition: background-color 1.5s cubic-bezier(0.16, 1, 0.3, 1); }
         .font-mono { font-family: 'Space Mono', monospace; }
         ::-webkit-scrollbar { width: 4px; } ::-webkit-scrollbar-track { background: var(--bg-void); } ::-webkit-scrollbar-thumb { background: #333; border-radius: 4px; } ::-webkit-scrollbar-thumb:hover { background: #a855f7; }
         
+        #math-canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; z-index: 0; pointer-events: none; transition: all 1.5s cubic-bezier(0.16, 1, 0.3, 1); }
+        .results-active #math-canvas { opacity: 0.25; filter: blur(8px) saturate(1.2); transform: translateY(-15vh); }
+        
         #ui-layer { position: relative; z-index: 10; min-height: 100vh; display: flex; flex-direction: column; }
         header { opacity: 0; pointer-events: none; transform: translateY(-20px); transition: all 1s; }
         .results-active header { opacity: 1; pointer-events: auto; transform: translateY(0); }
-        .nav-link { font-size: 11px; text-transform: uppercase; letter-spacing: 2px; color: var(--text-muted); transition: color 0.3s; cursor: pointer; }
+        .nav-link { font-size: 11px; text-transform: uppercase; letter-spacing: 2px; color: var(--text-muted); transition: color 0.3s; cursor: pointer; border: none; background: transparent; }
         .nav-link:hover, .nav-link.active { color: #fff; }
 
         .search-container { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 100%; max-width: 650px; padding: 0 16px; transition: all 1.5s cubic-bezier(0.16, 1, 0.3, 1); display: flex; flex-direction: column; align-items: center; }
         @media (min-width: 768px) { .search-container { padding: 0 24px; } }
-        /* Фиксируем поиск и экватор сферы на 35vh при активации */
         .results-active .search-container { top: 35vh; transform: translate(-50%, -50%); max-width: 800px; }
 
         .search-input-wrapper { display: flex; align-items: center; width: 100%; border-bottom: 2px solid rgba(255,255,255,0.4); transition: all 0.4s ease; padding-bottom: 8px; }
@@ -369,20 +393,9 @@ export default function Home() {
         .vector-btn.active::after { left: 0; right: 0; }
         .vector-btn.sonic-mode.active::after { background: #10b981; }
 
-        /* Изолируем сетку от документа, пока она скрыта */
-        .content-area { 
-          position: absolute; visibility: hidden; width: 100%;
-          opacity: 0; pointer-events: none; transform: translateY(40px); 
-          transition: all 1.2s cubic-bezier(0.16, 1, 0.3, 1); transition-delay: 0.3s; 
-          padding: 0 16px 80px; 
-        }
+        .content-area { position: absolute; visibility: hidden; width: 100%; opacity: 0; pointer-events: none; transform: translateY(40px); transition: all 1.2s cubic-bezier(0.16, 1, 0.3, 1); transition-delay: 0.3s; padding: 0 16px 80px; }
         @media (min-width: 768px) { .content-area { padding: 0 32px 80px; } }
-        
-        .results-active .content-area { 
-          position: relative; visibility: visible;
-          opacity: 1; pointer-events: auto; transform: translateY(0); 
-          margin-top: 45vh; /* Фиксированный отступ под сферой */
-        }
+        .results-active .content-area { position: relative; visibility: visible; opacity: 1; pointer-events: auto; transform: translateY(0); margin-top: 45vh; }
 
         .section-title { font-family: 'Space Mono', monospace; font-size: 9px; text-transform: uppercase; letter-spacing: 2px; color: var(--text-muted); margin-bottom: 16px; border-bottom: 1px solid var(--glass-border); padding-bottom: 8px; display: flex; justify-content: space-between; align-items: flex-end; }
         @media (min-width: 768px) { .section-title { font-size: 10px; letter-spacing: 4px; margin-bottom: 24px; padding-bottom: 12px; } }
@@ -440,8 +453,8 @@ export default function Home() {
           </div>
           
           <div className="gap-8 absolute left-1/2 -translate-x-1/2 hidden md:flex">
-            <div className={`nav-link ${!showSaved ? 'active' : ''}`} onClick={() => setShowSaved(false)}>Resonance</div>
-            <div className={`nav-link ${showSaved ? 'active' : ''}`} onClick={() => { setShowSaved(true); setIsResultsActive(true); }}>Saved</div>
+            <button className="nav-link active" onClick={resetUI}>Resonance</button>
+            <button className="nav-link" onClick={() => router.push('/profile')}>Saved</button>
           </div>
 
           <div className="flex items-center gap-3 md:gap-5">
@@ -449,9 +462,9 @@ export default function Home() {
               <div className="text-white">Entity: {userName.split(' ')[0]}</div>
               <div>Tensor Aligned</div>
             </div>
-            <a href="/profile" className="w-8 h-8 md:w-9 md:h-9 border border-neutral-700 bg-[#0a0a0c] flex items-center justify-center text-white font-mono text-xs hover:border-white cursor-pointer transition-all shadow-lg hover:shadow-[0_0_15px_rgba(255,255,255,0.2)] rounded-full overflow-hidden" style={{ textDecoration: 'none' }}>
+            <button onClick={() => router.push('/profile')} className="w-8 h-8 md:w-9 md:h-9 border border-neutral-700 bg-[#0a0a0c] flex items-center justify-center text-white font-mono text-xs hover:border-white cursor-pointer transition-all shadow-lg hover:shadow-[0_0_15px_rgba(255,255,255,0.2)] rounded-full overflow-hidden">
               {userAvatar ? <img src={userAvatar} className="w-full h-full object-cover" alt="avatar" /> : (userName[0] || "U").toUpperCase()}
-            </a>
+            </button>
           </div>
         </header>
 
@@ -473,54 +486,48 @@ export default function Home() {
         </div>
 
         <div className="content-area max-w-[1800px] mx-auto w-full">
-          {!showSaved && (
-            <div className="mb-10 md:mb-14">
-              <div className="section-title">
-                <span>My Archives</span>
-              </div>
-              <div className="archives-grid">
-                {boards.length === 0 ? (
-                  <>
-                    <div className="archive-card">
-                      <div className="font-mono text-[10px] md:text-[11px] tracking-widest text-white mb-2 md:mb-3 uppercase font-bold">Web Deployment</div>
-                      <div className="text-[8px] md:text-[9px] text-neutral-500 uppercase tracking-widest">React / Next.js</div>
-                      <div className="mt-4 text-[9px] md:text-[10px] text-purple-400 uppercase tracking-widest">0 Artifacts</div>
-                    </div>
-                  </>
-                ) : (
-                  boards.map(board => (
-                    <div key={board.id} className="archive-card">
-                      <div className="font-mono text-[10px] md:text-[11px] tracking-widest text-white mb-2 md:mb-3 uppercase font-bold">{board.name}</div>
-                      <div className="text-[8px] md:text-[9px] text-neutral-500 uppercase tracking-widest">{board.description || "Collection"}</div>
-                      <div className="mt-4 text-[9px] md:text-[10px] text-purple-400 uppercase tracking-widest">{pins.filter(p => p.board_id === board.id).length} Artifacts</div>
-                    </div>
-                  ))
-                )}
-                <div className="archive-card flex flex-col items-center justify-center border-dashed border-neutral-800 hover:border-neutral-500 bg-transparent min-h-[100px]" onClick={() => setShowNewBoard(true)}>
-                  <div className="font-mono text-[9px] md:text-[10px] text-neutral-400 uppercase tracking-widest">+ Establish Archive</div>
-                </div>
+          <div className="mb-10 md:mb-14">
+            <div className="section-title">
+              <span>My Archives</span>
+            </div>
+            <div className="archives-grid">
+              {boards.length === 0 ? (
+                <>
+                  <div className="archive-card">
+                    <div className="font-mono text-[10px] md:text-[11px] tracking-widest text-white mb-2 md:mb-3 uppercase font-bold">Web Deployment</div>
+                    <div className="text-[8px] md:text-[9px] text-neutral-500 uppercase tracking-widest">React / Next.js</div>
+                    <div className="mt-4 text-[9px] md:text-[10px] text-purple-400 uppercase tracking-widest">0 Artifacts</div>
+                  </div>
+                </>
+              ) : (
+                boards.map(board => (
+                  <div key={board.id} className="archive-card">
+                    <div className="font-mono text-[10px] md:text-[11px] tracking-widest text-white mb-2 md:mb-3 uppercase font-bold">{board.name}</div>
+                    <div className="text-[8px] md:text-[9px] text-neutral-500 uppercase tracking-widest">{board.description || "Collection"}</div>
+                    <div className="mt-4 text-[9px] md:text-[10px] text-purple-400 uppercase tracking-widest">{pins.filter(p => p.board_id === board.id).length} Artifacts</div>
+                  </div>
+                ))
+              )}
+              <div className="archive-card flex flex-col items-center justify-center border-dashed border-neutral-800 hover:border-neutral-500 bg-transparent min-h-[100px]" onClick={() => setShowNewBoard(true)}>
+                <div className="font-mono text-[9px] md:text-[10px] text-neutral-400 uppercase tracking-widest">+ Establish Archive</div>
               </div>
             </div>
-          )}
+          </div>
 
           <div>
             <div className="section-title">
-              <span>{showSaved ? "Saved Resonance" : "Resonance Feed"}</span>
+              <span>Resonance Feed</span>
               <span style={{ color: "rgba(255,255,255,0.4)" }}>Match: {matchScore}%</span>
             </div>
 
             <div className="masonry">
-              {displayPhotos.map((photo, i) => {
+              {photos.map((photo, i) => {
                 const isBlurred = photo.isNsfw && !nsfwAllowed;
                 const isLiked = localLikes[photo.id] || false;
                 const saved = isPinned(photo);
 
                 return (
-                  <div key={`${photo.id}-${i}`} className="pin-card" onClick={() => {
-                    feedLocalAI(photo.src, photo.id);
-                    if (isBlurred) setShowAgeGate(true);
-                    else router.push(`/vibe?src=${encodeURIComponent(photo.src)}&title=${encodeURIComponent(photo.title || "")}&link=${encodeURIComponent(photo.link || "")}`);
-                  }}>
+                  <div key={`${photo.id}-${i}`} className="pin-card" onClick={() => handleNavigateToVibe(photo)}>
                     <img src={photo.thumb || photo.src} alt="Artifact" style={isBlurred ? { filter: "blur(20px)" } : {}} />
                     <div className="pin-overlay">
                       <div className="flex justify-between items-start w-full">
@@ -535,10 +542,10 @@ export default function Home() {
                           <button className={`icon-btn ${isLiked ? 'liked' : ''}`} title="Like" onClick={(e) => { e.stopPropagation(); toggleLike(photo.id); }}>
                             <svg fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"/></svg>
                           </button>
-                          <button className="icon-btn" title="Comment" onClick={(e) => { e.stopPropagation(); showToast("Decryption required"); }}>
+                          <button className="icon-btn" title="Comment" onClick={(e) => { e.stopPropagation(); setCommentPin(photo); }}>
                             <svg fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
                           </button>
-                          <button className="icon-btn" title="Share" onClick={(e) => { e.stopPropagation(); copyLink(photo.link || photo.src); }}>
+                          <button className="icon-btn" title="Share" onClick={(e) => { e.stopPropagation(); handleShare(photo); }}>
                             <svg fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z"/></svg>
                           </button>
                         </div>
@@ -557,6 +564,30 @@ export default function Home() {
 
       {toastMsg && <div className="toast-popup">{toastMsg}</div>}
 
+      {/* COMMENTS MODAL */}
+      {commentPin && (
+        <div className="fixed inset-0 z-[600] bg-black/80 flex items-center justify-center p-4 backdrop-blur-md" onClick={() => setCommentPin(null)}>
+          <div onClick={e => e.stopPropagation()} className="bg-[#0a0a0c]/90 border border-white/10 rounded-xl p-8 max-w-md w-full flex flex-col gap-6 shadow-2xl backdrop-blur-xl">
+            <h2 className="font-mono text-sm font-bold text-white tracking-[3px] uppercase">Comm-Link</h2>
+            <div className="flex flex-col gap-3 max-h-[40vh] overflow-y-auto pr-2">
+               <div className="border-l-2 border-[var(--glow-emerald)] pl-3">
+                 <div className="font-mono text-[9px] text-[var(--glow-emerald)] mb-1">USER_0x9A</div>
+                 <div className="text-xs text-neutral-300">Absolute resonance. Vector matches perfectly.</div>
+               </div>
+               <div className="border-l-2 border-white/20 pl-3">
+                 <div className="font-mono text-[9px] text-neutral-500 mb-1">SYSTEM_NODE</div>
+                 <div className="text-xs text-neutral-400 italic">Decryption successful. Data stabilized.</div>
+               </div>
+            </div>
+            <div className="flex gap-2 mt-2">
+               <input type="text" className="w-full bg-black/50 border border-white/10 text-white font-mono text-xs p-3 outline-none focus:border-white/40 rounded-md" placeholder="Transmit thought..." />
+               <button className="bg-white/10 border border-white/30 text-white font-mono text-[10px] uppercase px-4 rounded-md hover:bg-white hover:text-black transition-all" onClick={() => { showToast("Transmission sent"); setCommentPin(null); }}>Send</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* NEW BOARD MODAL */}
       {showNewBoard && (
         <div className="fixed inset-0 z-[600] bg-black/80 flex items-center justify-center p-4 backdrop-blur-md" onClick={() => setShowNewBoard(false)}>
           <div onClick={e => e.stopPropagation()} className="bg-[#0a0a0c]/90 border border-white/10 rounded-xl p-8 max-w-md w-full flex flex-col gap-6 shadow-2xl backdrop-blur-xl">

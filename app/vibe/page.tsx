@@ -32,7 +32,7 @@ function VibeContent() {
   const [relatedLoading, setRelatedLoading] = useState(true);
   
   const [isMutating, setIsMutating] = useState(false);
-  const [displayVibe, setDisplayVibe] = useState("ANALYZING TENSOR...");
+  const [displayVibe, setDisplayVibe] = useState("ANALYZING...");
 
   const [comments, setComments] = useState<any[]>([]);
   const [commentInput, setCommentInput] = useState("");
@@ -50,7 +50,6 @@ function VibeContent() {
     setTimeout(() => setToastMsg(""), 3000);
   };
 
-  // 🔥 ЖЕСТКИЙ ФИКС СКРОЛЛА ПРИ СМЕНЕ КАРТИНКИ 🔥
   useEffect(() => {
     if (src) {
       window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
@@ -363,33 +362,33 @@ function VibeContent() {
             background: rgba(255, 255, 255, 0.02); 
             backdrop-filter: blur(20px); 
             border: 1px solid rgba(255, 255, 255, 0.05); 
-            border-radius: 20px; 
-            box-shadow: 0 20px 40px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.05);
+            border-radius: 16px; 
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.03);
         }
 
         .btn-elegant { 
             background: transparent; border: 1px solid rgba(255,255,255,0.2); color: #fff; 
-            font-family: 'Inter', sans-serif; font-size: 10px; font-weight: 500;
-            text-transform: uppercase; letter-spacing: 2px; padding: 10px 20px; 
+            font-family: 'Inter', sans-serif; font-size: 9px; font-weight: 500;
+            text-transform: uppercase; letter-spacing: 2px; padding: 8px 16px; 
             cursor: pointer; transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1); border-radius: 99px; 
         }
         .btn-elegant:hover:not(:disabled) { 
             background: #fff; 
             color: #000; 
-            box-shadow: 0 0 20px rgba(255,255,255,0.2); 
+            box-shadow: 0 0 15px rgba(255,255,255,0.2); 
         }
         .btn-elegant:disabled { opacity: 0.5; cursor: not-allowed; }
 
         .btn-mutate {
             background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.2);
-            color: white; padding: 14px 36px; border-radius: 99px;
-            font-family: 'Syncopate', sans-serif; font-size: 11px; font-weight: 700;
-            letter-spacing: 4px; text-transform: uppercase; transition: all 0.4s ease;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+            color: white; padding: 10px 24px; border-radius: 99px;
+            font-family: 'Syncopate', sans-serif; font-size: 10px; font-weight: 700;
+            letter-spacing: 3px; text-transform: uppercase; transition: all 0.4s ease;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.3);
         }
         .btn-mutate:hover:not(:disabled) { 
             background: white; color: black; 
-            box-shadow: 0 0 20px rgba(255,255,255,0.4); 
+            box-shadow: 0 0 15px rgba(255,255,255,0.4); 
             transform: scale(1.02); 
         }
         .btn-mutate:disabled { opacity: 0.5; cursor: not-allowed; }
@@ -459,15 +458,15 @@ function VibeContent() {
       </header>
 
       {/* MAIN VIEW: Огромная картинка по центру */}
-      <div className="w-full max-w-6xl mx-auto mt-28 px-4 flex flex-col items-center z-10 relative">
+      <div className="w-full max-w-6xl mx-auto mt-24 px-4 flex flex-col items-center z-10 relative">
         
-        {/* ИЗОБРАЖЕНИЕ (С жестким контейнером от схлопывания) */}
-        <div className="w-full flex justify-center items-center mb-8 relative group min-h-[50vh] md:min-h-[70vh] bg-black/20 rounded-xl border border-white/5">
+        {/* ИЗОБРАЖЕНИЕ */}
+        <div className="w-full flex justify-center items-center mb-6 relative group min-h-[50vh] md:min-h-[75vh] bg-black/20 rounded-xl border border-white/5 overflow-hidden">
           <div className="absolute inset-0 bg-white/5 blur-3xl rounded-full opacity-0 group-hover:opacity-50 transition-opacity duration-700 pointer-events-none"></div>
           <img 
             src={currentPhoto.src} 
             alt={currentPhoto.title} 
-            className="max-h-[75vh] w-auto max-w-full object-contain rounded-xl shadow-[0_30px_60px_rgba(0,0,0,0.8)] relative z-10"
+            className="max-h-[80vh] w-auto max-w-full object-contain shadow-[0_30px_60px_rgba(0,0,0,0.8)] relative z-10 p-2"
             onError={(e) => {
               if (!e.currentTarget.src.includes('placehold.co')) {
                 e.currentTarget.src = 'https://placehold.co/800x600/111/444?text=ARTIFACT+LOST';
@@ -476,12 +475,12 @@ function VibeContent() {
           />
         </div>
 
-        {/* КОНТРОЛЬНАЯ ПАНЕЛЬ */}
-        <div className="w-full glass-panel p-6 md:p-8 flex flex-col md:flex-row justify-between items-center gap-8 mb-8">
+        {/* КОНТРОЛЬНАЯ ПАНЕЛЬ (Уменьшена и отцентрована) */}
+        <div className="w-full max-w-4xl mx-auto glass-panel p-4 md:px-6 md:py-4 flex flex-col md:flex-row justify-between items-center gap-4 mb-4">
           
           <div className="flex flex-col items-center md:items-start text-center md:text-left flex-1">
-            <span className="font-inter text-[9px] text-neutral-400 tracking-[3px] uppercase mb-1">Oracle Resonance</span>
-            <span className="font-sync text-xl md:text-2xl text-white tracking-[2px] uppercase drop-shadow-md">
+            <span className="font-inter text-[8px] text-neutral-400 tracking-[3px] uppercase mb-1">Oracle Resonance</span>
+            <span className="font-sync text-lg md:text-xl text-white tracking-[2px] uppercase drop-shadow-md">
               {displayVibe}
             </span>
           </div>
@@ -496,7 +495,7 @@ function VibeContent() {
             </button>
           </div>
 
-          <div className="flex gap-3 justify-center md:justify-end flex-1">
+          <div className="flex gap-2 justify-center md:justify-end flex-1">
             <button className={`btn-elegant ${isPinned(currentPhoto) ? 'bg-white text-black' : ''}`} onClick={() => toggleSavePin(currentPhoto)}>
               {isPinned(currentPhoto) ? "Unlink" : "Store"}
             </button>
@@ -509,17 +508,17 @@ function VibeContent() {
 
         </div>
 
-        {/* АННОТАЦИИ / КОММЕНТАРИИ */}
-        <div className="w-full glass-panel flex flex-col overflow-hidden mb-16">
-          <div className="border-b border-white/5 px-6 py-4 font-inter font-semibold text-[10px] text-neutral-400 flex justify-between uppercase tracking-[3px]">
+        {/* АННОТАЦИИ / КОММЕНТАРИИ (Компактные) */}
+        <div className="w-full max-w-4xl mx-auto glass-panel flex flex-col overflow-hidden mb-12">
+          <div className="border-b border-white/5 px-5 py-3 font-inter font-semibold text-[9px] text-neutral-400 flex justify-between uppercase tracking-[3px]">
             <span>Resonance Annotations</span>
             <span>{comments.length} Entries</span>
           </div>
           
-          <div className="flex-1 overflow-y-auto px-6 py-5 flex flex-col gap-5 max-h-[40vh] scroll-smooth">
+          <div className="flex-1 overflow-y-auto px-5 py-4 flex flex-col gap-4 max-h-[30vh] scroll-smooth">
              <div className="flex flex-col gap-1">
-               <div className="text-purple-400 font-inter text-[9px] uppercase tracking-widest font-semibold">Oracle System</div>
-               <div className="text-neutral-300 font-inter text-[11px] font-light bg-white/5 p-4 rounded-tr-xl rounded-br-xl rounded-bl-xl border border-white/5 inline-block self-start max-w-[85%] shadow-sm">
+               <div className="text-purple-400 font-inter text-[8px] uppercase tracking-widest font-semibold">Oracle System</div>
+               <div className="text-neutral-300 font-inter text-[10px] font-light bg-white/5 p-3 rounded-tr-xl rounded-br-xl rounded-bl-xl border border-white/5 inline-block self-start max-w-[85%] shadow-sm">
                  Data-stream connected. Target vector isolated. Ready for human annotations.
                </div>
              </div>
@@ -527,10 +526,10 @@ function VibeContent() {
              {comments.map((c) => (
                <div key={c.id} className="flex flex-col gap-1">
                  <div className="flex items-end gap-3">
-                   <span className="text-neutral-500 font-inter text-[9px] uppercase tracking-widest font-medium">{c.sender_name}</span>
+                   <span className="text-neutral-500 font-inter text-[8px] uppercase tracking-widest font-medium">{c.sender_name}</span>
                    <span className="text-neutral-700 font-mono text-[8px]">{new Date(c.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
                  </div>
-                 <div className="text-neutral-200 font-inter text-[11px] font-light leading-relaxed bg-white/5 p-4 rounded-tr-xl rounded-br-xl rounded-bl-xl border border-white/5 inline-block self-start max-w-[85%] shadow-sm">
+                 <div className="text-neutral-200 font-inter text-[10px] font-light leading-relaxed bg-white/5 p-3 rounded-tr-xl rounded-br-xl rounded-bl-xl border border-white/5 inline-block self-start max-w-[85%] shadow-sm">
                    {c.content}
                  </div>
                </div>
@@ -538,18 +537,18 @@ function VibeContent() {
              <div ref={commentsEndRef} />
           </div>
           
-          <div className="border-t border-white/5 flex bg-black/20 p-2">
+          <div className="border-t border-white/5 flex bg-black/20 p-1.5">
              <input 
                type="text" 
                value={commentInput}
                onChange={(e) => setCommentInput(e.target.value)}
                onKeyDown={(e) => e.key === 'Enter' && submitComment()}
-               className="w-full bg-transparent border-none text-white font-inter font-light text-[11px] px-4 py-2 outline-none focus:ring-0 placeholder-neutral-600" 
+               className="w-full bg-transparent border-none text-white font-inter font-light text-[10px] px-3 py-1.5 outline-none focus:ring-0 placeholder-neutral-600" 
                placeholder="Add an annotation..." 
              />
              <button 
                onClick={submitComment}
-               className="bg-white text-black font-inter font-semibold text-[9px] uppercase tracking-[2px] px-6 rounded-full hover:bg-neutral-200 transition-colors" 
+               className="bg-white text-black font-inter font-semibold text-[8px] uppercase tracking-[2px] px-5 py-1.5 rounded-full hover:bg-neutral-200 transition-colors" 
              >
                Send
              </button>

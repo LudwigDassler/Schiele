@@ -5,11 +5,10 @@ import { supabase } from "../../lib/supabase";
 import type { User } from "@supabase/supabase-js";
 import { checkNsfw } from "../../lib/nsfw";
 import { getAnonId } from "../../lib/identity";
-import PinCard from "../../components/PinCard";
 import AgeGateModal from "../../components/AgeGateModal";
 import { useTasteProfile } from "../hooks/useTasteProfile";
 
-type Photo = { id: string; src: string; thumb: string; title: string; link: string; isNsfw?: boolean };
+type Photo = { id: string; src: string; thumb: string; title: string; link: string; isNsfw?: boolean; rank?: string };
 type Pin = { id: string; image_url: string; title: string; source_url?: string };
 
 function VibeContent() {
@@ -27,20 +26,34 @@ function VibeContent() {
   const [showAgeGate, setShowAgeGate] = useState<Photo | null>(null);
   const [identity, setIdentity] = useState<string | null>(null);
 
+  // Стейты выдачи
   const [relatedPhotos, setRelatedPhotos] = useState<Photo[]>([]);
   const [relatedPage, setRelatedPage] = useState(1);
   const [relatedHasMore, setRelatedHasMore] = useState(true);
   const [relatedLoading, setRelatedLoading] = useState(true);
   
+  // Стейты Троицы (Оракул + Мутатор)
   const [isMutating, setIsMutating] = useState(false);
-  const [displayVibe, setDisplayVibe] = useState("ANALYZING...");
+  const [displayVibe, setDisplayVibe] = useState("ANALYZING TENSOR...");
 
-  // Refs для предотвращения состояний гонки (Race conditions)
+  // Стейты Comm-Link (Комментарии)
+  const [comments, setComments] = useState<any[]>([]);
+  const [commentInput, setCommentInput] = useState("");
+  const [toastMsg, setToastMsg] = useState("");
+
+  const commentsEndRef = useRef<HTMLDivElement>(null);
+
+  // Refs для предотвращения состояний гонки
   const currentQueryRef = useRef("");
   const historyRef = useRef<string[]>([]);
   const lastAnalyzedSrcRef = useRef<string | null>(null);
   const relatedAbortRef = useRef<AbortController | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  const showToast = (msg: string) => {
+    setToastMsg(msg);
+    setTimeout(() => setToastMsg(""), 3000);
+  };
 
   useEffect(() => {
     try {
@@ -62,7 +75,67 @@ function VibeContent() {
     });
   }, []);
 
-  // Поиск картинок через парсер
+  // ==========================================
+  // СИНХРОНИЗАЦИЯ БАЗЫ ДАННЫХ КОММЕНТАРИЕВ
+  // ==========================================
+  useEffect(() => {
+    if (!src) return;
+    const fetchComments = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('comments')
+          .select('*')
+          .eq('pin_id', src)
+          .order('created_at', { ascending: true });
+          
+        if (error) throw error;
+        if (data) setComments(data);
+      } catch (e) {
+        console.error("Failed to load tensor logs:", e);
+      }
+    };
+    fetchComments();
+  }, [src]);
+
+  useEffect(() => {
+    if (commentsEndRef.current) {
+      commentsEndRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [comments]);
+
+  const submitComment = async () => {
+    if (!commentInput.trim() || !user || !src) {
+      if (!user) showToast("Authentication required");
+      return;
+    }
+
+    const newLog = {
+      user_id: user.id,
+      pin_id: src,
+      content: commentInput.trim(),
+      sender_name: user.user_metadata?.full_name || "USER_ANON"
+    };
+
+    // Оптимистичный UI
+    const optimisticLog = { ...newLog, id: Date.now().toString(), created_at: new Date().toISOString() };
+    setComments(prev => [...prev, optimisticLog]);
+    setCommentInput("");
+
+    try {
+      const { error } = await supabase.from('comments').insert([newLog]);
+      if (error) {
+        setComments(prev => prev.filter(c => c.id !== optimisticLog.id));
+        throw error;
+      }
+    } catch (e) {
+      console.error("Log sync failed:", e);
+      showToast("Transmission failed");
+    }
+  };
+
+  // ==========================================
+  // ВЫДАЧА (Парсер DDG + Гильотина)
+  // ==========================================
   const fetchImages = useCallback(async (query: string, pageNum: number, reset: boolean) => {
     if (!query || !src) return;
     setRelatedLoading(true);
@@ -88,7 +161,8 @@ function VibeContent() {
             src: mappedSrc,
             thumb: p.thumb || p.thumbnail || p.image || mappedSrc,
             link: p.link || p.url || p.source_url || mappedSrc,
-            isNsfw: isNsfwQuery || checkNsfw(p.title || "")
+            isNsfw: isNsfwQuery || checkNsfw(p.title || ""),
+            rank: Math.random() > 0.8 ? 'S' : (Math.random() > 0.4 ? 'A' : 'B')
           };
         })
         .filter((p: any) => p.src && p.src.startsWith("http") && p.src !== src);
@@ -109,13 +183,15 @@ function VibeContent() {
     }
   }, [src]);
 
-  // Контроллер Мутации (Nvidia + Groq)
+  // ==========================================
+  // АРХИТЕКТУРА ТРОИЦЫ (Мутатор + Оракул)
+  // ==========================================
   const handleMutate = useCallback(async (isInitial = false) => {
     if (isMutating || !src) return;
     setIsMutating(true);
 
     if (isInitial) {
-      setDisplayVibe("ANALYZING...");
+      setDisplayVibe("ANALYZING TENSOR...");
       setRelatedLoading(true);
     }
 
@@ -135,7 +211,6 @@ function VibeContent() {
         setDisplayVibe(data.displayVibe);
         currentQueryRef.current = data.smartQuery;
 
-        // Сохраняем в ref для избежания повторов
         historyRef.current.push(data.displayVibe);
 
         setRelatedPhotos([]);
@@ -148,12 +223,13 @@ function VibeContent() {
     } catch (e) {
       console.error("[MUTATION FAILED]", e);
       if (isInitial) setDisplayVibe("RESONANCE LOST");
+      showToast("Oracle iteration failed");
     } finally {
       setIsMutating(false);
     }
   }, [src, isMutating, fetchImages]);
 
-  // Автозапуск при смене картинки или открытии страницы
+  // Автозапуск при смене картинки
   useEffect(() => {
     if (!src || lastAnalyzedSrcRef.current === src) return;
     lastAnalyzedSrcRef.current = src;
@@ -166,7 +242,7 @@ function VibeContent() {
     handleMutate(true);
   }, [src, handleMutate]);
 
-  // Бесконечный скролл
+  // INFINITE SCROLL OBSERVER
   useEffect(() => {
     if (!bottomRef.current) return;
     const observer = new IntersectionObserver(entries => {
@@ -183,32 +259,44 @@ function VibeContent() {
     return () => observer.disconnect();
   }, [relatedHasMore, relatedLoading, fetchImages]);
 
+  // ==========================================
+  // SOCIALS
+  // ==========================================
   function isPinned(photo: Photo) { return pins.some(p => p.image_url === photo.src); }
 
-  async function savePin(photo: Photo) {
+  async function toggleSavePin(photo: Photo) {
     if (!user) { router.push("/auth"); return; }
-    try {
-      const res = await fetch("/api/pins", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          user_id: user.id,
-          image_url: photo.src,
-          title: photo.title,
-          source_url: photo.link
-        })
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.pin || data.data) setPins(prev => [data.pin || data.data, ...prev]);
-      }
-    } catch (e) {}
+    
+    const existingPin = pins.find(p => p.image_url === photo.src);
+    if (existingPin) {
+      setPins(prev => prev.filter(p => p.id !== existingPin.id)); 
+      try { 
+        await fetch(`/api/pins?id=${existingPin.id}`, { method: "DELETE" }); 
+        showToast("Artifact removed");
+      } catch (e) {}
+    } else {
+      try {
+        const res = await fetch("/api/pins", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ user_id: user.id, image_url: photo.src, title: photo.title, board_id: null, source_url: photo.link })
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.pin || data.data) setPins(prev => [data.pin || data.data, ...prev]);
+          showToast("Artifact secured");
+        }
+      } catch (e) {}
+    }
   }
 
   function sharePhoto(photo: Photo) {
     const url = photo.link || window.location.href;
     if (navigator.share) navigator.share({ title: displayVibe, url });
-    else navigator.clipboard.writeText(url);
+    else {
+      navigator.clipboard.writeText(url);
+      showToast("Coordinates copied");
+    }
   }
 
   function openPhoto(photo: Photo) {
@@ -218,133 +306,245 @@ function VibeContent() {
     router.push(`/vibe?src=${encodeURIComponent(photo.src)}&title=${encodeURIComponent(photo.title || "")}&link=${encodeURIComponent(photo.link || "")}`);
   }
 
-  // 🔥 ИСПРАВЛЕНИЕ: ВОТ ЭТА СТРОЧКА ТЕПЕРЬ НА МЕСТЕ
   const currentPhoto: Photo = { id: src || "", src: src || "", thumb: src || "", title: fallbackTitle, link: link || "" };
+  const vectorId = btoa((src || "V").substring(0, 15)).substring(0, 6).toUpperCase();
 
-  if (!src) return <div style={{ color: "#fff", padding: 40, textAlign: "center", background: "#020104", minHeight: "100vh", fontFamily: 'Syncopate' }}>Artifact not found.</div>;
+  if (!src) return <div style={{ color: "#fff", padding: 40, textAlign: "center", background: "#020104", minHeight: "100vh", fontFamily: 'Space Mono' }}>ARTIFACT NOT FOUND.</div>;
 
   return (
     <div className="min-h-screen bg-[#020104] text-white font-sans overflow-x-hidden overflow-y-auto flex flex-col relative">
       <style dangerouslySetInnerHTML={{ __html: `
-        @import url('https://fonts.googleapis.com/css2?family=Syncopate:wght@400;700&family=Inter:wght@300;400;500;600&display=swap');
-        .font-syncopate { font-family: 'Syncopate', sans-serif; }
+        @import url('https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Inter:wght@300;400;500&display=swap');
+        .font-mono { font-family: 'Space Mono', monospace; }
         
-        @keyframes ooze { 0% { transform: translate(0, 0) scale(1); } 100% { transform: translate(10%, -10%) scale(1.1); } }
-        @keyframes bg-drift { 0% { transform: translate(0, 0) scale(1.1); filter: hue-rotate(0deg); } 100% { transform: translate(-2%, 2%) scale(1.15); filter: hue-rotate(15deg); } }
-        @keyframes flow-lines { 0% { background-position: 0 0; } 100% { background-position: 500px 500px; } }
-        @keyframes text-pulse { 0% { opacity: 0.5; text-shadow: 0 0 20px rgba(255,255,255,0.3); } 100% { opacity: 1; text-shadow: 0 0 40px white, 0 0 80px rgba(168,85,247,0.8); } }
-        @keyframes volvelle-spin { 100% { transform: translate(-50%, -50%) rotate(360deg); } }
+        ::-webkit-scrollbar { width: 4px; } 
+        ::-webkit-scrollbar-track { background: #020104; } 
+        ::-webkit-scrollbar-thumb { background: #333; border-radius: 4px; } 
+        ::-webkit-scrollbar-thumb:hover { background: #666; }
+
+        .math-border { border: 1px solid rgba(255,255,255,0.08); border-radius: 2px; }
+        .grid-bg { background-image: linear-gradient(to right, rgba(255,255,255,0.02) 1px, transparent 1px), linear-gradient(to bottom, rgba(255,255,255,0.02) 1px, transparent 1px); background-size: 30px 30px; }
         
-        .force-fluid-filter { -webkit-filter: url('#fluid-warp'); filter: url('#fluid-warp'); }
-        .v-masonry { columns: 2; gap: 16px; } @media (min-width: 640px) { .v-masonry { columns: 3; } } @media (min-width: 1024px) { .v-masonry { columns: 4; } } @media (min-width: 1440px) { .v-masonry { columns: 5; } }
-        .v-spinner { width: 32px; height: 32px; border: 2px solid rgba(255,255,255,0.1); border-top-color: #a855f7; border-radius: 50%; animation: v-spin 0.8s cubic-bezier(0.6, 0.2, 0.4, 0.8) infinite; margin: 40px auto; box-shadow: 0 0 15px rgba(168,85,247,0.5); }
-        @keyframes v-spin { to { transform: rotate(360deg); } }
+        .btn-strict { background: transparent; border: 1px solid rgba(255,255,255,0.2); color: #fff; font-family: 'Space Mono', monospace; font-size: 9px; text-transform: uppercase; letter-spacing: 2px; padding: 8px 16px; cursor: pointer; transition: all 0.2s; border-radius: 2px; }
+        .btn-strict:hover:not(:disabled) { background: #fff; color: #000; }
+        .btn-strict:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        .toast-popup { position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); background: rgba(255,255,255,0.95); padding: 10px 20px; border-radius: 2px; font-family: 'Space Mono', monospace; font-size: 9px; text-transform: uppercase; letter-spacing: 2px; color: #000; z-index: 9999; animation: floatUp 0.3s ease-out; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+        @keyframes floatUp { from { opacity: 0; transform: translate(-50%, 20px); } to { opacity: 1; transform: translate(-50%, 0); } }
+
+        /* Стерильная сетка (как на главной) */
+        .v-masonry { column-count: 2; column-gap: 12px; }
+        @media (min-width: 768px) { .v-masonry { column-count: 3; column-gap: 16px; } }
+        @media (min-width: 1024px) { .v-masonry { column-count: 4; } }
+        @media (min-width: 1440px) { .v-masonry { column-count: 5; } }
         
-        .prism-hover { transition: all 0.4s cubic-bezier(0.16,1,0.3,1); }
-        .prism-hover:hover { box-shadow: -10px 0 30px rgba(255,0,85,0.4), 0 0 30px rgba(0,255,0,0.2), 10px 0 30px rgba(0,255,255,0.4); border-color: rgba(255,255,255,0.3); transform: translateY(-5px); }
+        .pin-card { break-inside: avoid; margin-bottom: 12px; border-radius: 2px; overflow: hidden; position: relative; background: #08070a; cursor: pointer; border: 1px solid transparent; transition: all 0.3s; }
+        @media (min-width: 768px) { .pin-card { margin-bottom: 16px; } }
+        .pin-card img { width: 100%; display: block; transition: all 0.4s ease; filter: brightness(0.7); }
+        .pin-card:hover { border-color: rgba(255,255,255,0.1); transform: scale(1.01); z-index: 10; }
+        .pin-card:hover img { filter: brightness(1); }
+
+        .pin-overlay { position: absolute; inset: 0; background: linear-gradient(to bottom, rgba(0,0,0,0) 50%, rgba(0,0,0,0.9) 100%); opacity: 0; transition: opacity 0.3s; display: flex; flex-direction: column; justify-content: space-between; padding: 12px; pointer-events: none; }
+        .pin-card:hover .pin-overlay { opacity: 1; pointer-events: auto; }
+        
+        .icon-btn { width: 28px; height: 28px; border-radius: 2px; background: rgba(0,0,0,0.5); backdrop-filter: blur(4px); border: 1px solid rgba(255,255,255,0.1); display: flex; align-items: center; justify-content: center; color: #fff; cursor: pointer; transition: all 0.2s; }
+        .icon-btn:hover { background: #fff; color: #000; }
+        .icon-btn svg { width: 12px; height: 12px; transition: fill 0.3s; }
       `}} />
 
-      <svg style={{ width: 0, height: 0, position: 'absolute', zIndex: -1 }}>
-        <defs>
-          <filter id="fluid-warp" x="-20%" y="-20%" width="140%" height="140%">
-            <feTurbulence type="fractalNoise" baseFrequency="0.01" numOctaves={3} result="noise" />
-            <feDisplacementMap in="SourceGraphic" in2="noise" scale="40" xChannelSelector="R" yChannelSelector="G" />
-          </filter>
-        </defs>
-      </svg>
+      {/* HEADER */}
+      <header className="w-full px-6 py-4 flex justify-between items-center fixed top-0 z-50 bg-[#020104]/90 backdrop-blur-md border-b border-white/5">
+        <button onClick={() => router.back()} className="font-mono text-[9px] md:text-[10px] text-neutral-500 hover:text-white uppercase tracking-widest flex items-center gap-2 transition-colors">
+          <span>←</span> <span>RETURN</span>
+        </button>
+        <div className="font-mono text-[10px] md:text-xs tracking-[4px] font-bold text-white uppercase">
+          TENSOR <span className="text-neutral-600">MANIFOLD</span>
+        </div>
+        <button onClick={() => sharePhoto(currentPhoto)} className="font-mono text-[9px] md:text-[10px] text-neutral-500 hover:text-white uppercase tracking-widest transition-colors">
+          TRANSMIT
+        </button>
+      </header>
 
-      <div className="fixed inset-0 z-0 pointer-events-none overflow-hidden bg-[#020104]">
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[120vw] h-[120vw] max-w-[1200px] max-h-[1200px] border-[1px] border-white/5 rounded-full opacity-20 animate-[volvelle-spin_120s_linear_infinite]" style={{ borderStyle: 'dashed' }}></div>
-        <img src={currentPhoto.src} alt="" aria-hidden="true" className="absolute -inset-[10%] w-[120%] h-[120%] object-cover blur-[100px] opacity-20 scale-110" style={{ animation: 'bg-drift 40s ease-in-out infinite alternate' }} />
-        <div className="absolute inset-0 bg-gradient-to-b from-[#020104]/80 via-[#020104]/60 to-[#020104]/95"></div>
-      </div>
-
-      <button className="fixed top-6 left-6 md:top-8 md:left-8 z-50 text-white/40 hover:text-white transition w-10 h-10 md:w-12 md:h-12 flex items-center justify-center bg-white/5 hover:bg-white/10 rounded-full backdrop-blur-md shadow-[0_0_20px_rgba(0,0,0,0.8)] cursor-pointer" onClick={() => router.push("/")}>
-        <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
-      </button>
-
-      <div className="flex-shrink-0 flex items-center justify-center p-4 pt-24 md:p-10 md:pt-28">
-        <div className="w-full max-w-7xl bg-[#050308]/60 backdrop-blur-3xl border border-white/10 rounded-[2rem] overflow-hidden flex flex-col lg:flex-row shadow-[0_30px_80px_rgba(0,0,0,0.9),_0_0_40px_rgba(168,85,247,0.1)] relative z-10 prism-hover">
-          
-          <div className="flex-1 p-4 md:p-8 flex items-center justify-center relative min-h-[40vh] lg:min-h-[60vh]">
-            <div className="absolute inset-0 bg-gradient-to-br from-white/5 to-transparent pointer-events-none"></div>
-            
-            <div className="relative flex items-center justify-center w-full h-full max-h-[60vh] lg:max-h-[75vh] group">
-              <img src={currentPhoto.src} alt="Artifact" className="max-w-full max-h-full object-contain rounded-xl shadow-[0_20px_50px_rgba(0,0,0,0.8)] transition-transform duration-1000 group-hover:scale-[1.02]" />
-              <div className="absolute top-4 right-4 flex gap-3 opacity-0 group-hover:opacity-100 transition-opacity duration-500 transform translate-y-2 group-hover:translate-y-0">
-                <button onClick={() => sharePhoto(currentPhoto)} className="w-10 h-10 md:w-12 md:h-12 rounded-full bg-black/40 backdrop-blur-md border border-white/20 flex items-center justify-center hover:bg-white hover:text-black transition-all text-white shadow-[0_0_20px_rgba(0,0,0,0.5)]" title="Share">
-                   <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8M16 6l-4-4-4 4M12 2v13"/></svg>
-                </button>
-              </div>
-            </div>
+      {/* MAIN LAYOUT (Blueprint Split) */}
+      <div className="w-full max-w-7xl mx-auto mt-24 px-4 flex flex-col lg:flex-row gap-8 z-10 relative items-start">
+        
+        {/* ЛЕВАЯ КОЛОНКА: Исходный вектор */}
+        <div className="w-full lg:w-1/2 flex flex-col gap-4 lg:sticky lg:top-24">
+          <div className="w-full p-2 math-border bg-[#08070a] relative group">
+            <img src={currentPhoto.src} alt={currentPhoto.title} className="w-full relative z-10 rounded-sm shadow-2xl object-contain max-h-[65vh]" />
           </div>
           
-          <div className="w-full lg:w-[400px] xl:w-[480px] shrink-0 p-6 md:p-10 flex flex-col justify-center relative bg-gradient-to-t lg:bg-gradient-to-l from-white/5 to-transparent border-t lg:border-t-0 lg:border-l border-white/5">
-            
-            <div className="relative z-20 text-center lg:text-left">
-              <p className="text-[#888] text-[9px] md:text-[10px] font-syncopate tracking-[0.3em] uppercase m-0 leading-relaxed font-bold mb-3">
-                {displayVibe === "ANALYZING..." ? "ANALYZING FREQUENCY..." : "CURRENT RESONANCE:"}
-              </p>
-              <h1 className="text-xl md:text-2xl xl:text-3xl font-syncopate tracking-[0.1em] font-bold text-white leading-tight uppercase text-shadow-[0_0_20px_rgba(255,255,255,0.2)] break-words">
-                {displayVibe}
-              </h1>
+          <div className="flex justify-between items-center px-2">
+            <div className="font-mono text-[8px] text-neutral-600 uppercase tracking-widest">
+              RES: {currentPhoto.title.substring(0,30)}...
             </div>
+            <div className="font-mono text-[8px] text-neutral-600 uppercase tracking-widest">
+              ID: {vectorId}
+            </div>
+          </div>
+        </div>
 
-            <div className="flex flex-col gap-6 mt-10 md:mt-16 relative z-10 w-full items-center lg:items-start">
-              
-              <div onClick={() => handleMutate(false)} className={`relative w-[180px] h-[180px] md:w-[200px] md:h-[200px] flex justify-center items-center cursor-pointer group mx-auto lg:mx-0 ${isMutating ? 'is-mutating' : ''}`}>
-                <div className="absolute inset-2 border-[1px] border-[#a855f7]/30 rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-1000 animate-[volvelle-spin_15s_linear_infinite]" style={{ borderStyle: 'dashed' }}></div>
-                <div className="absolute w-[120%] h-[120%] blur-[25px] opacity-70 mix-blend-screen transition-all duration-1000 group-hover:opacity-100 group-hover:scale-110" style={{ WebkitMaskImage: 'radial-gradient(ellipse 70% 45% at 50% 50%, black 20%, transparent 80%)', maskImage: 'radial-gradient(ellipse 70% 45% at 50% 50%, black 20%, transparent 80%)', filter: isMutating ? 'blur(35px)' : 'blur(25px)' }}>
-                  <div className="absolute w-[60%] h-[60%] -top-[10%] left-0 rounded-full bg-[#3a0088]" style={{ animation: 'ooze 12s infinite alternate ease-in-out', animationPlayState: isMutating ? 'running' : 'paused' }}></div>
-                  <div className="absolute w-[50%] h-[50%] -bottom-[10%] right-0 rounded-full bg-[#f97316]" style={{ animation: 'ooze 10s infinite alternate-reverse ease-in-out', animationPlayState: isMutating ? 'running' : 'paused' }}></div>
-                  <div className="absolute w-[40%] h-[40%] top-[30%] left-[30%] rounded-full bg-[#d946ef] opacity-80" style={{ animation: 'ooze 15s infinite alternate ease-in-out', animationPlayState: isMutating ? 'running' : 'paused' }}></div>
-                </div>
-                <div className="absolute -inset-[10%] opacity-40 pointer-events-none transition-opacity duration-500 group-hover:opacity-90 force-fluid-filter" style={{ background: 'repeating-linear-gradient(-45deg, transparent, transparent 2px, rgba(255, 255, 255, 0.2) 3px, rgba(255, 255, 255, 0.2) 4px)', WebkitMaskImage: 'radial-gradient(ellipse 70% 45% at 50% 50%, black 20%, transparent 80%)', maskImage: 'radial-gradient(ellipse 70% 45% at 50% 50%, black 20%, transparent 80%)', animation: isMutating ? 'flow-lines 5s linear infinite' : 'flow-lines 20s linear infinite' }}></div>
-                <div className="absolute w-[90px] h-[90px] md:w-[100px] md:h-[100px] rounded-full z-5 transition-all duration-[1.5s] ease-[cubic-bezier(0.19,1,0.22,1)] shadow-[inset_0_0_30px_rgba(0,0,0,1)]" style={{ background: 'radial-gradient(circle, rgba(2,1,4,0.95) 0%, rgba(2,1,4,0.6) 40%, rgba(0,0,0,0) 80%)', filter: isMutating ? 'blur(10px)' : 'blur(3px)', transform: isMutating ? 'scale(1.4)' : 'scale(1)', opacity: isMutating ? 0.8 : 1 }}></div>
-
-                <div className="relative z-10 text-white uppercase font-syncopate font-bold text-center" style={{ fontSize: '9px', letterSpacing: isMutating ? '0.2em' : '0.4em', textShadow: isMutating ? '0 0 20px white, 0 0 40px #a855f7' : '0 0 10px rgba(255, 255, 255, 0.5)', transition: 'all 0.8s cubic-bezier(0.16,1,0.3,1)', animation: isMutating ? 'text-pulse 1s infinite alternate' : 'none' }}>
-                  {isMutating ? 'MUTATING...' : 'MUTATE'}
-                </div>
-              </div>
-              
-              {isPinned(currentPhoto) ? (
-                <div className="text-[9px] md:text-[10px] text-[#a855f7] tracking-[0.3em] font-syncopate font-bold uppercase text-center w-full max-w-[200px] mx-auto lg:mx-0 mt-2 cursor-default drop-shadow-[0_0_10px_rgba(168,85,247,0.5)]">
-                  ✓ STORED IN ARCHIVE
-                </div>
-              ) : (
-                <button type="button" onClick={() => savePin(currentPhoto)} className="text-[9px] md:text-[10px] text-[#888] border border-[#888] px-6 py-3 rounded-full hover:text-white hover:border-white hover:bg-white/5 tracking-[0.3em] transition-all font-syncopate font-bold uppercase text-center w-full max-w-[200px] mx-auto lg:mx-0 mt-2 shadow-[0_0_15px_rgba(0,0,0,0.5)] hover:shadow-[0_0_20px_rgba(255,255,255,0.2)]">
-                  STORE ARTIFACT
-                </button>
+        {/* ПРАВАЯ КОЛОНКА: Контрольная панель */}
+        <div className="w-full lg:w-1/2 flex flex-col gap-8">
+          
+          {/* Метаданные */}
+          <div className="flex flex-col gap-4 border-b border-white/10 pb-6 mt-4 lg:mt-0">
+            <div className="font-mono text-[9px] text-neutral-500 uppercase tracking-[4px]">
+              Oracle 3.0 Output:
+            </div>
+            <h1 className="font-mono text-lg md:text-xl text-white uppercase tracking-[3px] leading-tight">
+              {displayVibe}
+            </h1>
+            
+            <div className="flex flex-wrap gap-3 mt-4">
+              <button className={`btn-strict ${isPinned(currentPhoto) ? 'bg-white text-black' : ''}`} onClick={() => toggleSavePin(currentPhoto)}>
+                {isPinned(currentPhoto) ? "[ UNLINK ]" : "[ STORE ARTIFACT ]"}
+              </button>
+              {link && (
+                <a href={link} target="_blank" rel="noreferrer" className="btn-strict border-neutral-800 text-neutral-500 hover:border-white hover:text-black flex items-center justify-center">
+                  [ SOURCE ]
+                </a>
               )}
             </div>
-            
           </div>
+
+          {/* КОНСОЛЬ МУТАТОРА */}
+          <div className="w-full grid-bg math-border p-6 md:p-8 flex flex-col gap-5 relative overflow-hidden bg-[#050408]">
+            <div className="flex justify-between items-center border-b border-white/5 pb-3">
+              <div className="font-mono text-[8px] text-[#10b981] uppercase tracking-[4px]">
+                MUTATOR_NODE_ACTIVE
+              </div>
+              <div className="font-mono text-[8px] text-neutral-600 uppercase tracking-widest">
+                DEPTH: {historyRef.current.length}
+              </div>
+            </div>
+            
+            <div className="font-mono text-[9px] text-neutral-400 leading-relaxed uppercase tracking-widest">
+              Initiate tensor iteration. Oracle will inject current resonance into global data-stream to derive deeper vectors.
+            </div>
+
+            <button 
+              onClick={() => handleMutate(false)}
+              disabled={isMutating}
+              className="mt-2 font-mono text-[10px] md:text-[11px] text-white tracking-[4px] uppercase border border-white/20 px-8 py-3 rounded-sm hover:bg-white hover:text-black transition-all disabled:opacity-50 disabled:border-neutral-700 w-full sm:w-auto self-start"
+            >
+              {isMutating ? "EXECUTING..." : "ƒ(X) = MUTATE TENSOR"}
+            </button>
+          </div>
+
+          {/* ВСТРОЕННЫЙ COMM-LINK (Логи) */}
+          <div className="w-full math-border flex flex-col bg-[#050408]">
+            <div className="border-b border-white/10 p-3 text-[9px] font-mono flex justify-between uppercase tracking-widest">
+              <span className="text-white">COMM_LINK // SECURE</span>
+              <span className="text-neutral-500">{comments.length} LOGS</span>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto p-5 flex flex-col gap-4 font-mono text-[10px] h-[250px]">
+               <div className="border-l-2 border-[#10b981] pl-3">
+                 <div className="text-[#10b981] mb-1 uppercase tracking-widest">System_Node</div>
+                 <div className="text-neutral-300">Data-stream connected. Ready for human input.</div>
+               </div>
+               
+               {comments.map((c) => (
+                 <div key={c.id} className="border-l-2 border-white/30 pl-3 mt-2">
+                   <div className="flex justify-between items-end mb-1">
+                     <span className="text-white uppercase tracking-widest">{c.sender_name}</span>
+                     <span className="text-neutral-700 text-[8px]">{new Date(c.created_at).toLocaleTimeString()}</span>
+                   </div>
+                   <div className="text-neutral-400 text-[10px] leading-relaxed break-words">{c.content}</div>
+                 </div>
+               ))}
+               <div ref={commentsEndRef} />
+            </div>
+            
+            <div className="border-t border-white/10 flex bg-[#030205]">
+               <div className="flex items-center text-neutral-500 px-3 font-mono text-[10px]">{'>'}</div>
+               <input 
+                 type="text" 
+                 value={commentInput}
+                 onChange={(e) => setCommentInput(e.target.value)}
+                 onKeyDown={(e) => e.key === 'Enter' && submitComment()}
+                 className="w-full bg-transparent border-none text-white font-mono text-[10px] py-3 outline-none focus:ring-0 placeholder-neutral-700" 
+                 placeholder="Transmit sequence..." 
+               />
+               <button 
+                 onClick={submitComment}
+                 className="bg-transparent border-l border-white/10 text-white font-mono text-[9px] uppercase tracking-[2px] px-6 hover:bg-white hover:text-black transition-colors" 
+               >
+                 Send
+               </button>
+            </div>
+          </div>
+
         </div>
       </div>
 
-      <div className="flex-grow w-full max-w-[1600px] mx-auto p-4 md:p-10 relative z-10 mt-8 md:mt-12">
+      {/* ВЫДАЧА (Сетка) */}
+      <div className="w-full max-w-[1600px] mx-auto p-4 md:p-10 relative z-10 mt-12 md:mt-20">
         <div className="flex items-center justify-center gap-4 md:gap-6 mb-10 md:mb-16 relative">
           <div className="h-[1px] flex-grow bg-gradient-to-r from-transparent to-white/10"></div>
-          <span className="text-[10px] md:text-xs font-syncopate font-bold tracking-[0.4em] text-[#666] uppercase">CURATED RESONANCE</span>
+          <span className="text-[10px] font-mono font-bold tracking-[4px] text-neutral-500 uppercase">
+             Derived Vectors {isMutating ? "[ CALC ]" : `[ n = ${relatedPhotos.length} ]`}
+          </span>
           <div className="h-[1px] flex-grow bg-gradient-to-l from-transparent to-white/10"></div>
         </div>
 
         <div className="v-masonry">
-          {relatedPhotos.map((photo, i) => (
-            <div key={`${photo.src}-${i}`} className="prism-hover mb-4 rounded-xl overflow-hidden">
-                <PinCard photo={photo} nsfwAllowed={nsfwAllowed} isPinned={isPinned(photo)} onClick={() => openPhoto(photo)} onSaveClick={(e: any) => { e.stopPropagation(); if (!isPinned(photo)) savePin(photo); }} onShareClick={(e: any) => { e.stopPropagation(); sharePhoto(photo); }} />
-            </div>
-          ))}
+          {relatedPhotos.map((photo, i) => {
+             const isLiked = false; 
+             return (
+              <div key={`${photo.id}-${i}`} className="pin-card" onClick={() => openPhoto(photo)}>
+                <img src={photo.thumb || photo.src} alt="Derivative" loading="lazy" />
+                <div className="pin-overlay">
+                  <div className="flex justify-end w-full">
+                    <button className={`btn-strict ${isPinned(photo) ? 'bg-white text-black' : ''} text-[8px] px-3 py-1.5`} onClick={(e) => { e.stopPropagation(); toggleSavePin(photo); }}>
+                      {isPinned(photo) ? 'UNLINK' : 'SAVE'}
+                    </button>
+                  </div>
+                  <div className="flex justify-between items-end w-full mt-auto">
+                    <div className="font-mono text-[8px] text-white/50 tracking-widest uppercase font-bold drop-shadow-md">
+                      ID: {photo.id.substring(0,6).toUpperCase()}
+                    </div>
+                    <div className="flex gap-2">
+                      <button className="icon-btn" title="Share" onClick={(e) => { e.stopPropagation(); sharePhoto(photo); }}>
+                        <svg fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z"/></svg>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
         </div>
 
-        {relatedPhotos.length === 0 && !relatedLoading && (
-          <div className="text-center p-16 text-[#555] font-syncopate tracking-[0.2em] uppercase text-sm font-bold">NO RESONANCE FOUND.</div>
+        {relatedPhotos.length === 0 && !relatedLoading && !isMutating && (
+          <div className="text-center p-16 text-[#555] font-mono tracking-[4px] uppercase text-[10px] font-bold">
+            NO RESONANCE FOUND.
+          </div>
         )}
-        <div ref={bottomRef}>{relatedLoading && <div className="v-spinner" />}</div>
+        
+        <div ref={bottomRef}>
+          {relatedLoading && (
+            <div className="text-center py-16">
+              <div className="w-6 h-6 border border-white/20 border-t-[#10b981] rounded-full animate-spin mx-auto"></div>
+            </div>
+          )}
+        </div>
       </div>
 
+      {toastMsg && <div className="toast-popup">{toastMsg}</div>}
+
       {showAgeGate && (
-        <AgeGateModal onConfirm={() => { setNsfwAllowed(true); try { localStorage.setItem("gelbet_nsfw_18plus", "true"); } catch (e) {} const p = showAgeGate; setShowAgeGate(null); if (p) openPhoto(p); }} onCancel={() => setShowAgeGate(null)} />
+        <AgeGateModal 
+          onConfirm={() => { 
+            setNsfwAllowed(true); 
+            try { localStorage.setItem("gelbet_nsfw_18plus", "true"); } catch (e) {} 
+            const p = showAgeGate; 
+            setShowAgeGate(null); 
+            if (p) openPhoto(p); 
+          }} 
+          onCancel={() => setShowAgeGate(null)} 
+        />
       )}
     </div>
   );

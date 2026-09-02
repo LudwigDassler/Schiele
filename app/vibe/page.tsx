@@ -32,12 +32,15 @@ function VibeContent() {
   const [relatedLoading, setRelatedLoading] = useState(true);
   
   const [isMutating, setIsMutating] = useState(false);
-  const [displayVibe, setDisplayVibe] = useState("ANALYZING...");
+  const [displayVibe, setDisplayVibe] = useState("ANALYZING TENSOR...");
 
+  // Комментарии теперь в модалке
+  const [showCommentsModal, setShowCommentsModal] = useState(false);
   const [comments, setComments] = useState<any[]>([]);
   const [commentInput, setCommentInput] = useState("");
   const [toastMsg, setToastMsg] = useState("");
 
+  const topRef = useRef<HTMLDivElement>(null);
   const commentsEndRef = useRef<HTMLDivElement>(null);
   const currentQueryRef = useRef("");
   const historyRef = useRef<string[]>([]);
@@ -50,18 +53,20 @@ function VibeContent() {
     setTimeout(() => setToastMsg(""), 3000);
   };
 
+  // 🔥 ЖЕСТКИЙ ФИКС СКРОЛЛА 🔥
+  // Используем таймаут, чтобы React успел отрендерить DOM, прежде чем мы дернем скролл
   useEffect(() => {
-    if (src) {
-      window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+    if (src && topRef.current) {
+      setTimeout(() => {
+        topRef.current?.scrollIntoView({ behavior: 'instant', block: 'start' });
+      }, 50);
     }
   }, [src]);
 
   useEffect(() => {
     try {
       const allowedNsfw = localStorage.getItem("gelbet_nsfw_18plus");
-      if (allowedNsfw === "true") {
-        setNsfwAllowed(true);
-      }
+      if (allowedNsfw === "true") setNsfwAllowed(true);
     } catch (e) {}
 
     supabase.auth.getSession().then(({ data }) => {
@@ -70,9 +75,7 @@ function VibeContent() {
         setIdentity(data.session.user.id);
         fetch(`/api/pins?user_id=${data.session.user.id}`)
           .then(r => r.ok ? r.json() : null)
-          .then(d => { 
-            if (d) setPins(d.pins || d.data || []); 
-          })
+          .then(d => { if (d) setPins(d.pins || d.data || []); })
           .catch(() => {});
       } else {
         setIdentity(getAnonId());
@@ -100,10 +103,10 @@ function VibeContent() {
   }, [src]);
 
   useEffect(() => {
-    if (commentsEndRef.current) {
+    if (showCommentsModal && commentsEndRef.current) {
       commentsEndRef.current.scrollIntoView({ behavior: "smooth" });
     }
-  }, [comments]);
+  }, [comments, showCommentsModal]);
 
   const submitComment = async () => {
     if (!commentInput.trim() || !user || !src) {
@@ -118,12 +121,7 @@ function VibeContent() {
       sender_name: user.user_metadata?.full_name || "USER_ANON" 
     };
     
-    const optimisticLog = { 
-      ...newLog, 
-      id: Date.now().toString(), 
-      created_at: new Date().toISOString() 
-    };
-    
+    const optimisticLog = { ...newLog, id: Date.now().toString(), created_at: new Date().toISOString() };
     setComments(prev => [...prev, optimisticLog]);
     setCommentInput("");
 
@@ -141,9 +139,7 @@ function VibeContent() {
 
   const fetchImages = useCallback(async (query: string, pageNum: number, reset: boolean) => {
     if (!query || !src) return;
-    
     setRelatedLoading(true);
-    
     if (reset) { 
       relatedAbortRef.current?.abort(); 
       relatedAbortRef.current = new AbortController(); 
@@ -161,29 +157,20 @@ function VibeContent() {
         .map((p: any) => {
           const mappedSrc = p.src || p.image || p.image_url || p.url;
           return {
-            ...p, 
-            id: p.id || mappedSrc, 
-            src: mappedSrc, 
-            thumb: p.thumb || p.thumbnail || p.image || mappedSrc,
-            link: p.link || p.url || p.source_url || mappedSrc, 
-            isNsfw: isNsfwQuery || checkNsfw(p.title || ""), 
-            rank: Math.random() > 0.8 ? 'S' : 'A'
+            ...p, id: p.id || mappedSrc, src: mappedSrc, thumb: p.thumb || p.thumbnail || p.image || mappedSrc,
+            link: p.link || p.url || p.source_url || mappedSrc, isNsfw: isNsfwQuery || checkNsfw(p.title || ""), rank: Math.random() > 0.8 ? 'S' : 'A'
           };
         })
         .filter((p: any) => p.src && p.src.startsWith("http") && p.src !== src);
 
       setRelatedPhotos(prev => {
         const combined = reset ? fetched : [...prev, ...fetched];
-        const map = new Map(); 
-        combined.forEach((p: any) => map.set(p.src, p));
+        const map = new Map(); combined.forEach((p: any) => map.set(p.src, p));
         return Array.from(map.values());
       });
-      
       setRelatedHasMore(fetched.length > 0);
     } catch (e: any) {
-      if (e.name !== "AbortError") {
-        console.error("[FETCH IMAGES ERROR]", e);
-      }
+      if (e.name !== "AbortError") console.error("[FETCH IMAGES ERROR]", e);
     } finally {
       setRelatedLoading(false);
     }
@@ -191,41 +178,28 @@ function VibeContent() {
 
   const handleMutate = useCallback(async (isInitial = false) => {
     if (isMutating || !src) return;
-    
     setIsMutating(true);
-    
-    if (isInitial) { 
-      setDisplayVibe("ANALYZING TENSOR..."); 
-      setRelatedLoading(true); 
-    }
+    if (isInitial) { setDisplayVibe("ANALYZING..."); setRelatedLoading(true); }
 
     try {
       const res = await fetch("/api/mutate", {
-        method: "POST", 
-        headers: { "Content-Type": "application/json" },
+        method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ image_url: src, history: historyRef.current })
       });
-      
       const data = await res.json();
 
       if (data.smartQuery && data.displayVibe) {
         setDisplayVibe(data.displayVibe);
         currentQueryRef.current = data.smartQuery;
         historyRef.current.push(data.displayVibe);
-        
-        setRelatedPhotos([]); 
-        setRelatedPage(1); 
-        setRelatedHasMore(true);
-        
+        setRelatedPhotos([]); setRelatedPage(1); setRelatedHasMore(true);
         await fetchImages(data.smartQuery, 1, true);
       } else {
         throw new Error(data.error || "Invalid mutation response");
       }
     } catch (e) {
       console.error("[MUTATION FAILED]", e);
-      if (isInitial) {
-        setDisplayVibe("RESONANCE LOST");
-      }
+      if (isInitial) setDisplayVibe("RESONANCE LOST");
       showToast("Oracle iteration failed");
     } finally {
       setIsMutating(false);
@@ -234,73 +208,40 @@ function VibeContent() {
 
   useEffect(() => {
     if (!src || lastAnalyzedSrcRef.current === src) return;
-    
     lastAnalyzedSrcRef.current = src;
-    currentQueryRef.current = ""; 
-    historyRef.current = [];
-    
-    setRelatedPhotos([]); 
-    setRelatedPage(1); 
-    setRelatedHasMore(true);
-    
+    currentQueryRef.current = ""; historyRef.current = [];
+    setRelatedPhotos([]); setRelatedPage(1); setRelatedHasMore(true);
     handleMutate(true);
   }, [src, handleMutate]);
 
   useEffect(() => {
     if (!bottomRef.current) return;
-    
     const observer = new IntersectionObserver(entries => {
       if (entries[0].isIntersecting && relatedHasMore && !relatedLoading && currentQueryRef.current) {
-        setRelatedPage(prev => { 
-          const next = prev + 1; 
-          fetchImages(currentQueryRef.current, next, false); 
-          return next; 
-        });
+        setRelatedPage(prev => { const next = prev + 1; fetchImages(currentQueryRef.current, next, false); return next; });
       }
     }, { threshold: 0.1 });
-    
     observer.observe(bottomRef.current);
-    
     return () => observer.disconnect();
   }, [relatedHasMore, relatedLoading, fetchImages]);
 
-  function isPinned(photo: Photo) { 
-    return pins.some(p => p.image_url === photo.src); 
-  }
+  function isPinned(photo: Photo) { return pins.some(p => p.image_url === photo.src); }
 
   async function toggleSavePin(photo: Photo) {
-    if (!user) { 
-      router.push("/auth"); 
-      return; 
-    }
-    
+    if (!user) { router.push("/auth"); return; }
     const existingPin = pins.find(p => p.image_url === photo.src);
-    
     if (existingPin) {
       setPins(prev => prev.filter(p => p.id !== existingPin.id)); 
-      try { 
-        await fetch(`/api/pins?id=${existingPin.id}`, { method: "DELETE" }); 
-        showToast("Artifact removed"); 
-      } catch (e) {}
+      try { await fetch(`/api/pins?id=${existingPin.id}`, { method: "DELETE" }); showToast("Artifact unlinked"); } catch (e) {}
     } else {
       try {
         const res = await fetch("/api/pins", {
-          method: "POST", 
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ 
-            user_id: user.id, 
-            image_url: photo.src, 
-            title: photo.title, 
-            board_id: null, 
-            source_url: photo.link 
-          })
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ user_id: user.id, image_url: photo.src, title: photo.title, board_id: null, source_url: photo.link })
         });
-        
         if (res.ok) {
           const data = await res.json();
-          if (data.pin || data.data) {
-            setPins(prev => [data.pin || data.data, ...prev]);
-          }
+          if (data.pin || data.data) setPins(prev => [data.pin || data.data, ...prev]);
           showToast("Artifact secured");
         }
       } catch (e) {}
@@ -309,44 +250,26 @@ function VibeContent() {
 
   function sharePhoto(photo: Photo) {
     const url = photo.link || window.location.href;
-    if (navigator.share) {
-      navigator.share({ title: displayVibe, url });
-    } else { 
-      navigator.clipboard.writeText(url); 
-      showToast("Coordinates copied"); 
-    }
+    if (navigator.share) { navigator.share({ title: displayVibe, url }); } 
+    else { navigator.clipboard.writeText(url); showToast("Coordinates copied"); }
   }
 
   function openPhoto(photo: Photo) {
     feedLocalAI(photo.src, photo.id);
     const isBlurred = photo.isNsfw && !nsfwAllowed;
-    
-    if (isBlurred) { 
-      setShowAgeGate(photo); 
-      return; 
-    }
-    
+    if (isBlurred) { setShowAgeGate(photo); return; }
     router.push(`/vibe?src=${encodeURIComponent(photo.src)}&title=${encodeURIComponent(photo.title || "")}&link=${encodeURIComponent(photo.link || "")}`);
   }
 
-  const currentPhoto: Photo = { 
-    id: src || "", 
-    src: src || "", 
-    thumb: src || "", 
-    title: fallbackTitle, 
-    link: link || "" 
-  };
+  const currentPhoto: Photo = { id: src || "", src: src || "", thumb: src || "", title: fallbackTitle, link: link || "" };
 
-  if (!src) {
-    return (
-      <div className="min-h-screen bg-[#020104] flex items-center justify-center text-white font-mono text-sm tracking-widest">
-        ARTIFACT NOT FOUND
-      </div>
-    );
-  }
+  if (!src) return <div className="min-h-screen bg-[#020104] flex items-center justify-center text-white font-mono text-sm tracking-widest">ARTIFACT NOT FOUND</div>;
 
   return (
     <div className="min-h-screen bg-[#020104] text-white overflow-x-hidden overflow-y-auto flex flex-col relative font-sans">
+      {/* Скрытый якорь для точного скролла */}
+      <div ref={topRef} className="absolute top-0 left-0 w-full h-1" />
+
       <style dangerouslySetInnerHTML={{ __html: `
         @import url('https://fonts.googleapis.com/css2?family=Syncopate:wght@400;700&family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Inter:wght@300;400;500&display=swap');
         .font-mono { font-family: 'Space Mono', monospace; }
@@ -359,10 +282,8 @@ function VibeContent() {
         ::-webkit-scrollbar-thumb:hover { background: #888; }
 
         .glass-panel { 
-            background: rgba(255, 255, 255, 0.02); 
-            backdrop-filter: blur(20px); 
-            border: 1px solid rgba(255, 255, 255, 0.05); 
-            border-radius: 16px; 
+            background: rgba(255, 255, 255, 0.02); backdrop-filter: blur(20px); 
+            border: 1px solid rgba(255, 255, 255, 0.05); border-radius: 12px; 
             box-shadow: 0 10px 30px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.03);
         }
 
@@ -372,11 +293,7 @@ function VibeContent() {
             text-transform: uppercase; letter-spacing: 2px; padding: 8px 16px; 
             cursor: pointer; transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1); border-radius: 99px; 
         }
-        .btn-elegant:hover:not(:disabled) { 
-            background: #fff; 
-            color: #000; 
-            box-shadow: 0 0 15px rgba(255,255,255,0.2); 
-        }
+        .btn-elegant:hover:not(:disabled) { background: #fff; color: #000; box-shadow: 0 0 15px rgba(255,255,255,0.2); }
         .btn-elegant:disabled { opacity: 0.5; cursor: not-allowed; }
 
         .btn-mutate {
@@ -384,55 +301,27 @@ function VibeContent() {
             color: white; padding: 10px 24px; border-radius: 99px;
             font-family: 'Syncopate', sans-serif; font-size: 10px; font-weight: 700;
             letter-spacing: 3px; text-transform: uppercase; transition: all 0.4s ease;
-            box-shadow: 0 5px 20px rgba(0,0,0,0.3);
         }
-        .btn-mutate:hover:not(:disabled) { 
-            background: white; color: black; 
-            box-shadow: 0 0 15px rgba(255,255,255,0.4); 
-            transform: scale(1.02); 
-        }
+        .btn-mutate:hover:not(:disabled) { background: white; color: black; box-shadow: 0 0 15px rgba(255,255,255,0.4); transform: scale(1.02); }
         .btn-mutate:disabled { opacity: 0.5; cursor: not-allowed; }
 
-        .toast-popup { 
-            position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); 
-            background: rgba(255,255,255,0.95); padding: 12px 24px; border-radius: 99px; 
-            font-family: 'Inter', sans-serif; font-weight: 500; font-size: 10px; 
-            text-transform: uppercase; letter-spacing: 2px; color: #000; z-index: 9999; 
-            animation: floatUp 0.4s cubic-bezier(0.16, 1, 0.3, 1); 
-            box-shadow: 0 10px 40px rgba(0,0,0,0.5); 
-        }
-        @keyframes floatUp { 
-            from { opacity: 0; transform: translate(-50%, 20px) scale(0.9); } 
-            to { opacity: 1; transform: translate(-50%, 0) scale(1); } 
-        }
+        .toast-popup { position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); background: rgba(255,255,255,0.95); padding: 12px 24px; border-radius: 99px; font-family: 'Inter', sans-serif; font-weight: 500; font-size: 10px; text-transform: uppercase; letter-spacing: 2px; color: #000; z-index: 9999; animation: floatUp 0.4s cubic-bezier(0.16, 1, 0.3, 1); box-shadow: 0 10px 40px rgba(0,0,0,0.5); }
+        @keyframes floatUp { from { opacity: 0; transform: translate(-50%, 20px) scale(0.9); } to { opacity: 1; transform: translate(-50%, 0) scale(1); } }
 
         .v-masonry { column-count: 2; column-gap: 16px; }
         @media (min-width: 768px) { .v-masonry { column-count: 3; column-gap: 20px; } }
         @media (min-width: 1024px) { .v-masonry { column-count: 4; } }
         @media (min-width: 1440px) { .v-masonry { column-count: 5; } }
         
-        .pin-card { 
-            break-inside: avoid; margin-bottom: 16px; border-radius: 12px; overflow: hidden; 
-            position: relative; background: #08070a; cursor: pointer; 
-            transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1); transform: translateZ(0); 
-        }
+        .pin-card { break-inside: avoid; margin-bottom: 16px; border-radius: 12px; overflow: hidden; position: relative; background: #08070a; cursor: pointer; transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1); transform: translateZ(0); }
         .pin-card img { width: 100%; display: block; filter: brightness(0.8); transition: filter 0.4s ease; }
         .pin-card:hover { transform: translateY(-4px); box-shadow: 0 15px 30px rgba(0,0,0,0.6); z-index: 10; }
         .pin-card:hover img { filter: brightness(1.05); }
 
-        .pin-overlay { 
-            position: absolute; inset: 0; 
-            background: linear-gradient(to bottom, rgba(0,0,0,0) 50%, rgba(0,0,0,0.9) 100%); 
-            opacity: 0; transition: opacity 0.4s ease; display: flex; flex-direction: column; 
-            justify-content: space-between; padding: 16px; pointer-events: none; 
-        }
+        .pin-overlay { position: absolute; inset: 0; background: linear-gradient(to bottom, rgba(0,0,0,0) 50%, rgba(0,0,0,0.9) 100%); opacity: 0; transition: opacity 0.4s ease; display: flex; flex-direction: column; justify-content: space-between; padding: 16px; pointer-events: none; }
         .pin-card:hover .pin-overlay { opacity: 1; pointer-events: auto; }
         
-        .icon-btn { 
-            width: 32px; height: 32px; border-radius: 50%; background: rgba(0,0,0,0.4); 
-            backdrop-filter: blur(8px); border: 1px solid rgba(255,255,255,0.2); display: flex; 
-            align-items: center; justify-content: center; color: #fff; cursor: pointer; transition: all 0.3s; 
-        }
+        .icon-btn { width: 32px; height: 32px; border-radius: 50%; background: rgba(0,0,0,0.4); backdrop-filter: blur(8px); border: 1px solid rgba(255,255,255,0.2); display: flex; align-items: center; justify-content: center; color: #fff; cursor: pointer; transition: all 0.3s; }
         .icon-btn:hover { background: #fff; color: #000; transform: scale(1.1); }
         .icon-btn svg { width: 14px; height: 14px; transition: fill 0.3s; }
       `}} />
@@ -447,7 +336,7 @@ function VibeContent() {
       <header className="w-full px-6 py-5 flex justify-between items-center fixed top-0 z-50 bg-[#020104]/60 backdrop-blur-xl border-b border-white/5">
         <button onClick={() => router.back()} className="font-inter font-medium text-[10px] text-neutral-400 hover:text-white uppercase tracking-[2px] flex items-center gap-2 transition-colors">
           <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
-          <span>Return</span>
+          <span className="hidden md:inline">Return</span>
         </button>
         <div className="font-sync text-xs md:text-sm tracking-[0.3em] font-bold text-white uppercase opacity-90">
           Tensor <span className="text-neutral-500 font-normal">Manifold</span>
@@ -460,13 +349,13 @@ function VibeContent() {
       {/* MAIN VIEW: Огромная картинка по центру */}
       <div className="w-full max-w-6xl mx-auto mt-24 px-4 flex flex-col items-center z-10 relative">
         
-        {/* ИЗОБРАЖЕНИЕ */}
-        <div className="w-full flex justify-center items-center mb-6 relative group min-h-[50vh] md:min-h-[75vh] bg-black/20 rounded-xl border border-white/5 overflow-hidden">
+        {/* ИЗОБРАЖЕНИЕ (Жесткий контейнер) */}
+        <div className="w-full flex justify-center items-center mb-6 relative group min-h-[50vh] md:min-h-[70vh]">
           <div className="absolute inset-0 bg-white/5 blur-3xl rounded-full opacity-0 group-hover:opacity-50 transition-opacity duration-700 pointer-events-none"></div>
           <img 
             src={currentPhoto.src} 
             alt={currentPhoto.title} 
-            className="max-h-[80vh] w-auto max-w-full object-contain shadow-[0_30px_60px_rgba(0,0,0,0.8)] relative z-10 p-2"
+            className="max-h-[75vh] w-auto max-w-full object-contain rounded-xl shadow-[0_30px_60px_rgba(0,0,0,0.8)] relative z-10"
             onError={(e) => {
               if (!e.currentTarget.src.includes('placehold.co')) {
                 e.currentTarget.src = 'https://placehold.co/800x600/111/444?text=ARTIFACT+LOST';
@@ -475,92 +364,46 @@ function VibeContent() {
           />
         </div>
 
-        {/* КОНТРОЛЬНАЯ ПАНЕЛЬ (Уменьшена и отцентрована) */}
-        <div className="w-full max-w-4xl mx-auto glass-panel p-4 md:px-6 md:py-4 flex flex-col md:flex-row justify-between items-center gap-4 mb-4">
+        {/* КОНТРОЛЬНАЯ ПАНЕЛЬ (Миниатюрная) */}
+        <div className="w-full max-w-3xl mx-auto glass-panel p-4 md:px-8 md:py-4 flex flex-col md:flex-row justify-between items-center gap-4 mb-4">
           
           <div className="flex flex-col items-center md:items-start text-center md:text-left flex-1">
-            <span className="font-inter text-[8px] text-neutral-400 tracking-[3px] uppercase mb-1">Oracle Resonance</span>
-            <span className="font-sync text-lg md:text-xl text-white tracking-[2px] uppercase drop-shadow-md">
+            <span className="font-sync text-sm md:text-lg text-white tracking-[2px] uppercase drop-shadow-md line-clamp-1">
               {displayVibe}
             </span>
           </div>
 
-          <div className="flex-shrink-0">
+          <div className="flex-shrink-0 my-2 md:my-0">
             <button 
               onClick={() => handleMutate(false)}
               disabled={isMutating}
               className="btn-mutate"
             >
-              {isMutating ? "Calculating..." : "Mutate"}
+              {isMutating ? "Calc..." : "Mutate"}
             </button>
           </div>
 
           <div className="flex gap-2 justify-center md:justify-end flex-1">
+            <button onClick={() => setShowCommentsModal(true)} className="btn-elegant border-neutral-700 text-neutral-300">
+              Logs ({comments.length})
+            </button>
             <button className={`btn-elegant ${isPinned(currentPhoto) ? 'bg-white text-black' : ''}`} onClick={() => toggleSavePin(currentPhoto)}>
               {isPinned(currentPhoto) ? "Unlink" : "Store"}
             </button>
             {link && (
-              <a href={link} target="_blank" rel="noreferrer" className="btn-elegant border-neutral-700 text-neutral-400 hover:border-white hover:text-black flex items-center justify-center">
+              <a href={link} target="_blank" rel="noreferrer" className="btn-elegant border-neutral-700 text-neutral-500 hover:border-white hover:text-black flex items-center justify-center">
                 Source
               </a>
             )}
           </div>
-
-        </div>
-
-        {/* АННОТАЦИИ / КОММЕНТАРИИ (Компактные) */}
-        <div className="w-full max-w-4xl mx-auto glass-panel flex flex-col overflow-hidden mb-12">
-          <div className="border-b border-white/5 px-5 py-3 font-inter font-semibold text-[9px] text-neutral-400 flex justify-between uppercase tracking-[3px]">
-            <span>Resonance Annotations</span>
-            <span>{comments.length} Entries</span>
-          </div>
-          
-          <div className="flex-1 overflow-y-auto px-5 py-4 flex flex-col gap-4 max-h-[30vh] scroll-smooth">
-             <div className="flex flex-col gap-1">
-               <div className="text-purple-400 font-inter text-[8px] uppercase tracking-widest font-semibold">Oracle System</div>
-               <div className="text-neutral-300 font-inter text-[10px] font-light bg-white/5 p-3 rounded-tr-xl rounded-br-xl rounded-bl-xl border border-white/5 inline-block self-start max-w-[85%] shadow-sm">
-                 Data-stream connected. Target vector isolated. Ready for human annotations.
-               </div>
-             </div>
-             
-             {comments.map((c) => (
-               <div key={c.id} className="flex flex-col gap-1">
-                 <div className="flex items-end gap-3">
-                   <span className="text-neutral-500 font-inter text-[8px] uppercase tracking-widest font-medium">{c.sender_name}</span>
-                   <span className="text-neutral-700 font-mono text-[8px]">{new Date(c.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
-                 </div>
-                 <div className="text-neutral-200 font-inter text-[10px] font-light leading-relaxed bg-white/5 p-3 rounded-tr-xl rounded-br-xl rounded-bl-xl border border-white/5 inline-block self-start max-w-[85%] shadow-sm">
-                   {c.content}
-                 </div>
-               </div>
-             ))}
-             <div ref={commentsEndRef} />
-          </div>
-          
-          <div className="border-t border-white/5 flex bg-black/20 p-1.5">
-             <input 
-               type="text" 
-               value={commentInput}
-               onChange={(e) => setCommentInput(e.target.value)}
-               onKeyDown={(e) => e.key === 'Enter' && submitComment()}
-               className="w-full bg-transparent border-none text-white font-inter font-light text-[10px] px-3 py-1.5 outline-none focus:ring-0 placeholder-neutral-600" 
-               placeholder="Add an annotation..." 
-             />
-             <button 
-               onClick={submitComment}
-               className="bg-white text-black font-inter font-semibold text-[8px] uppercase tracking-[2px] px-5 py-1.5 rounded-full hover:bg-neutral-200 transition-colors" 
-             >
-               Send
-             </button>
-          </div>
         </div>
       </div>
 
-      {/* ВЫДАЧА (Производные векторы) - ВЫЖЖЕНЫ ВСЕ ID */}
+      {/* ВЫДАЧА (Производные векторы) */}
       <div className="w-full max-w-[1600px] mx-auto p-4 md:p-10 relative z-10 mt-4">
-        <div className="flex items-center justify-center gap-6 mb-12 relative">
+        <div className="flex items-center justify-center gap-6 mb-10 relative">
           <div className="h-[1px] flex-grow bg-gradient-to-r from-transparent to-white/10"></div>
-          <span className="text-[10px] md:text-[11px] font-sync font-bold tracking-[0.3em] text-neutral-400 uppercase">
+          <span className="text-[10px] md:text-[11px] font-sync font-bold tracking-[0.3em] text-neutral-500 uppercase">
              Derived Resonance
           </span>
           <div className="h-[1px] flex-grow bg-gradient-to-l from-transparent to-white/10"></div>
@@ -621,6 +464,58 @@ function VibeContent() {
           }} 
           onCancel={() => setShowAgeGate(null)} 
         />
+      )}
+
+      {/* ========================================== */}
+      {/* МОДАЛКА КОММЕНТАРИЕВ (Изящная) */}
+      {/* ========================================== */}
+      {showCommentsModal && (
+        <div className="fixed inset-0 z-[600] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 md:p-6" onClick={() => setShowCommentsModal(false)}>
+          <div onClick={e => e.stopPropagation()} className="glass-panel w-full max-w-xl flex flex-col overflow-hidden shadow-2xl">
+            
+            <div className="border-b border-white/5 px-6 py-4 flex justify-between items-center bg-white/5">
+              <div className="font-inter font-semibold text-[10px] text-neutral-400 uppercase tracking-[3px]">
+                Resonance Annotations
+              </div>
+              <button onClick={() => setShowCommentsModal(false)} className="text-neutral-500 hover:text-white font-mono text-xs transition-colors">✕</button>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto px-6 py-5 flex flex-col gap-4 max-h-[50vh] scroll-smooth">
+               {comments.length === 0 && (
+                 <div className="text-center text-neutral-600 font-inter text-[10px] py-10 uppercase tracking-widest">No annotations yet.</div>
+               )}
+               {comments.map((c, idx) => (
+                 <div key={idx} className="flex flex-col gap-1 mt-1">
+                   <div className="flex items-end gap-3">
+                     <span className="text-neutral-400 font-inter text-[9px] uppercase tracking-widest font-medium">{c.sender_name}</span>
+                   </div>
+                   <div className="text-neutral-200 font-inter text-[11px] font-light leading-relaxed bg-white/5 px-4 py-3 rounded-tr-xl rounded-br-xl rounded-bl-xl border border-white/5 inline-block self-start max-w-[85%] shadow-sm">
+                     {c.content}
+                   </div>
+                 </div>
+               ))}
+               <div ref={commentsEndRef} />
+            </div>
+            
+            <div className="border-t border-white/5 flex bg-black/40 p-3">
+               <input 
+                 type="text" 
+                 value={commentInput}
+                 onChange={(e) => setCommentInput(e.target.value)}
+                 onKeyDown={(e) => e.key === 'Enter' && submitComment()}
+                 className="w-full bg-transparent border-none text-white font-inter font-light text-[11px] px-4 py-2 outline-none focus:ring-0 placeholder-neutral-600" 
+                 placeholder="Add an annotation..." 
+                 autoFocus
+               />
+               <button 
+                 onClick={submitComment}
+                 className="bg-white text-black font-inter font-semibold text-[9px] uppercase tracking-[2px] px-6 rounded-full hover:bg-neutral-200 transition-colors" 
+               >
+                 Send
+               </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

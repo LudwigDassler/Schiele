@@ -50,7 +50,7 @@ function VibeContent() {
     setTimeout(() => setToastMsg(""), 3000);
   };
 
-  // 🔥 ФИКС СКРОЛЛА ПРИ СМЕНЕ КАРТИНКИ 🔥
+  // 🔥 ЖЕСТКИЙ ФИКС СКРОЛЛА ПРИ СМЕНЕ КАРТИНКИ 🔥
   useEffect(() => {
     if (src) {
       window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
@@ -461,16 +461,17 @@ function VibeContent() {
       {/* MAIN VIEW: Огромная картинка по центру */}
       <div className="w-full max-w-6xl mx-auto mt-28 px-4 flex flex-col items-center z-10 relative">
         
-        {/* ИЗОБРАЖЕНИЕ (Без ленивой загрузки для мгновенного появления) */}
-        <div className="w-full flex justify-center mb-8 relative group">
-          <div className="absolute inset-0 bg-white/5 blur-3xl rounded-full opacity-0 group-hover:opacity-50 transition-opacity duration-700"></div>
+        {/* ИЗОБРАЖЕНИЕ (С жестким контейнером от схлопывания) */}
+        <div className="w-full flex justify-center items-center mb-8 relative group min-h-[50vh] md:min-h-[70vh] bg-black/20 rounded-xl border border-white/5">
+          <div className="absolute inset-0 bg-white/5 blur-3xl rounded-full opacity-0 group-hover:opacity-50 transition-opacity duration-700 pointer-events-none"></div>
           <img 
             src={currentPhoto.src} 
             alt={currentPhoto.title} 
             className="max-h-[75vh] w-auto max-w-full object-contain rounded-xl shadow-[0_30px_60px_rgba(0,0,0,0.8)] relative z-10"
             onError={(e) => {
-              // Если DDG не отдает картинку, показываем фоллбэк, чтобы не ломать верстку
-              e.currentTarget.src = 'https://placehold.co/800x600/111/444?text=ARTIFACT+LOST';
+              if (!e.currentTarget.src.includes('placehold.co')) {
+                e.currentTarget.src = 'https://placehold.co/800x600/111/444?text=ARTIFACT+LOST';
+              }
             }}
           />
         </div>

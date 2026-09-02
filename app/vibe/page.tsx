@@ -36,7 +36,7 @@ function VibeContent() {
   const [isMutating, setIsMutating] = useState(false);
   const [displayVibe, setDisplayVibe] = useState("ANALYZING TENSOR...");
 
-  // Стейты Comm-Link (Комментарии)
+  // Стейты Комментариев (Resonance Logs)
   const [comments, setComments] = useState<any[]>([]);
   const [commentInput, setCommentInput] = useState("");
   const [toastMsg, setToastMsg] = useState("");
@@ -116,7 +116,6 @@ function VibeContent() {
       sender_name: user.user_metadata?.full_name || "USER_ANON"
     };
 
-    // Оптимистичный UI
     const optimisticLog = { ...newLog, id: Date.now().toString(), created_at: new Date().toISOString() };
     setComments(prev => [...prev, optimisticLog]);
     setCommentInput("");
@@ -229,7 +228,6 @@ function VibeContent() {
     }
   }, [src, isMutating, fetchImages]);
 
-  // Автозапуск при смене картинки
   useEffect(() => {
     if (!src || lastAnalyzedSrcRef.current === src) return;
     lastAnalyzedSrcRef.current = src;
@@ -242,7 +240,6 @@ function VibeContent() {
     handleMutate(true);
   }, [src, handleMutate]);
 
-  // INFINITE SCROLL OBSERVER
   useEffect(() => {
     if (!bottomRef.current) return;
     const observer = new IntersectionObserver(entries => {
@@ -309,167 +306,213 @@ function VibeContent() {
   const currentPhoto: Photo = { id: src || "", src: src || "", thumb: src || "", title: fallbackTitle, link: link || "" };
   const vectorId = btoa((src || "V").substring(0, 15)).substring(0, 6).toUpperCase();
 
-  if (!src) return <div style={{ color: "#fff", padding: 40, textAlign: "center", background: "#020104", minHeight: "100vh", fontFamily: 'Space Mono' }}>ARTIFACT NOT FOUND.</div>;
+  if (!src) return <div className="min-h-screen bg-[#020104] flex items-center justify-center text-white font-mono text-sm tracking-widest">ARTIFACT NOT FOUND</div>;
 
   return (
-    <div className="min-h-screen bg-[#020104] text-white font-sans overflow-x-hidden overflow-y-auto flex flex-col relative">
+    <div className="min-h-screen bg-[#020104] text-white overflow-x-hidden overflow-y-auto flex flex-col relative font-sans">
       <style dangerouslySetInnerHTML={{ __html: `
-        @import url('https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Inter:wght@300;400;500&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Syncopate:wght@400;700&family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Inter:wght@300;400;500&display=swap');
         .font-mono { font-family: 'Space Mono', monospace; }
+        .font-sync { font-family: 'Syncopate', sans-serif; }
+        .font-inter { font-family: 'Inter', sans-serif; }
         
         ::-webkit-scrollbar { width: 4px; } 
         ::-webkit-scrollbar-track { background: #020104; } 
-        ::-webkit-scrollbar-thumb { background: #333; border-radius: 4px; } 
-        ::-webkit-scrollbar-thumb:hover { background: #666; }
+        ::-webkit-scrollbar-thumb { background: #444; border-radius: 4px; } 
+        ::-webkit-scrollbar-thumb:hover { background: #888; }
 
-        .math-border { border: 1px solid rgba(255,255,255,0.08); border-radius: 2px; }
-        .grid-bg { background-image: linear-gradient(to right, rgba(255,255,255,0.02) 1px, transparent 1px), linear-gradient(to bottom, rgba(255,255,255,0.02) 1px, transparent 1px); background-size: 30px 30px; }
-        
-        .btn-strict { background: transparent; border: 1px solid rgba(255,255,255,0.2); color: #fff; font-family: 'Space Mono', monospace; font-size: 9px; text-transform: uppercase; letter-spacing: 2px; padding: 8px 16px; cursor: pointer; transition: all 0.2s; border-radius: 2px; }
-        .btn-strict:hover:not(:disabled) { background: #fff; color: #000; }
-        .btn-strict:disabled { opacity: 0.5; cursor: not-allowed; }
+        /* Элегантные стеклянные панели (3Blue1Brown/Tame Impala vibe) */
+        .glass-panel { 
+            background: rgba(255, 255, 255, 0.02); 
+            backdrop-filter: blur(20px); 
+            border: 1px solid rgba(255, 255, 255, 0.05); 
+            border-radius: 20px; 
+            box-shadow: 0 20px 40px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.05);
+        }
 
-        .toast-popup { position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); background: rgba(255,255,255,0.95); padding: 10px 20px; border-radius: 2px; font-family: 'Space Mono', monospace; font-size: 9px; text-transform: uppercase; letter-spacing: 2px; color: #000; z-index: 9999; animation: floatUp 0.3s ease-out; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
-        @keyframes floatUp { from { opacity: 0; transform: translate(-50%, 20px); } to { opacity: 1; transform: translate(-50%, 0); } }
+        /* Элегантные кнопки */
+        .btn-elegant { 
+            background: transparent; 
+            border: 1px solid rgba(255,255,255,0.2); 
+            color: #fff; 
+            font-family: 'Inter', sans-serif; 
+            font-size: 10px; 
+            font-weight: 500;
+            text-transform: uppercase; 
+            letter-spacing: 2px; 
+            padding: 10px 20px; 
+            cursor: pointer; 
+            transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1); 
+            border-radius: 99px; /* Овальные кнопки */
+        }
+        .btn-elegant:hover:not(:disabled) { 
+            background: #fff; 
+            color: #000; 
+            box-shadow: 0 0 20px rgba(255,255,255,0.2);
+        }
+        .btn-elegant:disabled { opacity: 0.5; cursor: not-allowed; }
 
-        /* Стерильная сетка (как на главной) */
-        .v-masonry { column-count: 2; column-gap: 12px; }
-        @media (min-width: 768px) { .v-masonry { column-count: 3; column-gap: 16px; } }
+        /* Спектральный акцент Pink Floyd */
+        .spectral-glow {
+            position: absolute;
+            width: 150px;
+            height: 150px;
+            background: radial-gradient(circle, rgba(168,85,247,0.4) 0%, rgba(59,130,246,0.2) 50%, transparent 70%);
+            filter: blur(40px);
+            z-index: 0;
+            pointer-events: none;
+        }
+
+        .toast-popup { position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); background: rgba(255,255,255,0.95); padding: 12px 24px; border-radius: 99px; font-family: 'Inter', sans-serif; font-weight: 500; font-size: 10px; text-transform: uppercase; letter-spacing: 2px; color: #000; z-index: 9999; animation: floatUp 0.4s cubic-bezier(0.16, 1, 0.3, 1); box-shadow: 0 10px 40px rgba(0,0,0,0.5); }
+        @keyframes floatUp { from { opacity: 0; transform: translate(-50%, 20px) scale(0.9); } to { opacity: 1; transform: translate(-50%, 0) scale(1); } }
+
+        /* Сетка выдачи */
+        .v-masonry { column-count: 2; column-gap: 16px; }
+        @media (min-width: 768px) { .v-masonry { column-count: 3; column-gap: 20px; } }
         @media (min-width: 1024px) { .v-masonry { column-count: 4; } }
         @media (min-width: 1440px) { .v-masonry { column-count: 5; } }
         
-        .pin-card { break-inside: avoid; margin-bottom: 12px; border-radius: 2px; overflow: hidden; position: relative; background: #08070a; cursor: pointer; border: 1px solid transparent; transition: all 0.3s; }
-        @media (min-width: 768px) { .pin-card { margin-bottom: 16px; } }
-        .pin-card img { width: 100%; display: block; transition: all 0.4s ease; filter: brightness(0.7); }
-        .pin-card:hover { border-color: rgba(255,255,255,0.1); transform: scale(1.01); z-index: 10; }
-        .pin-card:hover img { filter: brightness(1); }
+        .pin-card { break-inside: avoid; margin-bottom: 16px; border-radius: 12px; overflow: hidden; position: relative; background: #08070a; cursor: pointer; transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1); transform: translateZ(0); }
+        .pin-card img { width: 100%; display: block; filter: brightness(0.8); transition: filter 0.4s ease; }
+        .pin-card:hover { transform: translateY(-4px); box-shadow: 0 15px 30px rgba(0,0,0,0.6); z-index: 10; }
+        .pin-card:hover img { filter: brightness(1.05); }
 
-        .pin-overlay { position: absolute; inset: 0; background: linear-gradient(to bottom, rgba(0,0,0,0) 50%, rgba(0,0,0,0.9) 100%); opacity: 0; transition: opacity 0.3s; display: flex; flex-direction: column; justify-content: space-between; padding: 12px; pointer-events: none; }
+        .pin-overlay { position: absolute; inset: 0; background: linear-gradient(to bottom, rgba(0,0,0,0) 50%, rgba(0,0,0,0.9) 100%); opacity: 0; transition: opacity 0.4s ease; display: flex; flex-direction: column; justify-content: space-between; padding: 16px; pointer-events: none; }
         .pin-card:hover .pin-overlay { opacity: 1; pointer-events: auto; }
         
-        .icon-btn { width: 28px; height: 28px; border-radius: 2px; background: rgba(0,0,0,0.5); backdrop-filter: blur(4px); border: 1px solid rgba(255,255,255,0.1); display: flex; align-items: center; justify-content: center; color: #fff; cursor: pointer; transition: all 0.2s; }
-        .icon-btn:hover { background: #fff; color: #000; }
-        .icon-btn svg { width: 12px; height: 12px; transition: fill 0.3s; }
+        .icon-btn { width: 32px; height: 32px; border-radius: 50%; background: rgba(0,0,0,0.4); backdrop-filter: blur(8px); border: 1px solid rgba(255,255,255,0.2); display: flex; align-items: center; justify-content: center; color: #fff; cursor: pointer; transition: all 0.3s; }
+        .icon-btn:hover { background: #fff; color: #000; transform: scale(1.1); }
+        .icon-btn svg { width: 14px; height: 14px; transition: fill 0.3s; }
       `}} />
 
-      {/* HEADER */}
-      <header className="w-full px-6 py-4 flex justify-between items-center fixed top-0 z-50 bg-[#020104]/90 backdrop-blur-md border-b border-white/5">
-        <button onClick={() => router.back()} className="font-mono text-[9px] md:text-[10px] text-neutral-500 hover:text-white uppercase tracking-widest flex items-center gap-2 transition-colors">
-          <span>←</span> <span>RETURN</span>
+      {/* ФОН: Мягкий градиент вместо жесткой черноты */}
+      <div className="fixed inset-0 z-0 pointer-events-none overflow-hidden">
+        <div className="absolute top-[-10%] left-[-10%] w-[50vw] h-[50vw] bg-purple-900/10 rounded-full blur-[120px] mix-blend-screen"></div>
+        <div className="absolute bottom-[-10%] right-[-10%] w-[40vw] h-[40vw] bg-blue-900/10 rounded-full blur-[100px] mix-blend-screen"></div>
+      </div>
+
+      {/* HEADER (Стерильный и элегантный) */}
+      <header className="w-full px-6 py-5 flex justify-between items-center fixed top-0 z-50 bg-[#020104]/60 backdrop-blur-xl border-b border-white/5">
+        <button onClick={() => router.back()} className="font-inter font-medium text-[10px] text-neutral-400 hover:text-white uppercase tracking-[2px] flex items-center gap-2 transition-colors">
+          <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+          <span>Return</span>
         </button>
-        <div className="font-mono text-[10px] md:text-xs tracking-[4px] font-bold text-white uppercase">
-          TENSOR <span className="text-neutral-600">MANIFOLD</span>
+        <div className="font-sync text-xs md:text-sm tracking-[0.3em] font-bold text-white uppercase opacity-90">
+          Tensor <span className="text-neutral-500 font-normal">Manifold</span>
         </div>
-        <button onClick={() => sharePhoto(currentPhoto)} className="font-mono text-[9px] md:text-[10px] text-neutral-500 hover:text-white uppercase tracking-widest transition-colors">
-          TRANSMIT
+        <button onClick={() => sharePhoto(currentPhoto)} className="font-inter font-medium text-[10px] text-neutral-400 hover:text-white uppercase tracking-[2px] transition-colors">
+          Share
         </button>
       </header>
 
-      {/* MAIN LAYOUT (Blueprint Split) */}
-      <div className="w-full max-w-7xl mx-auto mt-24 px-4 flex flex-col lg:flex-row gap-8 z-10 relative items-start">
+      {/* MAIN LAYOUT */}
+      <div className="w-full max-w-7xl mx-auto mt-28 px-4 flex flex-col lg:flex-row gap-10 z-10 relative items-start">
         
         {/* ЛЕВАЯ КОЛОНКА: Исходный вектор */}
-        <div className="w-full lg:w-1/2 flex flex-col gap-4 lg:sticky lg:top-24">
-          <div className="w-full p-2 math-border bg-[#08070a] relative group">
-            <img src={currentPhoto.src} alt={currentPhoto.title} className="w-full relative z-10 rounded-sm shadow-2xl object-contain max-h-[65vh]" />
+        <div className="w-full lg:w-1/2 flex flex-col gap-6 lg:sticky lg:top-28">
+          <div className="w-full p-2 glass-panel relative group">
+            <img src={currentPhoto.src} alt={currentPhoto.title} className="w-full relative z-10 rounded-xl shadow-2xl object-contain max-h-[70vh]" />
           </div>
           
-          <div className="flex justify-between items-center px-2">
-            <div className="font-mono text-[8px] text-neutral-600 uppercase tracking-widest">
-              RES: {currentPhoto.title.substring(0,30)}...
-            </div>
-            <div className="font-mono text-[8px] text-neutral-600 uppercase tracking-widest">
-              ID: {vectorId}
-            </div>
+          <div className="flex justify-between items-center px-4 font-mono text-[9px] text-neutral-500 uppercase tracking-widest">
+            <div>Vector ID: {vectorId}</div>
+            <div>Source: DDG_Oracle</div>
           </div>
         </div>
 
         {/* ПРАВАЯ КОЛОНКА: Контрольная панель */}
         <div className="w-full lg:w-1/2 flex flex-col gap-8">
           
-          {/* Метаданные */}
-          <div className="flex flex-col gap-4 border-b border-white/10 pb-6 mt-4 lg:mt-0">
-            <div className="font-mono text-[9px] text-neutral-500 uppercase tracking-[4px]">
-              Oracle 3.0 Output:
+          {/* Метаданные (Элегантные) */}
+          <div className="flex flex-col gap-3">
+            <div className="font-inter text-[10px] text-neutral-500 uppercase tracking-[3px] font-medium">
+              Oracle 3.0 Analysis
             </div>
-            <h1 className="font-mono text-lg md:text-xl text-white uppercase tracking-[3px] leading-tight">
+            <h1 className="font-sync text-2xl md:text-3xl text-white uppercase tracking-[0.1em] font-bold leading-tight drop-shadow-lg">
               {displayVibe}
             </h1>
             
-            <div className="flex flex-wrap gap-3 mt-4">
-              <button className={`btn-strict ${isPinned(currentPhoto) ? 'bg-white text-black' : ''}`} onClick={() => toggleSavePin(currentPhoto)}>
-                {isPinned(currentPhoto) ? "[ UNLINK ]" : "[ STORE ARTIFACT ]"}
+            <div className="flex flex-wrap gap-4 mt-4">
+              <button className={`btn-elegant ${isPinned(currentPhoto) ? 'bg-white text-black' : ''}`} onClick={() => toggleSavePin(currentPhoto)}>
+                {isPinned(currentPhoto) ? "Unlink Artifact" : "Store Artifact"}
               </button>
               {link && (
-                <a href={link} target="_blank" rel="noreferrer" className="btn-strict border-neutral-800 text-neutral-500 hover:border-white hover:text-black flex items-center justify-center">
-                  [ SOURCE ]
+                <a href={link} target="_blank" rel="noreferrer" className="btn-elegant border-neutral-700 text-neutral-400 hover:border-white hover:text-black flex items-center justify-center">
+                  View Source
                 </a>
               )}
             </div>
           </div>
 
-          {/* КОНСОЛЬ МУТАТОРА */}
-          <div className="w-full grid-bg math-border p-6 md:p-8 flex flex-col gap-5 relative overflow-hidden bg-[#050408]">
-            <div className="flex justify-between items-center border-b border-white/5 pb-3">
-              <div className="font-mono text-[8px] text-[#10b981] uppercase tracking-[4px]">
-                MUTATOR_NODE_ACTIVE
+          {/* КОНСОЛЬ МУТАТОРА (Мягкий Glassmorphism) */}
+          <div className="w-full glass-panel p-8 flex flex-col gap-6 relative overflow-hidden mt-4">
+            <div className="spectral-glow top-0 right-0"></div>
+            
+            <div className="flex justify-between items-center border-b border-white/5 pb-4 relative z-10">
+              <div className="font-inter text-[10px] font-semibold text-purple-400 uppercase tracking-[3px]">
+                Mutator Sequence
               </div>
-              <div className="font-mono text-[8px] text-neutral-600 uppercase tracking-widest">
-                DEPTH: {historyRef.current.length}
+              <div className="font-mono text-[9px] text-neutral-500 uppercase tracking-widest">
+                Depth: {historyRef.current.length}
               </div>
             </div>
             
-            <div className="font-mono text-[9px] text-neutral-400 leading-relaxed uppercase tracking-widest">
-              Initiate tensor iteration. Oracle will inject current resonance into global data-stream to derive deeper vectors.
+            <div className="font-inter text-[11px] text-neutral-400 leading-relaxed font-light relative z-10">
+              Initiate tensor iteration. Oracle will inject current resonance into the global data-stream to derive deeper semantic vectors.
             </div>
 
             <button 
               onClick={() => handleMutate(false)}
               disabled={isMutating}
-              className="mt-2 font-mono text-[10px] md:text-[11px] text-white tracking-[4px] uppercase border border-white/20 px-8 py-3 rounded-sm hover:bg-white hover:text-black transition-all disabled:opacity-50 disabled:border-neutral-700 w-full sm:w-auto self-start"
+              className="mt-2 font-mono text-[11px] font-bold text-white tracking-[3px] uppercase border border-white/20 px-8 py-4 rounded-full hover:bg-white hover:text-black transition-all disabled:opacity-50 disabled:border-neutral-700 w-full sm:w-auto self-start relative z-10 shadow-lg"
             >
-              {isMutating ? "EXECUTING..." : "ƒ(X) = MUTATE TENSOR"}
+              {isMutating ? "Calculating..." : "ƒ(X) = Mutate"}
             </button>
           </div>
 
-          {/* ВСТРОЕННЫЙ COMM-LINK (Логи) */}
-          <div className="w-full math-border flex flex-col bg-[#050408]">
-            <div className="border-b border-white/10 p-3 text-[9px] font-mono flex justify-between uppercase tracking-widest">
-              <span className="text-white">COMM_LINK // SECURE</span>
-              <span className="text-neutral-500">{comments.length} LOGS</span>
+          {/* АННОТАЦИИ / КОММЕНТАРИИ (Элегантный чат, а не терминал) */}
+          <div className="w-full glass-panel flex flex-col overflow-hidden mt-4">
+            <div className="border-b border-white/5 px-6 py-4 font-inter font-semibold text-[10px] text-neutral-400 flex justify-between uppercase tracking-[3px]">
+              <span>Resonance Annotations</span>
+              <span>{comments.length} Entries</span>
             </div>
             
-            <div className="flex-1 overflow-y-auto p-5 flex flex-col gap-4 font-mono text-[10px] h-[250px]">
-               <div className="border-l-2 border-[#10b981] pl-3">
-                 <div className="text-[#10b981] mb-1 uppercase tracking-widest">System_Node</div>
-                 <div className="text-neutral-300">Data-stream connected. Ready for human input.</div>
+            <div className="flex-1 overflow-y-auto px-6 py-5 flex flex-col gap-5 h-[250px] scroll-smooth">
+               {/* Системное сообщение */}
+               <div className="flex flex-col gap-1">
+                 <div className="text-purple-400 font-inter text-[9px] uppercase tracking-widest font-semibold">Oracle System</div>
+                 <div className="text-neutral-300 font-inter text-[11px] font-light bg-white/5 p-3 rounded-tr-xl rounded-br-xl rounded-bl-xl border border-white/5 inline-block self-start max-w-[85%]">
+                   Data-stream connected. Ready for human annotations.
+                 </div>
                </div>
                
+               {/* Сообщения пользователей */}
                {comments.map((c) => (
-                 <div key={c.id} className="border-l-2 border-white/30 pl-3 mt-2">
-                   <div className="flex justify-between items-end mb-1">
-                     <span className="text-white uppercase tracking-widest">{c.sender_name}</span>
-                     <span className="text-neutral-700 text-[8px]">{new Date(c.created_at).toLocaleTimeString()}</span>
+                 <div key={c.id} className="flex flex-col gap-1">
+                   <div className="flex items-end gap-3">
+                     <span className="text-neutral-500 font-inter text-[9px] uppercase tracking-widest font-medium">{c.sender_name}</span>
+                     <span className="text-neutral-700 font-mono text-[8px]">{new Date(c.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
                    </div>
-                   <div className="text-neutral-400 text-[10px] leading-relaxed break-words">{c.content}</div>
+                   <div className="text-neutral-200 font-inter text-[11px] font-light leading-relaxed bg-white/5 p-3 rounded-tr-xl rounded-br-xl rounded-bl-xl border border-white/5 inline-block self-start max-w-[85%] shadow-sm">
+                     {c.content}
+                   </div>
                  </div>
                ))}
                <div ref={commentsEndRef} />
             </div>
             
-            <div className="border-t border-white/10 flex bg-[#030205]">
-               <div className="flex items-center text-neutral-500 px-3 font-mono text-[10px]">{'>'}</div>
+            <div className="border-t border-white/5 flex bg-black/20 p-2">
                <input 
                  type="text" 
                  value={commentInput}
                  onChange={(e) => setCommentInput(e.target.value)}
                  onKeyDown={(e) => e.key === 'Enter' && submitComment()}
-                 className="w-full bg-transparent border-none text-white font-mono text-[10px] py-3 outline-none focus:ring-0 placeholder-neutral-700" 
-                 placeholder="Transmit sequence..." 
+                 className="w-full bg-transparent border-none text-white font-inter font-light text-[11px] px-4 py-2 outline-none focus:ring-0 placeholder-neutral-600" 
+                 placeholder="Add an annotation..." 
                />
                <button 
                  onClick={submitComment}
-                 className="bg-transparent border-l border-white/10 text-white font-mono text-[9px] uppercase tracking-[2px] px-6 hover:bg-white hover:text-black transition-colors" 
+                 className="bg-white text-black font-inter font-semibold text-[9px] uppercase tracking-[2px] px-6 rounded-full hover:bg-neutral-200 transition-colors" 
                >
                  Send
                </button>
@@ -479,30 +522,32 @@ function VibeContent() {
         </div>
       </div>
 
-      {/* ВЫДАЧА (Сетка) */}
-      <div className="w-full max-w-[1600px] mx-auto p-4 md:p-10 relative z-10 mt-12 md:mt-20">
-        <div className="flex items-center justify-center gap-4 md:gap-6 mb-10 md:mb-16 relative">
+      {/* ВЫДАЧА (Производные векторы) */}
+      <div className="w-full max-w-[1600px] mx-auto p-4 md:p-10 relative z-10 mt-16 md:mt-24">
+        <div className="flex items-center justify-center gap-6 mb-12 relative">
           <div className="h-[1px] flex-grow bg-gradient-to-r from-transparent to-white/10"></div>
-          <span className="text-[10px] font-mono font-bold tracking-[4px] text-neutral-500 uppercase">
-             Derived Vectors {isMutating ? "[ CALC ]" : `[ n = ${relatedPhotos.length} ]`}
+          <span className="text-[10px] md:text-[11px] font-sync font-bold tracking-[0.3em] text-neutral-400 uppercase">
+             Derived Resonance
           </span>
           <div className="h-[1px] flex-grow bg-gradient-to-l from-transparent to-white/10"></div>
         </div>
 
         <div className="v-masonry">
           {relatedPhotos.map((photo, i) => {
-             const isLiked = false; 
              return (
               <div key={`${photo.id}-${i}`} className="pin-card" onClick={() => openPhoto(photo)}>
                 <img src={photo.thumb || photo.src} alt="Derivative" loading="lazy" />
                 <div className="pin-overlay">
                   <div className="flex justify-end w-full">
-                    <button className={`btn-strict ${isPinned(photo) ? 'bg-white text-black' : ''} text-[8px] px-3 py-1.5`} onClick={(e) => { e.stopPropagation(); toggleSavePin(photo); }}>
-                      {isPinned(photo) ? 'UNLINK' : 'SAVE'}
+                    <button 
+                      className={`btn-elegant !text-[8px] !px-4 !py-1.5 ${isPinned(photo) ? 'bg-white text-black' : ''}`} 
+                      onClick={(e) => { e.stopPropagation(); toggleSavePin(photo); }}
+                    >
+                      {isPinned(photo) ? 'Unlink' : 'Save'}
                     </button>
                   </div>
                   <div className="flex justify-between items-end w-full mt-auto">
-                    <div className="font-mono text-[8px] text-white/50 tracking-widest uppercase font-bold drop-shadow-md">
+                    <div className="font-mono text-[9px] text-white/70 tracking-widest uppercase font-bold drop-shadow-md">
                       ID: {photo.id.substring(0,6).toUpperCase()}
                     </div>
                     <div className="flex gap-2">
@@ -518,15 +563,15 @@ function VibeContent() {
         </div>
 
         {relatedPhotos.length === 0 && !relatedLoading && !isMutating && (
-          <div className="text-center p-16 text-[#555] font-mono tracking-[4px] uppercase text-[10px] font-bold">
+          <div className="text-center py-20 text-neutral-600 font-sync tracking-[0.3em] uppercase text-xs font-bold">
             NO RESONANCE FOUND.
           </div>
         )}
         
         <div ref={bottomRef}>
           {relatedLoading && (
-            <div className="text-center py-16">
-              <div className="w-6 h-6 border border-white/20 border-t-[#10b981] rounded-full animate-spin mx-auto"></div>
+            <div className="text-center py-20">
+              <div className="w-8 h-8 border-2 border-white/10 border-t-purple-500 rounded-full animate-spin mx-auto shadow-[0_0_20px_rgba(168,85,247,0.4)]"></div>
             </div>
           )}
         </div>
@@ -552,7 +597,7 @@ function VibeContent() {
 
 export default function VibePage() {
   return (
-    <Suspense fallback={<div style={{ background: "#020104", minHeight: "100vh" }}></div>}>
+    <Suspense fallback={<div className="min-h-screen bg-[#020104]"></div>}>
       <VibeContent />
     </Suspense>
   );

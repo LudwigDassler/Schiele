@@ -32,7 +32,7 @@ function VibeContent() {
   const [relatedLoading, setRelatedLoading] = useState(true);
   
   const [isMutating, setIsMutating] = useState(false);
-  const [displayVibe, setDisplayVibe] = useState("ANALYZING...");
+  const [displayVibe, setDisplayVibe] = useState("ANALYZING TENSOR...");
 
   const [comments, setComments] = useState<any[]>([]);
   const [commentInput, setCommentInput] = useState("");
@@ -94,7 +94,7 @@ function VibeContent() {
         if (error) throw error;
         if (data) setComments(data);
       } catch (e) {
-        console.error("Failed to load comments:", e);
+        console.error("Failed to load tensor logs:", e);
       }
     };
     fetchComments();
@@ -201,10 +201,15 @@ function VibeContent() {
     }
 
     try {
+      // 🔥 ВШИТО: Передаем title в бэкенд для смыслового якоря 🔥
       const res = await fetch("/api/mutate", {
         method: "POST", 
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ image_url: src, history: historyRef.current })
+        body: JSON.stringify({ 
+          image_url: src, 
+          title: fallbackTitle, 
+          history: historyRef.current 
+        })
       });
       
       const data = await res.json();
@@ -231,7 +236,7 @@ function VibeContent() {
     } finally {
       setIsMutating(false);
     }
-  }, [src, isMutating, fetchImages]);
+  }, [src, fallbackTitle, isMutating, fetchImages]);
 
   useEffect(() => {
     if (!src || lastAnalyzedSrcRef.current === src) return;
@@ -439,13 +444,13 @@ function VibeContent() {
         .icon-btn svg { width: 14px; height: 14px; transition: fill 0.3s; }
       `}} />
 
-      {/* Мягкий фоновый градиент */}
+      {/* Фоновый градиент */}
       <div className="fixed inset-0 z-0 pointer-events-none overflow-hidden">
         <div className="absolute top-[-10%] left-[-10%] w-[50vw] h-[50vw] bg-purple-900/10 rounded-full blur-[120px] mix-blend-screen"></div>
         <div className="absolute bottom-[-10%] right-[-10%] w-[40vw] h-[40vw] bg-blue-900/10 rounded-full blur-[100px] mix-blend-screen"></div>
       </div>
 
-      {/* HEADER (Очищен от Share) */}
+      {/* HEADER */}
       <header className="w-full px-6 py-5 flex justify-between items-center fixed top-0 z-50 bg-[#020104]/60 backdrop-blur-xl border-b border-white/5">
         <button onClick={() => router.back()} className="font-inter font-medium text-[10px] text-neutral-400 hover:text-white uppercase tracking-[2px] flex items-center gap-2 transition-colors">
           <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
@@ -496,7 +501,7 @@ function VibeContent() {
 
           <div className="flex gap-2 justify-center md:justify-end flex-1">
             
-            {/* Иконка Share (Стрелочка как в iOS/Pinterest) */}
+            {/* Иконка Share */}
             <button onClick={() => sharePhoto(currentPhoto)} className="btn-elegant border-neutral-700 text-neutral-300 !px-3" title="Share">
               <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
                 <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8M16 6l-4-4-4 4M12 2v13"/>
@@ -524,7 +529,7 @@ function VibeContent() {
         </div>
       </div>
 
-      {/* ВЫДАЧА (Производные векторы) */}
+      {/* ВЫДАЧА (Производные векторы) 🔥 ТУТ ВЫРЕЗАНЫ ВСЕ ИДЕНТИФИКАТОРЫ 🔥 */}
       <div className="w-full max-w-[1600px] mx-auto p-4 md:p-10 relative z-10 mt-4">
         <div className="flex items-center justify-center gap-6 mb-12 relative">
           <div className="h-[1px] flex-grow bg-gradient-to-r from-transparent to-white/10"></div>
@@ -548,6 +553,7 @@ function VibeContent() {
                       {isPinned(photo) ? 'Unlink' : 'Save'}
                     </button>
                   </div>
+                  {/* Иконка Share внизу */}
                   <div className="flex justify-end items-end w-full mt-auto">
                     <div className="flex gap-2">
                       <button className="icon-btn" title="Share" onClick={(e) => { e.stopPropagation(); sharePhoto(photo); }}>
@@ -570,7 +576,7 @@ function VibeContent() {
         <div ref={bottomRef}>
           {relatedLoading && (
             <div className="text-center py-20">
-              <div className="w-8 h-8 border-2 border-white/10 border-t-purple-500 rounded-full animate-spin mx-auto shadow-[0_0_20px_rgba(168,85,247,0.4)]"></div>
+              <div className="w-8 h-8 border-2 border-white/10 border-t-[#a855f7] rounded-full animate-spin mx-auto shadow-[0_0_20px_rgba(168,85,247,0.4)]"></div>
             </div>
           )}
         </div>
@@ -578,22 +584,7 @@ function VibeContent() {
 
       {toastMsg && <div className="toast-popup">{toastMsg}</div>}
 
-      {showAgeGate && (
-        <AgeGateModal 
-          onConfirm={() => { 
-            setNsfwAllowed(true); 
-            try { localStorage.setItem("gelbet_nsfw_18plus", "true"); } catch (e) {} 
-            const p = showAgeGate; 
-            setShowAgeGate(null); 
-            if (p) openPhoto(p); 
-          }} 
-          onCancel={() => setShowAgeGate(null)} 
-        />
-      )}
-
-      {/* ========================================== */}
       {/* МОДАЛКА КОММЕНТАРИЕВ (Человеческая) */}
-      {/* ========================================== */}
       {showCommentsModal && (
         <div className="fixed inset-0 z-[600] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 md:p-6" onClick={() => setShowCommentsModal(false)}>
           <div onClick={e => e.stopPropagation()} className="glass-panel w-full max-w-xl flex flex-col overflow-hidden shadow-2xl">
@@ -643,6 +634,19 @@ function VibeContent() {
             </div>
           </div>
         </div>
+      )}
+
+      {showAgeGate && (
+        <AgeGateModal 
+          onConfirm={() => { 
+            setNsfwAllowed(true); 
+            try { localStorage.setItem("gelbet_nsfw_18plus", "true"); } catch (e) {} 
+            const p = showAgeGate; 
+            setShowAgeGate(null); 
+            if (p) openPhoto(p); 
+          }} 
+          onCancel={() => setShowAgeGate(null)} 
+        />
       )}
     </div>
   );

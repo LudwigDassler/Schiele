@@ -366,8 +366,6 @@ export default function Home() {
   
   const userAvatar = user?.user_metadata?.avatar_url || ""; 
   const userName = user?.user_metadata?.full_name || user?.email || "User";
-  
-  // Нет дефолтных тегов.
   const tagsToDisplay = isMounted ? userTags.slice(0, 4) : [];
 
   return (
@@ -379,8 +377,9 @@ export default function Home() {
         .font-inter { font-family: 'Inter', sans-serif; }
         .font-sync { font-family: 'Syncopate', sans-serif; }
         
-        ::-webkit-scrollbar { width: 4px; } ::-webkit-scrollbar-track { background: var(--bg-void); } ::-webkit-scrollbar-thumb { background: #333; border-radius: 4px; } ::-webkit-scrollbar-thumb:hover { background: #666; }
+        ::-webkit-scrollbar { width: 4px; } ::-webkit-scrollbar-track { background: var(--bg-void); } ::-webkit-scrollbar-thumb { background: #444; border-radius: 4px; } ::-webkit-scrollbar-thumb:hover { background: #888; }
         
+        /* ГАРАНТИЯ СКРОЛЛА */
         #ui-layer { position: relative; z-index: 10; min-height: 100vh; display: flex; flex-direction: column; }
         header { opacity: 0; pointer-events: none; transform: translateY(-20px); transition: all 1s; }
         .results-active header { opacity: 1; pointer-events: auto; transform: translateY(0); }
@@ -392,29 +391,36 @@ export default function Home() {
         .btn-elegant { background: transparent; border: 1px solid rgba(255,255,255,0.2); color: #fff; font-family: 'Inter', sans-serif; font-size: 9px; font-weight: 500; text-transform: uppercase; letter-spacing: 2px; padding: 8px 16px; cursor: pointer; transition: all 0.3s ease; border-radius: 99px; display: flex; align-items: center; justify-content: center; gap: 6px; }
         .btn-elegant:hover:not(:disabled) { background: #fff; color: #000; box-shadow: 0 0 15px rgba(255,255,255,0.2); }
 
-        /* ИСПРАВЛЕННАЯ СТРОКА ПОИСКА (АДАПТИВ) */
-        .search-container { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 100%; max-width: 800px; padding: 0 16px; transition: all 1s cubic-bezier(0.16, 1, 0.3, 1); display: flex; flex-direction: column; align-items: center; }
-        @media (min-width: 768px) { .search-container { padding: 0 24px; max-width: 1000px; } }
+        /* ИСПРАВЛЕННАЯ СТРОКА ПОИСКА (БЕЗ ABSOLUTE, ЕСТЕСТВЕННЫЙ ПОТОК) */
+        .search-container { 
+          position: relative; margin: 0 auto; margin-top: 45vh; transform: translateY(-50%); 
+          width: 100%; max-width: 900px; padding: 40px 16px; transition: all 1s cubic-bezier(0.16, 1, 0.3, 1); 
+          display: flex; flex-direction: column; align-items: center; z-index: 20; 
+          background: radial-gradient(ellipse at center, rgba(2,1,4,0.9) 0%, rgba(2,1,4,0.4) 40%, transparent 70%); 
+        }
+        @media (min-width: 768px) { .search-container { max-width: 1100px; padding: 60px 24px; } }
         
-        .results-active .search-container { top: 12vh; transform: translate(-50%, 0); max-width: 800px; }
-        @media (min-width: 768px) { .results-active .search-container { top: 15vh; } }
+        .results-active .search-container { 
+          margin-top: 100px; transform: translateY(0); padding-top: 20px; padding-bottom: 20px; 
+          background: radial-gradient(ellipse at center, rgba(2,1,4,0.9) 0%, rgba(2,1,4,0.3) 50%, transparent 80%); 
+        }
 
         .search-input-wrapper { display: flex; align-items: center; width: 100%; border-bottom: 2px solid rgba(255,255,255,0.4); transition: all 0.4s ease; padding-bottom: 12px; }
         .search-input-wrapper:focus-within { border-bottom-color: rgba(255,255,255,1); box-shadow: 0 20px 50px -10px rgba(255,255,255,0.1); }
         .results-active .search-input-wrapper { border-bottom: 1px solid rgba(255,255,255,0.3); padding-bottom: 8px; }
 
-        .search-input { width: 100%; background: transparent; border: none; color: #fff; font-size: 28px; outline: none; letter-spacing: 4px; text-align: center; font-family: 'Space Mono', monospace; text-transform: uppercase; transition: all 0.4s ease; text-shadow: 0 2px 10px rgba(0,0,0,0.8); }
+        .search-input { width: 100%; background: transparent; border: none; color: #fff; font-size: 28px; outline: none; letter-spacing: 4px; text-align: center; font-family: 'Space Mono', monospace; text-transform: uppercase; transition: all 0.4s ease; text-shadow: 0 4px 20px rgba(0,0,0,1), 0 0 40px rgba(0,0,0,0.8); }
         .search-input::placeholder { color: rgba(255,255,255,0.5); letter-spacing: 4px; text-shadow: 0 2px 15px rgba(0,0,0,1); }
         @media (min-width: 768px) { .search-input { font-size: 48px; letter-spacing: 10px; } .search-input::placeholder { letter-spacing: 10px; } }
         
-        .results-active .search-input { font-size: 16px; letter-spacing: 2px; text-shadow: none; }
+        .results-active .search-input { font-size: 16px; letter-spacing: 2px; text-shadow: 0 2px 10px rgba(0,0,0,1); }
         @media (min-width: 768px) { .results-active .search-input { font-size: 20px; } }
 
         .quick-tags { display: flex; gap: 10px; margin-top: 28px; justify-content: center; flex-wrap: wrap; transition: opacity 0.5s; }
         .results-active .quick-tags { opacity: 0; pointer-events: none; position: absolute; }
-        .tag-pill { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); color: rgba(255,255,255,0.6); padding: 8px 18px; border-radius: 4px; font-family: 'Space Mono', monospace; font-size: 10px; text-transform: uppercase; letter-spacing: 2px; cursor: pointer; transition: all 0.2s; }
+        .tag-pill { background: rgba(0,0,0,0.6); backdrop-filter: blur(8px); border: 1px solid rgba(255,255,255,0.1); color: rgba(255,255,255,0.8); padding: 8px 18px; border-radius: 4px; font-family: 'Space Mono', monospace; font-size: 10px; text-transform: uppercase; letter-spacing: 2px; cursor: pointer; transition: all 0.2s; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
         @media (min-width: 768px) { .tag-pill { font-size: 11px; padding: 10px 22px; } }
-        .tag-pill:hover { background: rgba(255,255,255,0.08); color: #fff; border-color: rgba(255,255,255,0.2); }
+        .tag-pill:hover { background: rgba(255,255,255,0.1); color: #fff; border-color: rgba(255,255,255,0.3); }
 
         .vector-selector { display: flex; gap: 24px; margin-top: 40px; transition: opacity 0.5s; }
         @media (min-width: 768px) { .vector-selector { gap: 50px; margin-top: 50px; } }
@@ -426,10 +432,11 @@ export default function Home() {
         .vector-btn.active::after { left: 0; right: 0; }
         .vector-btn.sonic-mode.active::after { background: #10b981; }
 
-        .content-area { position: absolute; visibility: hidden; width: 100%; opacity: 0; pointer-events: none; transform: translateY(40px); transition: all 1.2s cubic-bezier(0.16, 1, 0.3, 1); transition-delay: 0.3s; padding: 0 16px 80px; }
+        /* КОНТЕЙНЕР РЕЗУЛЬТАТОВ (Тоже в естественном потоке) */
+        .content-area { width: 100%; max-width: 1800px; margin: 0 auto; display: none; opacity: 0; transform: translateY(40px); transition: all 1.2s cubic-bezier(0.16, 1, 0.3, 1); padding: 0 16px 80px; }
         @media (min-width: 768px) { .content-area { padding: 0 32px 80px; } }
-        .results-active .content-area { position: relative; visibility: visible; opacity: 1; pointer-events: auto; transform: translateY(0); margin-top: 30vh; }
-        @media (min-width: 768px) { .results-active .content-area { margin-top: 35vh; } }
+        
+        .results-active .content-area { display: block; opacity: 1; transform: translateY(0); margin-top: 20px; }
 
         .section-title { font-family: 'Space Mono', monospace; font-size: 9px; text-transform: uppercase; letter-spacing: 2px; color: var(--text-muted); margin-bottom: 16px; border-bottom: 1px solid var(--glass-border); padding-bottom: 8px; display: flex; justify-content: space-between; align-items: flex-end; }
         @media (min-width: 768px) { .section-title { font-size: 10px; letter-spacing: 4px; margin-bottom: 24px; padding-bottom: 12px; } }
@@ -461,11 +468,12 @@ export default function Home() {
         @keyframes floatUp { from { opacity: 0; transform: translate(-50%, 20px) scale(0.9); } to { opacity: 1; transform: translate(-50%, 0) scale(1); } }
       `}} />
 
-      {/* ФИКСАЦИЯ СФЕРЫ (Масштаб на мобилках) */}
+      {/* ФИКСАЦИЯ СФЕРЫ (Масштаб на мобилке для защиты верстки) */}
       <div style={{ position: 'fixed', inset: 0, zIndex: 0, transform: isResultsActive ? 'translateY(-20vh) scale(0.85)' : 'none', transition: 'transform 1.5s cubic-bezier(0.16, 1, 0.3, 1)' }}>
          <ResonanceEngine mode={searchMode} isActive={isResultsActive} />
       </div>
 
+      {/* НОРМАЛЬНЫЙ ДОКУМЕНТНЫЙ ПОТОК (Скроллится целиком) */}
       <div id="ui-layer">
         <header className="w-full px-4 md:px-8 py-4 md:py-6 flex justify-between items-center fixed top-0 z-50 bg-[#020104]/80 backdrop-blur-md border-b border-white/5">
           <div className="font-sync text-xs md:text-sm tracking-[4px] font-bold text-white cursor-pointer" onClick={resetUI}>
@@ -510,7 +518,7 @@ export default function Home() {
           </div>
         </div>
 
-        <div className="content-area max-w-[1800px] mx-auto w-full">
+        <div className="content-area">
           {!showSaved && (
             <div className="mb-10 md:mb-14">
               <div className="section-title">
@@ -554,9 +562,10 @@ export default function Home() {
                     <div className="pin-overlay">
                       <div className="flex justify-end w-full">
                         <button className={`btn-elegant !text-[8px] !px-4 !py-1.5 ${saved ? 'bg-white text-black' : ''}`} onClick={(e) => { e.stopPropagation(); toggleSavePin(photo); }}>
-                          {saved ? 'Unlink' : 'Store'}
+                          {saved ? 'Unlink' : 'Save'}
                         </button>
                       </div>
+                      {/* 🔥 Выжжены надписи ID, остались только иконки шеринга и чата 🔥 */}
                       <div className="flex justify-end items-end w-full mt-auto">
                         <div className="flex gap-2">
                           <button className="icon-btn" title="Comments" onClick={(e) => { e.stopPropagation(); setCommentPin(photo); }}>
@@ -573,7 +582,7 @@ export default function Home() {
               })}
             </div>
             
-            {loading && <div className="text-center py-12"><div className="w-8 h-8 border border-white/20 border-t-[#10b981] rounded-full animate-spin mx-auto"></div></div>}
+            {loading && <div className="text-center py-12"><div className="w-8 h-8 border border-white/20 border-t-[#a855f7] rounded-full animate-spin mx-auto shadow-[0_0_20px_rgba(168,85,247,0.4)]"></div></div>}
             <div ref={bottomRef} style={{ height: 10 }}></div>
           </div>
         </div>

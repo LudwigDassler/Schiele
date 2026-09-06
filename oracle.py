@@ -7,7 +7,7 @@ from io import BytesIO
 import re
 import urllib.request
 
-app = FastAPI(title="GELBET Oracle 8.0 (Ulysses-Numb Core)", version="8.0.0")
+app = FastAPI(title="GELBET Oracle 9.0 (Ulysses-Numb Core + Lexical Centrifuge)", version="9.0.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -17,21 +17,66 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Аппаратный детектор лиц (OpenCV)
 FACE_CASCADE = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
 
+# ==============================================================================
+# ЛЕКСИЧЕСКАЯ ЦЕНТРИФУГА (ОЧИСТКА ЯКОРЯ)
+# ==============================================================================
 CLEANUP_REGEX = re.compile(
     r'\b(wallpaper|hd|4k|image|photo|pic|picture|download|free|vector|stock|source|desktop|background|pinterest|preview)\b',
     re.IGNORECASE
 )
 
-# ==============================================================================
-# БАЗА АРХЕТИПОВ (РАСШИРЕНА ПОД 32-МЕРНОЕ ПРОСТРАНСТВО)
-# ==============================================================================
-# Оси 24-31: [s_m_p_syllogism, q_e_d_resolution, numbness_index, gilmour_peak, pink_noise, synesthetic_drift, solipsism, temporal_decay]
+# Фильтр: 5 и более согласных букв подряд (отсекает мусор вроде hmednntnga)
+CONSONANT_CLUSTER_REGEX = re.compile(r'[bcdfghjklmnpqrstvwxzBCDFGHJKLMNPQRSTVWXZБВГДЖЗЙКЛМНПРСТФХЦЧШЩЪЬ]{5,}')
 
+# Фильтр: хеши, содержащие одновременно и буквы, и цифры (например, a0k, img12345)
+HASH_REGEX = re.compile(r'^(?=.*[a-zA-Zа-яА-Я])(?=.*\d)[a-zA-Zа-яА-Я\d]{4,}$')
+
+def clean_anchor_title(raw_title: str) -> str:
+    """Хирургическая очистка якоря от хешей, URL-мусора и артефактов файловых систем."""
+    if not raw_title or raw_title == "Aesthetic Artifact":
+        return ""
+        
+    # 1. Убиваем URL, пути, расширения
+    clean = re.sub(r'http\S+|www\S+', '', raw_title)
+    clean = re.sub(r'\.(jpg|jpeg|png|webp|gif|mp4|avif)\b', '', clean, flags=re.IGNORECASE)
+    
+    # 2. Убиваем скобки, спецсимволы. Дефисы и подчеркивания меняем на пробелы
+    clean = re.sub(r'\[.*?\]|\(.*?\)', '', clean)
+    clean = re.sub(r'[-_]', ' ', clean)
+    clean = CLEANUP_REGEX.sub('', clean)
+    clean = re.sub(r'[^a-zA-Zа-яА-Я0-9\s]', ' ', clean)
+    
+    valid_words = []
+    for word in clean.split():
+        # 3. Фильтры лексического мусора
+        if len(word) > 15: continue # Слишком длинное (вероятно хеш)
+        if HASH_REGEX.match(word): continue # Смесь цифр и букв
+        if CONSONANT_CLUSTER_REGEX.search(word): continue # Нечитаемые наборы согласных
+        
+        # Пропускаем одиночные странные буквы (оставляем только логичные предлоги/артикли)
+        if len(word) == 1 and word.lower() not in ['a', 'i', 'о', 'у', 'а', 'я', 'и', 'к', 'в', 'с']:
+            continue
+            
+        valid_words.append(word)
+
+    # Берем 2-3 самых значимых слова
+    final_anchor = " ".join(valid_words[:3]).strip()
+    
+    # Если после зачистки остался мусор в 1-2 символа — лучше сбросить якорь, чем отравлять им запрос
+    if len(final_anchor) <= 2:
+        return ""
+        
+    return final_anchor
+
+# ==============================================================================
+# БАЗА АРХЕТИПОВ (32-МЕРНОЕ ПРОСТРАНСТВО СИЛЛОГИЗМОВ)
+# ==============================================================================
+# Оси 24-31: [smp_syllogism, qed_resolution, numbness_index, gilmour_peak, pink_noise, synesthetic_drift, solipsism, temporal_decay]
 ARCHETYPE_VECTORS = {
     "COMFORTABLY_NUMB": (
-        # Высокий Numbness (0.9), Высокий Gilmour Peak (0.85), Высокий Pink Noise (0.8)
         np.array([0.6, 0.4, 0.3, 0.2, 0.2, 0.4, 0.5, 0.8, 0.9, 0.7, 0.3, 0.4, 0.5, 0.8, 0.2, 0.2, 0.6, 0.8, 0.4, 0.2, 0.5, 0.3, 0.8, 0.2, 
                   0.3, 0.2, 0.90, 0.85, 0.80, 0.70, 0.75, 0.4]),
         {
@@ -41,7 +86,6 @@ ARCHETYPE_VECTORS = {
         }
     ),
     "JOYCEAN_SYLLOGISM": (
-        # Высокий SMP (0.9), Высокий Q.E.D (0.9), Высокая структура (Tension, Gestalt)
         np.array([0.4, 0.8, 0.7, 0.6, 0.8, 0.5, 0.4, 0.6, 0.7, 0.6, 0.8, 0.6, 0.9, 0.5, 0.8, 0.6, 0.3, 0.2, 0.7, 0.6, 0.5, 0.9, 0.3, 0.8, 
                   0.90, 0.95, 0.10, 0.40, 0.50, 0.20, 0.40, 0.6]),
         {
@@ -79,18 +123,10 @@ ARCHETYPE_VECTORS = {
     )
 }
 
-def clean_anchor_title(raw_title: str) -> str:
-    if not raw_title or raw_title == "Aesthetic Artifact":
-        return ""
-    clean = re.sub(r'http\S+|www\S+', '', raw_title)
-    clean = re.sub(r'\[.*?\]|\(.*?\)', '', clean)
-    clean = CLEANUP_REGEX.sub('', clean)
-    clean = re.sub(r'[^a-zA-Zа-яА-Я0-9\s\-]', ' ', clean)
-    words = clean.split()
-    return " ".join(words[:4]).strip()
-
+# ==============================================================================
+# ИЗВЛЕЧЕНИЕ 32D ТЕНЗОРА (ОПТИКА + СМЫСЛ + АППАРАТНОЕ ЗРЕНИЕ)
+# ==============================================================================
 def extract_32d_consciousness_tensor(img_data: bytes):
-    """Извлекает 32D вектор, включая логику Джойса и гитарное соло Гилмора."""
     img_pil = Image.open(BytesIO(img_data)).convert('RGB')
     img_pil = img_pil.resize((256, 256))
     img = np.array(img_pil)
@@ -104,10 +140,11 @@ def extract_32d_consciousness_tensor(img_data: bytes):
     y, x = np.ogrid[:h, :w]
     gauss_kernel = np.exp(-((x - cx)**2 + (y - cy)**2) / (2.0 * (50**2)))
 
+    # Детектор лиц (Gatekeeper)
     faces = FACE_CASCADE.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=4, minSize=(30, 30))
     has_human = len(faces) > 0
 
-    # === БАЗОВАЯ ФИЗИКА (1-24) ===
+    # === БАЗОВАЯ ФИЗИКА (1-23) ===
     luminance = np.mean(gray) / 255.0
     rms_contrast = np.clip(np.std(gray) / 128.0, 0.0, 1.0)
     
@@ -184,47 +221,43 @@ def extract_32d_consciousness_tensor(img_data: bytes):
     void_ratio = np.clip(np.sum(gradient_mag < 15.0) / (256 * 256), 0.0, 1.0)
     edge_sharpness = np.clip(np.mean(laplacian_var) / 600.0, 0.0, 1.0) if np.sum(edges > 0) > 50 else 0.1
 
-    # === РАСШИРЕНИЕ: СИЛЛОГИЗМ И ГИЛМОР (25-32) ===
+    # === РАСШИРЕНИЕ: СИЛЛОГИЗМ И ГИЛМОР (24-31) ===
     
-    # 24. S-M-P Силлогизм (Разделение глубины на 3 плана)
-    # Сравниваем дисперсию градиентов в центре, на среднем кольце и по краям
+    # 24. S-M-P Syllogism (Разделение глубины на 3 плана)
     mid_ring_mask = (gauss_kernel < 0.8) & (gauss_kernel > 0.2)
     fg_grad = np.mean(gradient_mag[gauss_kernel >= 0.8])
     mg_grad = np.mean(gradient_mag[mid_ring_mask])
     bg_grad = np.mean(gradient_mag[gauss_kernel <= 0.2]) + 1e-5
     smp_syllogism = np.clip((fg_grad - bg_grad) / (mg_grad + 1e-5) / 5.0, 0.0, 1.0)
 
-    # 25. Точка Q.E.D. (Абсолютное разрешение)
-    # Четкий центр при глубоком виньетировании/размытии краев
+    # 25. Q.E.D. (Абсолютное разрешение)
     qed_resolution = np.clip(gestalt * vignette * (1.0 - void_ratio) * 2.0, 0.0, 1.0)
 
-    # 26. Индекс Оцепенения (Numbness) - Туман, размытие, отсутствие резкости
+    # 26. Numbness Index (Оцепенение / Туман)
     numbness_index = np.clip((depth * (1.0 - rms_contrast) * (1.0 - edge_sharpness)) * 3.0, 0.0, 1.0)
 
-    # 27. Гилморовский Резонанс (The Gilmour Peak)
-    # Пик энергии на фоне общего оцепенения
+    # 27. Gilmour Peak (Гитарное соло / Прорезь)
     laplacian_full = cv2.Laplacian(gray, cv2.CV_64F)
     max_lap = np.max(np.abs(laplacian_full))
     mean_lap = np.mean(np.abs(laplacian_full)) + 1e-5
     gilmour_peak = np.clip((max_lap / mean_lap) / 50.0, 0.0, 1.0) * numbness_index
 
-    # 28. Pink Noise (1/f) - Прокси через отношение низких/средних частот к высоким
+    # 28. Pink Noise (1/f спектр)
     low_freq_mask = (x - cx)**2 + (y - cy)**2 <= (32**2)
     low_power = np.sum(mag_spectrum[low_freq_mask])
     high_power = np.sum(mag_spectrum[high_freq_mask]) + 1e-5
     pink_noise = np.clip((low_power / high_power) / 5.0, 0.0, 1.0)
 
-    # 29. Synesthetic Drift (Дрейф цвета отдельно от формы)
+    # 29. Synesthetic Drift 
     hue_grad_x = cv2.Sobel(hsv[:,:,0], cv2.CV_64F, 1, 0, ksize=3)
     hue_grad_y = cv2.Sobel(hsv[:,:,0], cv2.CV_64F, 0, 1, ksize=3)
     hue_edges = cv2.magnitude(hue_grad_x, hue_grad_y)
-    # Разница между границами яркости и границами цвета
     synesthetic_drift = np.clip(np.mean(np.abs(gradient_mag - hue_edges)) / 100.0, 0.0, 1.0)
 
-    # 30. Солипсизм (Полная изоляция, доминирование негативного пространства)
+    # 30. Solipsism (Изоляция)
     solipsism = np.clip(void_ratio * gestalt * 1.5, 0.0, 1.0)
 
-    # 31. Temporal Decay (Эрозия, распад)
+    # 31. Temporal Decay (Распад)
     morph_kernel = np.ones((5,5),np.uint8)
     erosion = cv2.erode(gray, morph_kernel, iterations=1)
     dilation = cv2.dilate(gray, morph_kernel, iterations=1)
@@ -255,7 +288,7 @@ def synthesize_syllogism_query(tensor: np.ndarray, has_human: bool, raw_title: s
     for arch_name, (arch_vec, _) in ARCHETYPE_VECTORS.items():
         sim = cosine_similarity(tensor, arch_vec)
         if any(arch_name in h for h in history[-2:]):
-            sim *= 0.5  # Защита от зацикливания
+            sim *= 0.5  # Анти-зацикливание
         scores[arch_name] = sim
 
     dominant_name, dominant_score = sorted(scores.items(), key=lambda x: x[1], reverse=True)[0]
@@ -273,10 +306,10 @@ def synthesize_syllogism_query(tensor: np.ndarray, has_human: bool, raw_title: s
     else:
         subject_s = "abstract architectural form"
 
-    # MIDDLE / COPULA (M) - Оптика и атмосфера
+    # MIDDLE / COPULA (M)
     copula_m = arch_data["copula_m"]
 
-    # PREDICATE (P) - Среда, текстура, финал
+    # PREDICATE (P)
     predicate_p = arch_data["predicate_p"]
 
     # Итоговый Силлогизм: Субъект -> Связка -> Предикат
@@ -284,9 +317,9 @@ def synthesize_syllogism_query(tensor: np.ndarray, has_human: bool, raw_title: s
     
     # Очистка стоп-слов для DDG
     clean_words = [w for w in search_query.split() if len(w) > 2 and w.lower() not in ["and", "the", "with", "from"]]
-    final_query = " ".join(clean_words[:7]) # Поисковики любят емкие запросы
+    final_query = " ".join(clean_words[:7])
 
-    # Если достигнута точка Q.E.D.
+    # Точка Q.E.D. (Абсолютное разрешение)
     if tensor[25] > 0.8:
         display_vibe = f"Q.E.D. // {arch_data['alias']}"
     else:
@@ -296,11 +329,11 @@ def synthesize_syllogism_query(tensor: np.ndarray, has_human: bool, raw_title: s
     return final_query, display_vibe, resonance_pct, dominant_name
 
 # ==============================================================================
-# API ENDPOINT
+# API ENDPOINTS
 # ==============================================================================
 @app.get("/")
 def health():
-    return {"status": "ORACLE_8_ONLINE", "core": "Joycean-Gilmour Manifold", "dimensions": 32}
+    return {"status": "ORACLE_9_ONLINE", "core": "Lexical Centrifuge & Ulysses Manifold", "dimensions": 32}
 
 @app.post("/api/mutate")
 async def mutate_endpoint(request: Request):
@@ -326,21 +359,18 @@ async def mutate_endpoint(request: Request):
             if not body_bytes:
                 raise HTTPException(status_code=400, detail="Empty image data")
 
-        # 1. Экстракция 32-мерного Джойсовско-Гилморовского тензора
         tensor, has_human = extract_32d_consciousness_tensor(body_bytes)
 
-        # 2. Формирование Силлогизма
         smart_query, display_vibe, resonance_pct, dominant_archetype = synthesize_syllogism_query(
             tensor, has_human, raw_title, history
         )
 
-        print(f"\n[ORACLE 8.0: ULYSSES-NUMB CORE] ----------------------")
-        print(f" > ANCHOR SYLLOGISM (S): '{raw_title}' -> '{clean_anchor_title(raw_title)}'")
-        print(f" > NUMBNESS INDEX      : {tensor[26]:.3f}")
-        print(f" > GILMOUR PEAK        : {tensor[27]:.3f}")
-        print(f" > Q.E.D. RESOLUTION   : {tensor[25]:.3f}")
-        print(f" > DOMINANT ARCHETYPE  : {dominant_archetype} ({resonance_pct}%)")
-        print(f" > SYNTHESIZED QUERY   : \"{smart_query}\"")
+        print(f"\n[ORACLE 9.0: LEXICAL CENTRIFUGE] ------------------------")
+        print(f" > RAW ANCHOR IN   : '{raw_title}'")
+        print(f" > PURIFIED ANCHOR : '{clean_anchor_title(raw_title)}'")
+        print(f" > NUMBNESS INDEX  : {tensor[26]:.3f} | GILMOUR PEAK: {tensor[27]:.3f}")
+        print(f" > DOMINANT ARC    : {dominant_archetype} ({resonance_pct}%)")
+        print(f" > FINAL QUERY     : \"{smart_query}\"")
         print(f"----------------------------------------------------------\n")
 
         return {
@@ -353,7 +383,7 @@ async def mutate_endpoint(request: Request):
         }
 
     except Exception as e:
-        print(f"[ORACLE 8.0 CRITICAL FAILURE] {e}")
+        print(f"[ORACLE 9.0 CRITICAL FAILURE] {e}")
         return {
             "status": "error",
             "displayVibe": "RESONANCE VOID",

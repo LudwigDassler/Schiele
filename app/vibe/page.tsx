@@ -32,7 +32,7 @@ function VibeContent() {
   const [relatedLoading, setRelatedLoading] = useState(true);
   
   const [isMutating, setIsMutating] = useState(false);
-  const [displayVibe, setDisplayVibe] = useState("ANALYZING TENSOR...");
+  const [displayVibe, setDisplayVibe] = useState("ANALYZING...");
 
   const [comments, setComments] = useState<any[]>([]);
   const [commentInput, setCommentInput] = useState("");
@@ -45,6 +45,9 @@ function VibeContent() {
   const lastAnalyzedSrcRef = useRef<string | null>(null);
   const relatedAbortRef = useRef<AbortController | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  // 🔥 SMART LOCK: Мгновенная защита от Race Condition (пулеметной загрузки страниц)
+  const fetchedPagesRef = useRef<Set<number>>(new Set());
 
   const showToast = (msg: string) => {
     setToastMsg(msg);
@@ -94,7 +97,7 @@ function VibeContent() {
         if (error) throw error;
         if (data) setComments(data);
       } catch (e) {
-        console.error("Failed to load tensor logs:", e);
+        console.error("Failed to load comments:", e);
       }
     };
     fetchComments();
@@ -143,12 +146,17 @@ function VibeContent() {
   const fetchImages = useCallback(async (query: string, pageNum: number, reset: boolean) => {
     if (!query || !src) return;
     
-    setRelatedLoading(true);
-    
     if (reset) { 
+      fetchedPagesRef.current.clear(); // Сброс лока при новом запросе
       relatedAbortRef.current?.abort(); 
       relatedAbortRef.current = new AbortController(); 
     }
+
+    // Защита от дублей: если страница уже загружается, игнорируем
+    if (fetchedPagesRef.current.has(pageNum)) return;
+    fetchedPagesRef.current.add(pageNum);
+
+    setRelatedLoading(true);
 
     try {
       const params = new URLSearchParams({ page: String(pageNum), query });
@@ -201,13 +209,12 @@ function VibeContent() {
     }
 
     try {
-      // 🔥 ВШИТО: Передаем title в бэкенд для смыслового якоря 🔥
       const res = await fetch("/api/mutate", {
         method: "POST", 
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
           image_url: src, 
-          title: fallbackTitle, 
+          title: fallbackTitle, // ЯКОРЬ ПАМЯТИ
           history: historyRef.current 
         })
       });
@@ -256,7 +263,8 @@ function VibeContent() {
     if (!bottomRef.current) return;
     
     const observer = new IntersectionObserver(entries => {
-      if (entries[0].isIntersecting && relatedHasMore && !relatedLoading && currentQueryRef.current) {
+      // Убрано условие !relatedLoading. Smart Lock (fetchedPagesRef) сам решит, можно ли грузить.
+      if (entries[0].isIntersecting && relatedHasMore && currentQueryRef.current) {
         setRelatedPage(prev => { 
           const next = prev + 1; 
           fetchImages(currentQueryRef.current, next, false); 
@@ -268,7 +276,7 @@ function VibeContent() {
     observer.observe(bottomRef.current);
     
     return () => observer.disconnect();
-  }, [relatedHasMore, relatedLoading, fetchImages]);
+  }, [relatedHasMore, fetchImages]);
 
   function isPinned(photo: Photo) { 
     return pins.some(p => p.image_url === photo.src); 
@@ -501,7 +509,7 @@ function VibeContent() {
 
           <div className="flex gap-2 justify-center md:justify-end flex-1">
             
-            {/* Иконка Share */}
+            {/* Иконка Share (Стрелочка как в iOS/Pinterest) */}
             <button onClick={() => sharePhoto(currentPhoto)} className="btn-elegant border-neutral-700 text-neutral-300 !px-3" title="Share">
               <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
                 <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8M16 6l-4-4-4 4M12 2v13"/>
@@ -529,7 +537,7 @@ function VibeContent() {
         </div>
       </div>
 
-      {/* ВЫДАЧА (Производные векторы) 🔥 ТУТ ВЫРЕЗАНЫ ВСЕ ИДЕНТИФИКАТОРЫ 🔥 */}
+      {/* ВЫДАЧА (Производные векторы) */}
       <div className="w-full max-w-[1600px] mx-auto p-4 md:p-10 relative z-10 mt-4">
         <div className="flex items-center justify-center gap-6 mb-12 relative">
           <div className="h-[1px] flex-grow bg-gradient-to-r from-transparent to-white/10"></div>
@@ -553,7 +561,6 @@ function VibeContent() {
                       {isPinned(photo) ? 'Unlink' : 'Save'}
                     </button>
                   </div>
-                  {/* Иконка Share внизу */}
                   <div className="flex justify-end items-end w-full mt-auto">
                     <div className="flex gap-2">
                       <button className="icon-btn" title="Share" onClick={(e) => { e.stopPropagation(); sharePhoto(photo); }}>
@@ -584,7 +591,7 @@ function VibeContent() {
 
       {toastMsg && <div className="toast-popup">{toastMsg}</div>}
 
-      {/* МОДАЛКА КОММЕНТАРИЕВ (Человеческая) */}
+      {/* МОДАЛКА КОММЕНТАРИЕВ */}
       {showCommentsModal && (
         <div className="fixed inset-0 z-[600] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 md:p-6" onClick={() => setShowCommentsModal(false)}>
           <div onClick={e => e.stopPropagation()} className="glass-panel w-full max-w-xl flex flex-col overflow-hidden shadow-2xl">

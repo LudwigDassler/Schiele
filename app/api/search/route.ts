@@ -11,12 +11,44 @@ import { bayesianGuillotine } from "../../../lib/overseer";
 const HYDRA_PROXY_URL = process.env.HYDRA_PROXY_URL || "https://kashmir-hydra.firsovivan2003.workers.dev";
 const PAGE_SIZE = 35;
 const CACHE_TTL_HOURS = 24;
-const MAX_CACHE_ENTRIES = 1000; // Лимит записей в кэше
+const MAX_CACHE_ENTRIES = 1000;
+
+// ==========================================
+// ЭВРИСТИЧЕСКАЯ ГИЛЬОТИНА (PRE-FILTER)
+// ==========================================
+const TOXIC_PATTERNS = /(stock|vector|clipart|template|royalty.?free|watermark|alamy|getty|shutter|depositphotos|123rf|dreamstime|freepik|pngtree|illustration|logo|icon|map|chart|graph|diagram|infographic|drawing|sketch)/i;
+const SEO_SPAM = /(download|buy|premium|price|subscribe|cheap|discount|high.?res|hd.?free|wallpaper.?4k)/i;
+
+function heuristicGuillotine(results: any[], originalQuery: string) {
+  return results.filter((item) => {
+    const url = (item.link || item.src || "").toLowerCase();
+    const title = (item.title || "").toLowerCase();
+
+    if (!url.startsWith("http")) return false;
+    
+    // Рубим стоковые помойки и векторы
+    if (TOXIC_PATTERNS.test(url) || TOXIC_PATTERNS.test(title)) return false;
+    
+    // Рубим коммерческий спам
+    if (SEO_SPAM.test(title) || SEO_SPAM.test(url)) return false;
+
+    // Энтропия заголовка (Отсекаем SEO перечисления слов)
+    const wordsCount = title.split(/[\s,|_-]+/).length;
+    if (wordsCount > 18) return false;
+
+    // Специфичная защита от "ПОП = Population"
+    const isPopTrap = originalQuery.toLowerCase().includes("поп");
+    if (isPopTrap && (title.includes("popul") || title.includes("africa") || title.includes("world map") || title.includes("geography"))) {
+      return false;
+    }
+
+    return true;
+  });
+}
 
 // ==========================================
 // ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
 // ==========================================
-
 const safelyParseJson = (str: string) => {
   try { return JSON.parse(str); } catch { return null; }
 };
@@ -37,7 +69,6 @@ async function readCache(key: string, allowStale = false): Promise<any[] | null>
     
     const ageHours = (Date.now() - new Date(data.created_at).getTime()) / 36e5;
     if (!allowStale && ageHours > CACHE_TTL_HOURS) {
-      // Автоматическая очистка устаревших записей
       await supabase.from("search_cache").delete().eq("query_key", key);
       return null;
     }
@@ -51,7 +82,6 @@ async function readCache(key: string, allowStale = false): Promise<any[] | null>
 
 async function writeCache(key: string, results: any[]) {
   try {
-    // Очистка старых записей при превышении лимита
     const { count } = await supabase.from("search_cache").select("*", { count: "exact", head: true });
     if ((count || 0) > MAX_CACHE_ENTRIES) {
       await supabase
@@ -96,7 +126,8 @@ async function searchDuckDuckGo(query: string, page: number) {
     const vqd = vqdMatch[1];
 
     const offset = (page - 1) * PAGE_SIZE;
-    const imgTargetUrl = `https://duckduckgo.com/i.js?l=us-en&o=json&q=${encodeURIComponent(query)}&vqd=${vqd}&f=,,,,&s=${offset}`;
+    // ВАЖНО: Добавил f=type:photo в парсер DDG для нативной фильтрации
+    const imgTargetUrl = `https://duckduckgo.com/i.js?l=us-en&o=json&q=${encodeURIComponent(query)}&vqd=${vqd}&f=type:photo&s=${offset}`;
     const imgProxyUrl = `${HYDRA_PROXY_URL}/?url=${encodeURIComponent(imgTargetUrl)}`;
 
     const imgRes = await fetch(imgProxyUrl, { 
@@ -135,7 +166,8 @@ async function searchBing(query: string, page: number) {
 
   try {
     const first = (page - 1) * PAGE_SIZE + 1;
-    const targetUrl = `https://www.bing.com/images/search?q=${encodeURIComponent(query)}&setmkt=en-US&setlang=en-US&form=HDRSC2&first=${first}`;
+    // Фильтр Bing: +filterui:photo-photo (только фото)
+    const targetUrl = `https://www.bing.com/images/search?q=${encodeURIComponent(query)}&qft=+filterui:photo-photo&setmkt=en-US&setlang=en-US&form=HDRSC2&first=${first}`;
     const proxyUrl = `${HYDRA_PROXY_URL}/?url=${encodeURIComponent(targetUrl)}`;
 
     const response = await fetch(proxyUrl, {
@@ -282,7 +314,7 @@ export async function GET(req: Request) {
     }
 
     // ==========================================
-    // ФАЗА 2: БАЙЕСОВСКАЯ ГИЛЬОТИНА
+    // ФАЗА 2: ДВОЙНАЯ ГИЛЬОТИНА (Эвристика + Байес)
     // ==========================================
     let filterApplied = false;
     
@@ -290,15 +322,25 @@ export async function GET(req: Request) {
       if (externalArtifacts && externalArtifacts.length > 0) {
         console.log(`[OVERSEER] Суд начался. Артефактов на входе: ${externalArtifacts.length}`);
         
-        const survivedArtifacts = bayesianGuillotine(externalArtifacts);
+        // 1. Быстрая эвристическая зачистка стоков и карт
+        const pureArtifacts = heuristicGuillotine(externalArtifacts, rawQuery);
+        const heuristicDeathToll = externalArtifacts.length - pureArtifacts.length;
+        if (heuristicDeathToll > 0) {
+            console.log(`[OVERSEER: HEURISTIC] Казнено карт/векторов: ${heuristicDeathToll}`);
+        }
+
+        // 2. Глубокий Байесовский анализ
+        const survivedArtifacts = bayesianGuillotine(pureArtifacts);
 
         if (survivedArtifacts.length > 0) {
-          const deathToll = externalArtifacts.length - survivedArtifacts.length;
+          const bayesDeathToll = pureArtifacts.length - survivedArtifacts.length;
           externalArtifacts = survivedArtifacts;
           filterApplied = true;
-          console.log(`[OVERSEER] Казнено: ${deathToll}. Выжило: ${externalArtifacts.length}`);
+          console.log(`[OVERSEER: BAYES] Казнено: ${bayesDeathToll}. Итого выжило: ${externalArtifacts.length}`);
         } else {
           console.warn(`[OVERSEER] Активирована амнистия: все результаты отфильтрованы.`);
+          // Амнистия: если Байес убил всех, отдаем то, что выжило после Эвристики
+          externalArtifacts = pureArtifacts;
         }
       }
     } catch (filterError: any) {

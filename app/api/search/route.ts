@@ -16,7 +16,10 @@ const MAX_CACHE_ENTRIES = 1000;
 // ==========================================
 // ЭВРИСТИЧЕСКАЯ ГИЛЬОТИНА (PRE-FILTER)
 // ==========================================
+// 1. Ультимативный паттерн стокового и графического мусора (Регулярное выражение)
 const TOXIC_PATTERNS = /(stock|vector|clipart|template|royalty.?free|watermark|alamy|getty|shutter|depositphotos|123rf|dreamstime|freepik|pngtree|illustration|logo|icon|map|chart|graph|diagram|infographic|drawing|sketch)/i;
+
+// 2. Паттерн коммерческого SEO-спама (Продажа картинок)
 const SEO_SPAM = /(download|buy|premium|price|subscribe|cheap|discount|high.?res|hd.?free|wallpaper.?4k)/i;
 
 function heuristicGuillotine(results: any[], originalQuery: string) {
@@ -24,19 +27,20 @@ function heuristicGuillotine(results: any[], originalQuery: string) {
     const url = (item.link || item.src || "").toLowerCase();
     const title = (item.title || "").toLowerCase();
 
+    // ПРАВИЛО 1: Рубим битые ссылки
     if (!url.startsWith("http")) return false;
     
-    // Рубим стоковые помойки и векторы
+    // ПРАВИЛО 2: Проверка на совпадение с мусорными корнями (Токсичная регулярка)
     if (TOXIC_PATTERNS.test(url) || TOXIC_PATTERNS.test(title)) return false;
     
-    // Рубим коммерческий спам
+    // ПРАВИЛО 3: Проверка на коммерческий SEO-спам
     if (SEO_SPAM.test(title) || SEO_SPAM.test(url)) return false;
 
-    // Энтропия заголовка (Отсекаем SEO перечисления слов)
+    // ПРАВИЛО 4: Анализ Энтропии Заголовка (SEO Keyword Stuffing)
     const wordsCount = title.split(/[\s,|_-]+/).length;
     if (wordsCount > 18) return false;
 
-    // Специфичная защита от "ПОП = Population"
+    // ПРАВИЛО 5: Защита от "ПОП = Population" (Твой кейс с Игги Попом)
     const isPopTrap = originalQuery.toLowerCase().includes("поп");
     if (isPopTrap && (title.includes("popul") || title.includes("africa") || title.includes("world map") || title.includes("geography"))) {
       return false;
@@ -50,7 +54,11 @@ function heuristicGuillotine(results: any[], originalQuery: string) {
 // ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
 // ==========================================
 const safelyParseJson = (str: string) => {
-  try { return JSON.parse(str); } catch { return null; }
+  try { 
+    return JSON.parse(str); 
+  } catch { 
+    return null; 
+  }
 };
 
 function cacheKey(query: string, page: number) {
@@ -64,10 +72,11 @@ async function readCache(key: string, allowStale = false): Promise<any[] | null>
       .select("results, created_at")
       .eq("query_key", key)
       .maybeSingle();
-    
+      
     if (!data) return null;
     
     const ageHours = (Date.now() - new Date(data.created_at).getTime()) / 36e5;
+    
     if (!allowStale && ageHours > CACHE_TTL_HOURS) {
       await supabase.from("search_cache").delete().eq("query_key", key);
       return null;
@@ -82,14 +91,17 @@ async function readCache(key: string, allowStale = false): Promise<any[] | null>
 
 async function writeCache(key: string, results: any[]) {
   try {
-    const { count } = await supabase.from("search_cache").select("*", { count: "exact", head: true });
+    const { count } = await supabase
+      .from("search_cache")
+      .select("*", { count: "exact", head: true });
+      
     if ((count || 0) > MAX_CACHE_ENTRIES) {
       await supabase
         .from("search_cache")
         .delete()
         .lt("created_at", new Date(Date.now() - CACHE_TTL_HOURS * 36e5).toISOString());
     }
-
+    
     await supabase
       .from("search_cache")
       .upsert({ query_key: key, results, created_at: new Date().toISOString() }, { onConflict: "query_key" });
@@ -100,7 +112,7 @@ async function writeCache(key: string, results: any[]) {
 
 async function searchDuckDuckGo(query: string, page: number) {
   const headers = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
     "Accept-Language": "en-US,en;q=0.9",
   };
   
@@ -117,15 +129,20 @@ async function searchDuckDuckGo(query: string, page: number) {
       signal: controller.signal 
     });
     
-    if (!tokenRes.ok) throw new Error(`Hydra Proxy (Token) error: ${tokenRes.status}`);
+    if (!tokenRes.ok) {
+      throw new Error(`Hydra Proxy (Token) error`);
+    }
     
     const html = await tokenRes.text();
     const vqdMatch = html.match(/vqd=["'](.*?)["']/);
     
-    if (!vqdMatch) throw new Error("DuckDuckGo не отдал токен vqd");
+    if (!vqdMatch) {
+      throw new Error("No vqd");
+    }
     const vqd = vqdMatch[1];
 
     const offset = (page - 1) * PAGE_SIZE;
+    
     // ВАЖНО: Добавил f=type:photo в парсер DDG для нативной фильтрации
     const imgTargetUrl = `https://duckduckgo.com/i.js?l=us-en&o=json&q=${encodeURIComponent(query)}&vqd=${vqd}&f=type:photo&s=${offset}`;
     const imgProxyUrl = `${HYDRA_PROXY_URL}/?url=${encodeURIComponent(imgTargetUrl)}`;
@@ -136,12 +153,12 @@ async function searchDuckDuckGo(query: string, page: number) {
       signal: controller.signal 
     });
     
-    if (!imgRes.ok) throw new Error(`Hydra Proxy (Images) error: ${imgRes.status}`);
-    
     const data = await imgRes.json();
     clearTimeout(timeoutId);
 
-    if (!data.results || data.results.length === 0) return [];
+    if (!data.results) {
+      return [];
+    }
 
     return data.results.map((r: any, index: number) => ({
       id: `ddg-${Date.now()}-${offset + index}`,
@@ -166,6 +183,7 @@ async function searchBing(query: string, page: number) {
 
   try {
     const first = (page - 1) * PAGE_SIZE + 1;
+    
     // Фильтр Bing: +filterui:photo-photo (только фото)
     const targetUrl = `https://www.bing.com/images/search?q=${encodeURIComponent(query)}&qft=+filterui:photo-photo&setmkt=en-US&setlang=en-US&form=HDRSC2&first=${first}`;
     const proxyUrl = `${HYDRA_PROXY_URL}/?url=${encodeURIComponent(targetUrl)}`;
@@ -173,16 +191,12 @@ async function searchBing(query: string, page: number) {
     const response = await fetch(proxyUrl, {
       cache: "no-store",
       headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
         "Accept-Language": "en-US,en;q=0.9",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8"
       },
       signal: controller.signal
     });
-    
     clearTimeout(timeoutId);
-
-    if (!response.ok) throw new Error(`Hydra Proxy dropped connection with status: ${response.status}`);
 
     const html = await response.text();
     const $ = cheerio.load(html);
@@ -260,13 +274,22 @@ export async function GET(req: Request) {
     const isExplicitOverride = !!explicitMode && explicitMode !== "classic";
     const intent = isExplicitOverride ? "kashmir" : classifyIntent(rawQuery);
 
-    console.log(`[KASHMIR ROUTER] "${rawQuery}" -> ${intent}${isExplicitOverride ? ` (оверрайд: ${explicitMode})` : ""}, User: ${userId}, Page: ${page}`);
+    // 🔥 ЛИНГВИСТИЧЕСКИЙ САНИТАЙЗЕР (Лечим синтаксический инфаркт парсера) 🔥
+    let safeQuery = rawQuery
+      .replace(/^[^a-zA-Z0-9А-Яа-я]+/, '') 
+      .replace(/([a-zA-Z0-9А-Яа-я]+)(?:\s+\1\b)+/gi, '$1') 
+      .replace(/\s+/g, ' ')
+      .trim();
+      
+    if (!safeQuery) safeQuery = "cinematic aesthetic";
 
-    let optimizedQuery = rawQuery;
+    console.log(`[KASHMIR ROUTER] "${safeQuery}" -> ${intent}${isExplicitOverride ? ` (оверрайд: ${explicitMode})` : ""}, User: ${userId}, Page: ${page}`);
+
+    let optimizedQuery = safeQuery;
 
     if (intent === "kashmir") {
       try {
-        const processed = await kashmir.processQuery(rawQuery, userId);
+        const processed = await kashmir.processQuery(safeQuery, userId);
         if (processed && typeof processed === 'string' && processed.trim() !== "") {
           optimizedQuery = processed.trim();
         }
@@ -274,6 +297,9 @@ export async function GET(req: Request) {
         console.warn(`[KASHMIR CORTEX WARNING] Personality core glitched, falling back to raw query.`);
       }
     }
+
+    // Финальная зачистка перед запросом в кэш
+    optimizedQuery = optimizedQuery.replace(/([a-zA-Z0-9А-Яа-я]+)(?:\s+\1\b)+/gi, '$1').trim();
 
     console.log(`[KASHMIR] Vibe formulated: "${optimizedQuery}"`);
     const key = cacheKey(optimizedQuery, page);
@@ -288,6 +314,7 @@ export async function GET(req: Request) {
     let externalArtifacts: any[] = [];
     
     const cached = await readCache(key);
+    
     if (cached && cached.length > 0) {
       console.log(`[KASHMIR CACHE] Hit для "${optimizedQuery}" (страница ${page})`);
       externalArtifacts = cached;
@@ -323,8 +350,9 @@ export async function GET(req: Request) {
         console.log(`[OVERSEER] Суд начался. Артефактов на входе: ${externalArtifacts.length}`);
         
         // 1. Быстрая эвристическая зачистка стоков и карт
-        const pureArtifacts = heuristicGuillotine(externalArtifacts, rawQuery);
+        const pureArtifacts = heuristicGuillotine(externalArtifacts, safeQuery);
         const heuristicDeathToll = externalArtifacts.length - pureArtifacts.length;
+        
         if (heuristicDeathToll > 0) {
             console.log(`[OVERSEER: HEURISTIC] Казнено карт/векторов: ${heuristicDeathToll}`);
         }
@@ -339,8 +367,7 @@ export async function GET(req: Request) {
           console.log(`[OVERSEER: BAYES] Казнено: ${bayesDeathToll}. Итого выжило: ${externalArtifacts.length}`);
         } else {
           console.warn(`[OVERSEER] Активирована амнистия: все результаты отфильтрованы.`);
-          // Амнистия: если Байес убил всех, отдаем то, что выжило после Эвристики
-          externalArtifacts = pureArtifacts;
+          externalArtifacts = pureArtifacts; 
         }
       }
     } catch (filterError: any) {

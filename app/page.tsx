@@ -27,6 +27,17 @@ export default function Home() {
   const [isResultsActive, setIsResultsActive] = useState(false);
   const [searchMode, setSearchMode] = useState<'visual' | 'sonic'>('visual');
   const [matchScore, setMatchScore] = useState(98.4);
+
+  // ==========================================
+  // СТЕЙТЫ СИНЕСТЕЗИИ (SONIC ENGINE)
+  // ==========================================
+  const [isSonicAnalyzing, setIsSonicAnalyzing] = useState(false);
+  const [sonicLogs, setSonicLogs] = useState<string[]>([]);
+  const [displayVibe, setDisplayVibe] = useState("");
+  
+  // 🔥 ВАЖНО: ЗАМЕНИ НА СВОЙ РЕАЛЬНЫЙ URL ВИЗУАЛЬНОГО ОРАКУЛА! 🔥
+  const ORACLE_URL = "https://gelbet-oracle-1234.onrender.com"; 
+  const SONIC_URL = "https://gelbet-sonic-engine.onrender.com";
   
   // Стейты данных
   const [photos, setPhotos] = useState<Photo[]>([]);
@@ -111,7 +122,7 @@ export default function Home() {
         const modeFromUrl = urlParams.get("mode") as 'visual' | 'sonic';
         
         if (modeFromUrl) setSearchMode(modeFromUrl);
-        if (qFromUrl) {
+        if (qFromUrl && modeFromUrl !== 'sonic') {
             setSearch(qFromUrl); setSearchQuery(qFromUrl); setIsResultsActive(true);
             fetchPhotos(qFromUrl, 1, true, modeFromUrl || 'visual');
         }
@@ -191,7 +202,64 @@ export default function Home() {
   };
 
   // ==========================================
-  // ЯДРО ПОИСКА
+  // ЯДРО СИНЕСТЕЗИИ (SONIC ENGINE -> ORACLE)
+  // ==========================================
+  const triggerSonicResonance = async (query: string) => {
+    setIsSonicAnalyzing(true);
+    setSonicLogs([`[SYSTEM] Инициация Sonic Resonance для: ${query}`]);
+    setDisplayVibe("TRANSLATING WAVES...");
+    
+    try {
+      // АКТ 1: БОГ-ОТЕЦ
+      const sonicRes = await fetch(`${SONIC_URL}/api/resonate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: query })
+      });
+      const sonicData = await sonicRes.json();
+      if (sonicData.status === "error") throw new Error(sonicData.message);
+
+      for (let i = 0; i < sonicData.logs.length; i++) {
+        setSonicLogs(prev => [...prev, sonicData.logs[i]]);
+        await new Promise(resolve => setTimeout(resolve, 600)); 
+      }
+
+      setSonicLogs(prev => [...prev, "[СИНЕСТЕЗИЯ] 32D тензор захвачен. Отправка Оракулу..."]);
+      await new Promise(resolve => setTimeout(resolve, 800));
+
+      // АКТ 2: СЫН (ОРАКУЛ)
+      const oracleRes = await fetch(`${ORACLE_URL}/api/mutate_from_tensor`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ anchor: sonicData.anchor, visual_tensor: sonicData.visual_tensor })
+      });
+      const oracleData = await oracleRes.json();
+      if (oracleData.status === "error") throw new Error(oracleData.message);
+
+      setSonicLogs(prev => [...prev, `[ОРАКУЛ] Архетип: ${oracleData.archetype}`]);
+      await new Promise(resolve => setTimeout(resolve, 500));
+      setSonicLogs(prev => [...prev, `[ОРАКУЛ] Формулировка: "${oracleData.smartQuery}"`]);
+      
+      setDisplayVibe(oracleData.displayVibe);
+      setSonicLogs(prev => [...prev, "[SYSTEM] РЕЗОНАНС ДОСТИГНУТ. ПЕРЕХОД В ВИЗУАЛЬНЫЙ ПЛАН..."]);
+      
+      await new Promise(resolve => setTimeout(resolve, 1500));
+
+      // АКТ 3: ПЕРЕХОД В ВИЗУАЛЬНЫЙ РЕЖИМ
+      setSearch(oracleData.smartQuery);
+      setSearchMode('visual');
+      setIsSonicAnalyzing(false);
+      handleSearch(undefined, oracleData.smartQuery); // Триггерим обычный поиск картинок
+
+    } catch (error: any) {
+      setSonicLogs(prev => [...prev, `[FATAL ERROR] ${error.message}`]);
+      setDisplayVibe("RESONANCE FAILED");
+      setTimeout(() => { setIsSonicAnalyzing(false); setDisplayVibe(""); }, 3000);
+    }
+  };
+
+  // ==========================================
+  // ЯДРО ПОИСКА (ВИЗУАЛЬНЫЙ)
   // ==========================================
   const fetchPhotos = useCallback(async (queryParam: string, pageNum: number, reset: boolean, modeOverride?: string) => {
     if (!queryParam) return;
@@ -256,7 +324,7 @@ export default function Home() {
   }, [hasMore, page, searchQuery, fetchPhotos]);
 
   // ==========================================
-  // ИСТОРИЯ
+  // ИСТОРИЯ И РОУТЕР ПОИСКА
   // ==========================================
   function saveUserTag(tag: string) { 
     const formattedTag = tag.trim().charAt(0).toUpperCase() + tag.trim().slice(1); 
@@ -282,6 +350,12 @@ export default function Home() {
     const query = (forceQuery || search).trim();
     if (!query) return; 
 
+    // 🔥 ИНТЕРЦЕПТОР: Если режим музыки и это ручной ввод — запускаем Синестезию 🔥
+    if (searchMode === 'sonic' && !forceQuery) {
+      triggerSonicResonance(query);
+      return;
+    }
+
     setIsResultsActive(true);
     window.history.pushState({}, '', `/?q=${encodeURIComponent(query)}&mode=${searchMode}`);
 
@@ -289,7 +363,12 @@ export default function Home() {
     fetchPhotos(query, 1, true);
   }
 
-  function handleTagClick(tag: string) { setSearch(tag); handleSearch(undefined, tag); }
+  function handleTagClick(tag: string) { 
+    setSearch(tag); 
+    // Если мы в звуковом режиме, клик по тегу ищет музыку
+    if (searchMode === 'sonic') triggerSonicResonance(tag);
+    else handleSearch(undefined, tag); 
+  }
 
   function resetUI() {
     setIsResultsActive(false); setSearch(""); setSearchQuery(""); setShowSaved(false);
@@ -391,7 +470,7 @@ export default function Home() {
         .btn-elegant { background: transparent; border: 1px solid rgba(255,255,255,0.2); color: #fff; font-family: 'Inter', sans-serif; font-size: 9px; font-weight: 500; text-transform: uppercase; letter-spacing: 2px; padding: 8px 16px; cursor: pointer; transition: all 0.3s ease; border-radius: 99px; display: flex; align-items: center; justify-content: center; gap: 6px; }
         .btn-elegant:hover:not(:disabled) { background: #fff; color: #000; box-shadow: 0 0 15px rgba(255,255,255,0.2); }
 
-        /* ИСПРАВЛЕННАЯ СТРОКА ПОИСКА (БЕЗ ABSOLUTE, ЕСТЕСТВЕННЫЙ ПОТОК) */
+        /* ИСПРАВЛЕННАЯ СТРОКА ПОИСКА */
         .search-container { 
           position: relative; margin: 0 auto; margin-top: 45vh; transform: translateY(-50%); 
           width: 100%; max-width: 900px; padding: 40px 16px; transition: all 1s cubic-bezier(0.16, 1, 0.3, 1); 
@@ -430,12 +509,10 @@ export default function Home() {
         .vector-btn::after { content: ''; position: absolute; bottom: 0; left: 50%; right: 50%; height: 1px; background: #fff; transition: all 0.3s ease; }
         .vector-btn.active, .vector-btn:hover { color: #fff; text-shadow: 0 0 10px rgba(255,255,255,0.5); }
         .vector-btn.active::after { left: 0; right: 0; }
-        .vector-btn.sonic-mode.active::after { background: #10b981; }
+        .vector-btn.sonic-mode.active::after { background: #10b981; box-shadow: 0 0 10px #10b981; }
 
-        /* КОНТЕЙНЕР РЕЗУЛЬТАТОВ (Тоже в естественном потоке) */
         .content-area { width: 100%; max-width: 1800px; margin: 0 auto; display: none; opacity: 0; transform: translateY(40px); transition: all 1.2s cubic-bezier(0.16, 1, 0.3, 1); padding: 0 16px 80px; }
         @media (min-width: 768px) { .content-area { padding: 0 32px 80px; } }
-        
         .results-active .content-area { display: block; opacity: 1; transform: translateY(0); margin-top: 20px; }
 
         .section-title { font-family: 'Space Mono', monospace; font-size: 9px; text-transform: uppercase; letter-spacing: 2px; color: var(--text-muted); margin-bottom: 16px; border-bottom: 1px solid var(--glass-border); padding-bottom: 8px; display: flex; justify-content: space-between; align-items: flex-end; }
@@ -497,24 +574,54 @@ export default function Home() {
         </header>
 
         <div className="search-container">
+          {displayVibe && isSonicAnalyzing && (
+            <div className="text-white/80 mb-6 text-center font-sync tracking-widest text-xs md:text-sm animate-pulse">
+              {displayVibe}
+            </div>
+          )}
+
           <form className="search-input-wrapper w-full" onSubmit={(e) => handleSearch(e)}>
-            <input type="text" id="searchInput" className="search-input" placeholder={searchMode === 'sonic' ? "AWAITING AUDIO STREAM..." : "DEFINE VECTOR..."} autoComplete="off" value={search} onChange={(e) => setSearch(e.target.value)} />
+            <input 
+              type="text" 
+              id="searchInput" 
+              className="search-input" 
+              placeholder={searchMode === 'sonic' ? "ENTER AUDIO TARGET..." : "DEFINE VECTOR..."} 
+              autoComplete="off" 
+              value={search} 
+              onChange={(e) => setSearch(e.target.value)} 
+              disabled={isSonicAnalyzing}
+            />
           </form>
           
-          <div className="quick-tags relative">
-            {tagsToDisplay.map(tag => (
-              <button key={tag} type="button" className="tag-pill" onClick={() => handleTagClick(tag)}>{tag}</button>
-            ))}
-            {userTags.length > 0 && (
-              <button onClick={clearHistory} className="ml-2 text-[8px] font-mono text-neutral-600 hover:text-white transition-colors uppercase tracking-widest mt-1">
-                [ Wipe ]
-              </button>
-            )}
-          </div>
+          {/* 🔥 КИБЕРПАНК ТЕРМИНАЛ ОРАКУЛА 🔥 */}
+          {isSonicAnalyzing ? (
+            <div className="w-full max-w-2xl font-mono text-[9px] md:text-[11px] text-[#10b981] uppercase tracking-[0.2em] text-left p-6 md:p-8 rounded-lg mt-8 transition-all duration-500 bg-black/60 backdrop-blur-md border border-[#10b981]/20 shadow-[0_0_30px_rgba(16,185,129,0.1)]">
+              {sonicLogs.map((log, idx) => (
+                <div key={idx} className="mb-3 opacity-90 animate-pulse leading-relaxed">
+                  {log}
+                </div>
+              ))}
+              <div className="mt-4 flex items-center gap-3">
+                <div className="w-2 h-4 bg-[#10b981] animate-ping"></div>
+                <span className="text-[#10b981]/50">CALCULATING MANIFOLD...</span>
+              </div>
+            </div>
+          ) : (
+            <div className="quick-tags relative">
+              {tagsToDisplay.map(tag => (
+                <button key={tag} type="button" className="tag-pill" onClick={() => handleTagClick(tag)}>{tag}</button>
+              ))}
+              {userTags.length > 0 && (
+                <button onClick={clearHistory} className="ml-2 text-[8px] font-mono text-neutral-600 hover:text-white transition-colors uppercase tracking-widest mt-1">
+                  [ Wipe ]
+                </button>
+              )}
+            </div>
+          )}
 
           <div className="vector-selector">
-            <button type="button" className={`vector-btn ${searchMode === 'visual' ? 'active' : ''}`} onClick={() => setSearchMode('visual')}>Visual Plane</button>
-            <button type="button" className={`vector-btn sonic-mode ${searchMode === 'sonic' ? 'active' : ''}`} onClick={() => setSearchMode('sonic')}>Sonic Resonance</button>
+            <button type="button" disabled={isSonicAnalyzing} className={`vector-btn ${searchMode === 'visual' ? 'active' : ''}`} onClick={() => setSearchMode('visual')}>Visual Plane</button>
+            <button type="button" disabled={isSonicAnalyzing} className={`vector-btn sonic-mode ${searchMode === 'sonic' ? 'active' : ''}`} onClick={() => setSearchMode('sonic')}>Sonic Resonance</button>
           </div>
         </div>
 
@@ -565,7 +672,6 @@ export default function Home() {
                           {saved ? 'Unlink' : 'Save'}
                         </button>
                       </div>
-                      {/* 🔥 Выжжены надписи ID, остались только иконки шеринга и чата 🔥 */}
                       <div className="flex justify-end items-end w-full mt-auto">
                         <div className="flex gap-2">
                           <button className="icon-btn" title="Comments" onClick={(e) => { e.stopPropagation(); setCommentPin(photo); }}>
@@ -590,7 +696,7 @@ export default function Home() {
 
       {toastMsg && <div className="toast-popup">{toastMsg}</div>}
 
-      {/* ЭЛЕГАНТНАЯ МОДАЛКА КОММЕНТАРИЕВ ДЛЯ ГЛАВНОЙ */}
+      {/* ЭЛЕГАНТНАЯ МОДАЛКА КОММЕНТАРИЕВ */}
       {commentPin && (
         <div className="fixed inset-0 z-[600] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 md:p-6" onClick={() => setCommentPin(null)}>
           <div onClick={e => e.stopPropagation()} className="glass-panel w-full max-w-xl flex flex-col overflow-hidden shadow-2xl">

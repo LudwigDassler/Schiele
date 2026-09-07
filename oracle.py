@@ -1,5 +1,7 @@
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from typing import List, Optional
 import numpy as np
 import cv2
 from PIL import Image
@@ -28,10 +30,7 @@ CLEANUP_REGEX = re.compile(
     re.IGNORECASE
 )
 
-# Фильтр: 5 и более согласных букв подряд (отсекает мусор вроде hmednntnga)
 CONSONANT_CLUSTER_REGEX = re.compile(r'[bcdfghjklmnpqrstvwxzBCDFGHJKLMNPQRSTVWXZБВГДЖЗЙКЛМНПРСТФХЦЧШЩЪЬ]{5,}')
-
-# Фильтр: хеши, содержащие одновременно и буквы, и цифры (например, a0k, img12345)
 HASH_REGEX = re.compile(r'^(?=.*[a-zA-Zа-яА-Я])(?=.*\d)[a-zA-Zа-яА-Я\d]{4,}$')
 
 def clean_anchor_title(raw_title: str) -> str:
@@ -39,11 +38,9 @@ def clean_anchor_title(raw_title: str) -> str:
     if not raw_title or raw_title == "Aesthetic Artifact":
         return ""
         
-    # 1. Убиваем URL, пути, расширения
     clean = re.sub(r'http\S+|www\S+', '', raw_title)
     clean = re.sub(r'\.(jpg|jpeg|png|webp|gif|mp4|avif)\b', '', clean, flags=re.IGNORECASE)
     
-    # 2. Убиваем скобки, спецсимволы. Дефисы и подчеркивания меняем на пробелы
     clean = re.sub(r'\[.*?\]|\(.*?\)', '', clean)
     clean = re.sub(r'[-_]', ' ', clean)
     clean = CLEANUP_REGEX.sub('', clean)
@@ -51,21 +48,17 @@ def clean_anchor_title(raw_title: str) -> str:
     
     valid_words = []
     for word in clean.split():
-        # 3. Фильтры лексического мусора
-        if len(word) > 15: continue # Слишком длинное (вероятно хеш)
-        if HASH_REGEX.match(word): continue # Смесь цифр и букв
-        if CONSONANT_CLUSTER_REGEX.search(word): continue # Нечитаемые наборы согласных
+        if len(word) > 15: continue
+        if HASH_REGEX.match(word): continue
+        if CONSONANT_CLUSTER_REGEX.search(word): continue
         
-        # Пропускаем одиночные странные буквы (оставляем только логичные предлоги/артикли)
         if len(word) == 1 and word.lower() not in ['a', 'i', 'о', 'у', 'а', 'я', 'и', 'к', 'в', 'с']:
             continue
             
         valid_words.append(word)
 
-    # Берем 2-3 самых значимых слова
     final_anchor = " ".join(valid_words[:3]).strip()
     
-    # Если после зачистки остался мусор в 1-2 символа — лучше сбросить якорь, чем отравлять им запрос
     if len(final_anchor) <= 2:
         return ""
         
@@ -74,7 +67,6 @@ def clean_anchor_title(raw_title: str) -> str:
 # ==============================================================================
 # БАЗА АРХЕТИПОВ (32-МЕРНОЕ ПРОСТРАНСТВО СИЛЛОГИЗМОВ)
 # ==============================================================================
-# Оси 24-31: [smp_syllogism, qed_resolution, numbness_index, gilmour_peak, pink_noise, synesthetic_drift, solipsism, temporal_decay]
 ARCHETYPE_VECTORS = {
     "COMFORTABLY_NUMB": (
         np.array([0.6, 0.4, 0.3, 0.2, 0.2, 0.4, 0.5, 0.8, 0.9, 0.7, 0.3, 0.4, 0.5, 0.8, 0.2, 0.2, 0.6, 0.8, 0.4, 0.2, 0.5, 0.3, 0.8, 0.2, 
@@ -140,11 +132,9 @@ def extract_32d_consciousness_tensor(img_data: bytes):
     y, x = np.ogrid[:h, :w]
     gauss_kernel = np.exp(-((x - cx)**2 + (y - cy)**2) / (2.0 * (50**2)))
 
-    # Детектор лиц (Gatekeeper)
     faces = FACE_CASCADE.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=4, minSize=(30, 30))
     has_human = len(faces) > 0
 
-    # === БАЗОВАЯ ФИЗИКА (1-23) ===
     luminance = np.mean(gray) / 255.0
     rms_contrast = np.clip(np.std(gray) / 128.0, 0.0, 1.0)
     
@@ -221,43 +211,32 @@ def extract_32d_consciousness_tensor(img_data: bytes):
     void_ratio = np.clip(np.sum(gradient_mag < 15.0) / (256 * 256), 0.0, 1.0)
     edge_sharpness = np.clip(np.mean(laplacian_var) / 600.0, 0.0, 1.0) if np.sum(edges > 0) > 50 else 0.1
 
-    # === РАСШИРЕНИЕ: СИЛЛОГИЗМ И ГИЛМОР (24-31) ===
-    
-    # 24. S-M-P Syllogism (Разделение глубины на 3 плана)
     mid_ring_mask = (gauss_kernel < 0.8) & (gauss_kernel > 0.2)
     fg_grad = np.mean(gradient_mag[gauss_kernel >= 0.8])
     mg_grad = np.mean(gradient_mag[mid_ring_mask])
     bg_grad = np.mean(gradient_mag[gauss_kernel <= 0.2]) + 1e-5
     smp_syllogism = np.clip((fg_grad - bg_grad) / (mg_grad + 1e-5) / 5.0, 0.0, 1.0)
 
-    # 25. Q.E.D. (Абсолютное разрешение)
     qed_resolution = np.clip(gestalt * vignette * (1.0 - void_ratio) * 2.0, 0.0, 1.0)
-
-    # 26. Numbness Index (Оцепенение / Туман)
     numbness_index = np.clip((depth * (1.0 - rms_contrast) * (1.0 - edge_sharpness)) * 3.0, 0.0, 1.0)
 
-    # 27. Gilmour Peak (Гитарное соло / Прорезь)
     laplacian_full = cv2.Laplacian(gray, cv2.CV_64F)
     max_lap = np.max(np.abs(laplacian_full))
     mean_lap = np.mean(np.abs(laplacian_full)) + 1e-5
     gilmour_peak = np.clip((max_lap / mean_lap) / 50.0, 0.0, 1.0) * numbness_index
 
-    # 28. Pink Noise (1/f спектр)
     low_freq_mask = (x - cx)**2 + (y - cy)**2 <= (32**2)
     low_power = np.sum(mag_spectrum[low_freq_mask])
     high_power = np.sum(mag_spectrum[high_freq_mask]) + 1e-5
     pink_noise = np.clip((low_power / high_power) / 5.0, 0.0, 1.0)
 
-    # 29. Synesthetic Drift 
     hue_grad_x = cv2.Sobel(hsv[:,:,0], cv2.CV_64F, 1, 0, ksize=3)
     hue_grad_y = cv2.Sobel(hsv[:,:,0], cv2.CV_64F, 0, 1, ksize=3)
     hue_edges = cv2.magnitude(hue_grad_x, hue_grad_y)
     synesthetic_drift = np.clip(np.mean(np.abs(gradient_mag - hue_edges)) / 100.0, 0.0, 1.0)
 
-    # 30. Solipsism (Изоляция)
     solipsism = np.clip(void_ratio * gestalt * 1.5, 0.0, 1.0)
 
-    # 31. Temporal Decay (Распад)
     morph_kernel = np.ones((5,5),np.uint8)
     erosion = cv2.erode(gray, morph_kernel, iterations=1)
     dilation = cv2.dilate(gray, morph_kernel, iterations=1)
@@ -279,26 +258,19 @@ def cosine_similarity(v1, v2):
     return np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2) + 1e-7)
 
 def synthesize_syllogism_query(tensor: np.ndarray, has_human: bool, raw_title: str, history: list):
-    """Синтез запроса по структуре S-M-P Силлогизма."""
     anchor = clean_anchor_title(raw_title)
     depth_iteration = len(history)
 
-    # 1. Латентная проекция в пространство Архетипов
     scores = {}
     for arch_name, (arch_vec, _) in ARCHETYPE_VECTORS.items():
         sim = cosine_similarity(tensor, arch_vec)
         if any(arch_name in h for h in history[-2:]):
-            sim *= 0.5  # Анти-зацикливание
+            sim *= 0.5 
         scores[arch_name] = sim
 
     dominant_name, dominant_score = sorted(scores.items(), key=lambda x: x[1], reverse=True)[0]
     arch_data = ARCHETYPE_VECTORS[dominant_name][1]
 
-    # ==========================================
-    # СБОРКА СИЛЛОГИЗМА (S - M - P)
-    # ==========================================
-    
-    # SUBJECT (S)
     if anchor and depth_iteration <= 2:
         subject_s = anchor
     elif has_human:
@@ -306,20 +278,14 @@ def synthesize_syllogism_query(tensor: np.ndarray, has_human: bool, raw_title: s
     else:
         subject_s = "abstract architectural form"
 
-    # MIDDLE / COPULA (M)
     copula_m = arch_data["copula_m"]
-
-    # PREDICATE (P)
     predicate_p = arch_data["predicate_p"]
 
-    # Итоговый Силлогизм: Субъект -> Связка -> Предикат
     search_query = f"{subject_s} {copula_m} {predicate_p}"
     
-    # Очистка стоп-слов для DDG
     clean_words = [w for w in search_query.split() if len(w) > 2 and w.lower() not in ["and", "the", "with", "from"]]
     final_query = " ".join(clean_words[:7])
 
-    # Точка Q.E.D. (Абсолютное разрешение)
     if tensor[25] > 0.8:
         display_vibe = f"Q.E.D. // {arch_data['alias']}"
     else:
@@ -327,6 +293,14 @@ def synthesize_syllogism_query(tensor: np.ndarray, has_human: bool, raw_title: s
 
     resonance_pct = int(np.clip(dominant_score * 100.0, 85, 99))
     return final_query, display_vibe, resonance_pct, dominant_name
+
+# ==============================================================================
+# СХЕМА ДЛЯ СИНЕСТЕЗИИ (ЗВУК -> КАРТИНКА)
+# ==============================================================================
+class TensorPayload(BaseModel):
+    anchor: str
+    visual_tensor: List[float]
+    history: Optional[List[str]] = []
 
 # ==============================================================================
 # API ENDPOINTS
@@ -388,6 +362,46 @@ async def mutate_endpoint(request: Request):
             "status": "error",
             "displayVibe": "RESONANCE VOID",
             "smartQuery": "cinematic film still",
+            "message": str(e)
+        }
+
+# 🔥 ЭНДПОИНТ СИНЕСТЕЗИИ: ПРИНИМАЕТ МАТЕМАТИКУ ОТ SONIC ENGINE 🔥
+@app.post("/api/mutate_from_tensor")
+async def mutate_from_tensor_endpoint(payload: TensorPayload):
+    try:
+        if len(payload.visual_tensor) != 32:
+            raise HTTPException(status_code=400, detail="Tensor must be exactly 32-dimensional")
+
+        tensor = np.array(payload.visual_tensor)
+        
+        # Аудио абстрактно, поэтому человеческих лиц по умолчанию нет
+        has_human = False 
+
+        smart_query, display_vibe, resonance_pct, dominant_archetype = synthesize_syllogism_query(
+            tensor, has_human, payload.anchor, payload.history
+        )
+
+        print(f"\n[ORACLE 9.0: SYNESTHESIA BRIDGE] -----------------")
+        print(f" > SONIC ANCHOR IN : '{payload.anchor}'")
+        print(f" > DOMINANT ARC    : {dominant_archetype} ({resonance_pct}%)")
+        print(f" > FINAL QUERY     : \"{smart_query}\"")
+        print(f"----------------------------------------------------------\n")
+
+        return {
+            "status": "success",
+            "displayVibe": display_vibe,
+            "smartQuery": smart_query,
+            "resonanceScore": resonance_pct,
+            "hasHuman": has_human,
+            "archetype": dominant_archetype
+        }
+
+    except Exception as e:
+        print(f"[ORACLE 9.0 SYNESTHESIA FAILURE] {e}")
+        return {
+            "status": "error",
+            "displayVibe": "SONIC VOID",
+            "smartQuery": "cinematic abstract blur",
             "message": str(e)
         }
 

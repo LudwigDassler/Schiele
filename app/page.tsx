@@ -35,8 +35,8 @@ export default function Home() {
   const [sonicLogs, setSonicLogs] = useState<string[]>([]);
   const [displayVibe, setDisplayVibe] = useState("");
   
-  // 🔥 ВАЖНО: ЗАМЕНИ НА СВОЙ РЕАЛЬНЫЙ URL ВИЗУАЛЬНОГО ОРАКУЛА! 🔥
-  const ORACLE_URL = "https://gelbet-oracle-1234.onrender.com"; 
+  // 🔥 АКТУАЛЬНЫЕ УЗЛЫ ГЕЛЬБЕТА 🔥
+  const ORACLE_URL = "https://kashmir-oracle.onrender.com"; 
   const SONIC_URL = "https://gelbet-sonic-engine.onrender.com";
   
   // Стейты данных
@@ -243,18 +243,18 @@ export default function Home() {
       setDisplayVibe(oracleData.displayVibe);
       setSonicLogs(prev => [...prev, "[SYSTEM] РЕЗОНАНС ДОСТИГНУТ. ПЕРЕХОД В ВИЗУАЛЬНЫЙ ПЛАН..."]);
       
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      await new Promise(resolve => setTimeout(resolve, 1800));
 
-      // АКТ 3: ПЕРЕХОД В ВИЗУАЛЬНЫЙ РЕЖИМ
+      // АКТ 3: ПЕРЕХОД В ВИЗУАЛЬНЫЙ РЕЖИМ (С ИСПРАВЛЕНИЕМ RACE CONDITION)
       setSearch(oracleData.smartQuery);
       setSearchMode('visual');
       setIsSonicAnalyzing(false);
-      handleSearch(undefined, oracleData.smartQuery); // Триггерим обычный поиск картинок
+      handleSearch(undefined, oracleData.smartQuery, 'visual'); 
 
     } catch (error: any) {
       setSonicLogs(prev => [...prev, `[FATAL ERROR] ${error.message}`]);
       setDisplayVibe("RESONANCE FAILED");
-      setTimeout(() => { setIsSonicAnalyzing(false); setDisplayVibe(""); }, 3000);
+      setTimeout(() => { setIsSonicAnalyzing(false); setDisplayVibe(""); }, 4000);
     }
   };
 
@@ -272,8 +272,9 @@ export default function Home() {
     }
     
     try {
+      const currentMode = modeOverride ?? searchMode;
       const params = new URLSearchParams({ page: String(pageNum), query: queryParam });
-      if (modeOverride ?? searchMode) params.set("mode", modeOverride ?? searchMode);
+      params.set("mode", currentMode);
       if (user) params.set("userId", user.id);
       
       const res = await fetch(`/api/search?${params}`, { signal: abortControllerRef.current?.signal });
@@ -345,27 +346,29 @@ export default function Home() {
     showToast("History wiped");
   };
 
-  async function handleSearch(e?: React.FormEvent, forceQuery?: string) { 
+  // Улучшенный обработчик с защитой от race-condition
+  async function handleSearch(e?: React.FormEvent, forceQuery?: string, forceMode?: 'visual' | 'sonic') { 
     if (e) e.preventDefault(); 
     const query = (forceQuery || search).trim();
     if (!query) return; 
 
+    const currentMode = forceMode || searchMode;
+
     // 🔥 ИНТЕРЦЕПТОР: Если режим музыки и это ручной ввод — запускаем Синестезию 🔥
-    if (searchMode === 'sonic' && !forceQuery) {
+    if (currentMode === 'sonic' && !forceQuery) {
       triggerSonicResonance(query);
       return;
     }
 
     setIsResultsActive(true);
-    window.history.pushState({}, '', `/?q=${encodeURIComponent(query)}&mode=${searchMode}`);
+    window.history.pushState({}, '', `/?q=${encodeURIComponent(query)}&mode=${currentMode}`);
 
     setSearchQuery(query); saveUserTag(query); setPage(1); setHasMore(true); setPhotos([]); 
-    fetchPhotos(query, 1, true);
+    fetchPhotos(query, 1, true, currentMode);
   }
 
   function handleTagClick(tag: string) { 
     setSearch(tag); 
-    // Если мы в звуковом режиме, клик по тегу ищет музыку
     if (searchMode === 'sonic') triggerSonicResonance(tag);
     else handleSearch(undefined, tag); 
   }

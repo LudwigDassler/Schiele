@@ -9,7 +9,7 @@ from io import BytesIO
 import re
 import urllib.request
 
-app = FastAPI(title="GELBET Oracle 9.0 (Generative Tensor & Bayesian Lexicon)", version="9.0.0")
+app = FastAPI(title="GELBET Oracle 9.0 (Generative Tensor & Occam's Razor)", version="9.0.1")
 
 app.add_middleware(
     CORSMiddleware,
@@ -54,36 +54,39 @@ def clean_anchor_title(raw_title: str) -> str:
     return "" if len(final_anchor) <= 2 else final_anchor
 
 # ==============================================================================
-# БАЗА АРХЕТИПОВ (СИЛЛОГИЗМЫ ДЛЯ ПРЕДИКАТА И КОПУЛЫ)
+# БАЗА АРХЕТИПОВ (ДЛЯ UI И ВИЗУАЛЬНОГО ВАЙБА)
 # ==============================================================================
 ARCHETYPE_VECTORS = {
     "COMFORTABLY_NUMB": (
         np.array([0.6, 0.4, 0.3, 0.2, 0.2, 0.4, 0.5, 0.8, 0.9, 0.7, 0.3, 0.4, 0.5, 0.8, 0.2, 0.2, 0.6, 0.8, 0.4, 0.2, 0.5, 0.3, 0.8, 0.2, 
                   0.3, 0.2, 0.90, 0.85, 0.80, 0.70, 0.75, 0.4]),
-        {"copula_m": "ethereal glowing fog vaseline lens sensory deprivation", "predicate_p": "transcendental isolation floating dreamscape", "alias": "GILMOUR RESONANCE"}
+        {"alias": "GILMOUR RESONANCE"}
     ),
     "JOYCEAN_SYLLOGISM": (
         np.array([0.4, 0.8, 0.7, 0.6, 0.8, 0.5, 0.4, 0.6, 0.7, 0.6, 0.8, 0.6, 0.9, 0.5, 0.8, 0.6, 0.3, 0.2, 0.7, 0.6, 0.5, 0.9, 0.3, 0.8, 
                   0.90, 0.95, 0.10, 0.40, 0.50, 0.20, 0.40, 0.6]),
-        {"copula_m": "sharp structural composition golden ratio chiaroscuro", "predicate_p": "absolute resolution Q.E.D focal singularity", "alias": "SYLLOGISM Q.E.D."}
+        {"alias": "SYLLOGISM Q.E.D."}
     ),
     "SIBERIAN_POST_PUNK": (
         np.array([0.28, 0.65, 0.78, 0.60, 0.70, 0.20, 0.15, 0.50, 0.40, 0.30, 0.85, 0.80, 0.55, 0.80, 0.75, 0.85, 0.20, 0.10, 0.40, 0.70, 0.20, 0.40, 0.50, 0.60,
                   0.4, 0.5, 0.6, 0.3, 0.7, 0.1, 0.8, 0.9]),
-        {"copula_m": "soviet 35mm svema film scan gloomy overcast light", "predicate_p": "brutalist concrete monolith decayed industrial void", "alias": "SIBERIAN RESIDUAL"}
+        {"alias": "SIBERIAN RESIDUAL"}
     ),
     "ACID_KRAUTROCK": (
         np.array([0.55, 0.75, 0.85, 0.80, 0.65, 0.75, 0.85, 0.70, 0.60, 0.95, 0.40, 0.75, 0.65, 0.25, 0.45, 0.60, 0.85, 0.70, 0.50, 0.10, 0.80, 0.60, 0.20, 0.50,
                   0.5, 0.4, 0.3, 0.7, 0.6, 0.9, 0.2, 0.3]),
-        {"copula_m": "1970s liquid light projection chromatic aberration prismatic", "predicate_p": "kaleidoscopic astral vision cosmic psychedelia", "alias": "ACID KALEIDOSCOPE"}
+        {"alias": "ACID KALEIDOSCOPE"}
     ),
     "LIMINAL_VOID": (
         np.array([0.50, 0.35, 0.30, 0.20, 0.40, 0.45, 0.20, 0.80, 0.85, 0.40, 0.60, 0.30, 0.40, 0.90, 0.50, 0.15, 0.05, 0.15, 0.20, 0.10, 0.30, 0.70, 0.85, 0.75,
                   0.7, 0.8, 0.85, 0.1, 0.5, 0.1, 0.9, 0.2]),
-        {"copula_m": "diffuse sterile fluorescent light liminal large format", "predicate_p": "infinite desolate transitional space uncanny silence", "alias": "LIMINAL VOID"}
+        {"alias": "LIMINAL VOID"}
     )
 }
 
+# ==============================================================================
+# ИЗВЛЕЧЕНИЕ 32D ТЕНЗОРА (ОПТИКА + СМЫСЛ + АППАРАТНОЕ ЗРЕНИЕ)
+# ==============================================================================
 def extract_32d_consciousness_tensor(img_data: bytes):
     img_pil = Image.open(BytesIO(img_data)).convert('RGB')
     img_pil = img_pil.resize((256, 256))
@@ -223,13 +226,13 @@ def cosine_similarity(v1, v2):
     return np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2) + 1e-7)
 
 # ==============================================================================
-# КОМБИНАТОРНАЯ ГЕНЕРАЦИЯ СМЫСЛА (ВЕРОЯТНОСТНАЯ ЛИНГВИСТИКА)
+# КОМБИНАТОРНАЯ ГЕНЕРАЦИЯ СМЫСЛА + БРИТВА ОККАМА
 # ==============================================================================
 def synthesize_syllogism_query(tensor: np.ndarray, has_human: bool, raw_title: str, history: list):
     anchor = clean_anchor_title(raw_title)
     depth_iteration = len(history)
 
-    # 1. Проекция на Архитипы (для Предиката и Копулы)
+    # 1. Проекция на Архитипы (только для вычисления Resonance Score и UI Vibe)
     scores = {}
     for arch_name, (arch_vec, _) in ARCHETYPE_VECTORS.items():
         sim = cosine_similarity(tensor, arch_vec)
@@ -238,74 +241,75 @@ def synthesize_syllogism_query(tensor: np.ndarray, has_human: bool, raw_title: s
     dominant_name, dominant_score = sorted(scores.items(), key=lambda x: x[1], reverse=True)[0]
     arch_data = ARCHETYPE_VECTORS[dominant_name][1]
 
-    # 2. ДИНАМИЧЕСКИЙ ЛЕГО-КОНСТРУКТОР СУБЪЕКТА (Матрица Гильотины)
-    if anchor and depth_iteration <= 2:
-        subject_s = anchor
-    elif has_human:
-        subject_s = "enigmatic portrait silhouette"
-    else:
-        # Извлекаем параметры из 32D тензора
-        luminance = tensor[0]
-        entropy = tensor[2]
-        tension = tensor[4]
-        depth = tensor[8]
-        gestalt = tensor[12]
-        pink_noise = tensor[28]
+    # Извлекаем параметры из 32D тензора для Матриц
+    luminance = tensor[0]
+    entropy = tensor[2]
+    tension = tensor[4]
+    depth = tensor[8]
+    gestalt = tensor[12]
+    pink_noise = tensor[28]
 
-        # --- МАТРИЦА 1: СОСТОЯНИЕ (Текстура, Свет, Хаос) ---
-        state_tensor = np.array([luminance, entropy, pink_noise])
-        # Координаты: [Свет, Хаос, Органика]
-        state_lexicon = {
-            "luminous ethereal": np.array([0.9, 0.2, 0.4]),
-            "fleshy biomechanical": np.array([0.3, 0.8, 0.9]),
-            "decaying rust": np.array([0.2, 0.7, 0.6]),
-            "sterile clinical": np.array([0.9, 0.1, 0.1]),
-            "psychedelic chromatic": np.array([0.6, 0.8, 0.9]),
-            "lo-fi vhs": np.array([0.3, 0.7, 0.8]),
-            "diffuse liminal": np.array([0.4, 0.1, 0.2]),
-            "neon-drenched dystopian": np.array([0.8, 0.7, 0.4]),
-            "iridescent opalescent": np.array([0.7, 0.6, 0.5]),
-            "subatomic particle": np.array([0.9, 0.9, 0.3])
-        }
-        
-        best_state, max_s_prob = "abstract", -1.0
-        for state, vec in state_lexicon.items():
-            prob = np.dot(state_tensor, vec) / (np.linalg.norm(state_tensor) * np.linalg.norm(vec) + 1e-7)
-            if prob > max_s_prob: 
-                max_s_prob = prob; best_state = state
-
-        # --- МАТРИЦА 2: ФОРМА (Геометрия, Глубина, Структура) ---
-        form_tensor = np.array([tension, depth, gestalt])
-        # Координаты: [Напряжение/Резкость, Глубина, Целостность формы]
-        form_lexicon = {
-            "geometric construct": np.array([0.9, 0.6, 0.8]),
-            "concrete monolith": np.array([0.8, 0.7, 0.9]),
-            "fractal topology": np.array([0.5, 0.5, 0.5]), 
-            "microscopic cell": np.array([0.2, 0.4, 0.6]),
-            "gothic cathedral tracery": np.array([0.8, 0.9, 0.8]),
-            "claustrophobic ventilation shaft": np.array([0.7, 0.9, 0.4]),
-            "kinetic wireframe matrix": np.array([0.9, 0.8, 0.5]),
-            "obscure void": np.array([0.1, 0.9, 0.1]),
-            "crystalline anomaly": np.array([0.8, 0.6, 0.7])
-        }
-
-        best_form, max_f_prob = "form", -1.0
-        for form, vec in form_lexicon.items():
-            prob = np.dot(form_tensor, vec) / (np.linalg.norm(form_tensor) * np.linalg.norm(vec) + 1e-7)
-            if prob > max_f_prob: 
-                max_f_prob = prob; best_form = form
-
-        # Склеиваем идеальную форму и состояние на лету!
-        subject_s = f"{best_state} {best_form}"
-
-    copula_m = arch_data["copula_m"]
-    predicate_p = arch_data["predicate_p"]
-
-    search_query = f"{subject_s} {copula_m} {predicate_p}"
+    # --- МАТРИЦА 1: СОСТОЯНИЕ (Текстура, Свет, Хаос) ---
+    state_tensor = np.array([luminance, entropy, pink_noise])
+    state_lexicon = {
+        "luminous ethereal": np.array([0.9, 0.2, 0.4]),
+        "fleshy biomechanical": np.array([0.3, 0.8, 0.9]),
+        "decaying rust": np.array([0.2, 0.7, 0.6]),
+        "sterile clinical": np.array([0.9, 0.1, 0.1]),
+        "psychedelic chromatic": np.array([0.6, 0.8, 0.9]),
+        "lo-fi vhs": np.array([0.3, 0.7, 0.8]),
+        "diffuse liminal": np.array([0.4, 0.1, 0.2]),
+        "neon-drenched dystopian": np.array([0.8, 0.7, 0.4]),
+        "iridescent opalescent": np.array([0.7, 0.6, 0.5]),
+        "subatomic particle": np.array([0.9, 0.9, 0.3])
+    }
     
-    clean_words = [w for w in search_query.split() if len(w) > 2 and w.lower() not in ["and", "the", "with", "from"]]
-    final_query = " ".join(clean_words[:9]) # Расширил до 9 слов, чтобы вся фраза влезла
+    best_state, max_s_prob = "abstract", -1.0
+    for state, vec in state_lexicon.items():
+        prob = np.dot(state_tensor, vec) / (np.linalg.norm(state_tensor) * np.linalg.norm(vec) + 1e-7)
+        if prob > max_s_prob: 
+            max_s_prob = prob; best_state = state
 
+    # --- МАТРИЦА 2: ФОРМА (Геометрия, Глубина, Структура) ---
+    form_tensor = np.array([tension, depth, gestalt])
+    form_lexicon = {
+        "geometric construct": np.array([0.9, 0.6, 0.8]),
+        "concrete monolith": np.array([0.8, 0.7, 0.9]),
+        "fractal topology": np.array([0.5, 0.5, 0.5]), 
+        "microscopic cell": np.array([0.2, 0.4, 0.6]),
+        "gothic cathedral tracery": np.array([0.8, 0.9, 0.8]),
+        "ventilation shaft": np.array([0.7, 0.9, 0.4]),
+        "wireframe matrix": np.array([0.9, 0.8, 0.5]),
+        "obscure void": np.array([0.1, 0.9, 0.1]),
+        "crystalline anomaly": np.array([0.8, 0.6, 0.7])
+    }
+
+    best_form, max_f_prob = "form", -1.0
+    for form, vec in form_lexicon.items():
+        prob = np.dot(form_tensor, vec) / (np.linalg.norm(form_tensor) * np.linalg.norm(vec) + 1e-7)
+        if prob > max_f_prob: 
+            max_f_prob = prob; best_form = form
+
+    # ==========================================
+    # СЕМАНТИЧЕСКАЯ БРИТВА: РУБИМ ЛИШНЕЕ
+    # ==========================================
+    if anchor and depth_iteration <= 2:
+        # Держим Якорь + Состояние. Пример: "Led Zeppelin Stairway luminous ethereal"
+        search_query = f"{anchor} {best_state}"
+    elif has_human:
+        # Силуэт + Состояние. Пример: "enigmatic portrait lo-fi vhs"
+        search_query = f"enigmatic portrait {best_state}"
+    else:
+        # Чистая абстракция: Состояние + Форма. Пример: "iridescent opalescent geometric construct"
+        search_query = f"{best_state} {best_form}"
+    
+    # Очистка стоп-слов
+    clean_words = [w for w in search_query.split() if len(w) > 2 and w.lower() not in ["and", "the", "with", "from"]]
+    
+    # ЖЕСТКИЙ ЛИМИТ БРИТВЫ: Не более 5 слов для идеальной работы векторного поисковика
+    final_query = " ".join(clean_words[:5]) 
+
+    # Точка Q.E.D. для интерфейса 
     if tensor[25] > 0.8:
         display_vibe = f"Q.E.D. // {arch_data['alias']}"
     else:
@@ -324,7 +328,7 @@ class TensorPayload(BaseModel):
 
 @app.get("/")
 def health():
-    return {"status": "ORACLE_9_ONLINE", "core": "Combinatorial Lexical Generation", "dimensions": 32}
+    return {"status": "ORACLE_9_ONLINE", "core": "Combinatorial Lexicon & Occam's Razor", "dimensions": 32}
 
 @app.post("/api/mutate")
 async def mutate_endpoint(request: Request):

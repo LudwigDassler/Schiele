@@ -9,7 +9,7 @@ from io import BytesIO
 import re
 import urllib.request
 
-app = FastAPI(title="GELBET Oracle 9.0 (Ulysses-Numb Core + Lexical Centrifuge)", version="9.0.0")
+app = FastAPI(title="GELBET Oracle 9.0 (Generative Tensor & Bayesian Lexicon)", version="9.0.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -19,7 +19,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Аппаратный детектор лиц (OpenCV)
+# Аппаратный детектор лиц
 FACE_CASCADE = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
 
 # ==============================================================================
@@ -29,18 +29,14 @@ CLEANUP_REGEX = re.compile(
     r'\b(wallpaper|hd|4k|image|photo|pic|picture|download|free|vector|stock|source|desktop|background|pinterest|preview)\b',
     re.IGNORECASE
 )
-
 CONSONANT_CLUSTER_REGEX = re.compile(r'[bcdfghjklmnpqrstvwxzBCDFGHJKLMNPQRSTVWXZБВГДЖЗЙКЛМНПРСТФХЦЧШЩЪЬ]{5,}')
 HASH_REGEX = re.compile(r'^(?=.*[a-zA-Zа-яА-Я])(?=.*\d)[a-zA-Zа-яА-Я\d]{4,}$')
 
 def clean_anchor_title(raw_title: str) -> str:
-    """Хирургическая очистка якоря от хешей, URL-мусора и артефактов файловых систем."""
     if not raw_title or raw_title == "Aesthetic Artifact":
         return ""
-        
     clean = re.sub(r'http\S+|www\S+', '', raw_title)
     clean = re.sub(r'\.(jpg|jpeg|png|webp|gif|mp4|avif)\b', '', clean, flags=re.IGNORECASE)
-    
     clean = re.sub(r'\[.*?\]|\(.*?\)', '', clean)
     clean = re.sub(r'[-_]', ' ', clean)
     clean = CLEANUP_REGEX.sub('', clean)
@@ -51,78 +47,47 @@ def clean_anchor_title(raw_title: str) -> str:
         if len(word) > 15: continue
         if HASH_REGEX.match(word): continue
         if CONSONANT_CLUSTER_REGEX.search(word): continue
-        
-        if len(word) == 1 and word.lower() not in ['a', 'i', 'о', 'у', 'а', 'я', 'и', 'к', 'в', 'с']:
-            continue
-            
+        if len(word) == 1 and word.lower() not in ['a', 'i', 'о', 'у', 'а', 'я', 'и', 'к', 'в', 'с']: continue
         valid_words.append(word)
 
     final_anchor = " ".join(valid_words[:3]).strip()
-    
-    if len(final_anchor) <= 2:
-        return ""
-        
-    return final_anchor
+    return "" if len(final_anchor) <= 2 else final_anchor
 
 # ==============================================================================
-# БАЗА АРХЕТИПОВ (32-МЕРНОЕ ПРОСТРАНСТВО СИЛЛОГИЗМОВ)
+# БАЗА АРХЕТИПОВ (СИЛЛОГИЗМЫ ДЛЯ ПРЕДИКАТА И КОПУЛЫ)
 # ==============================================================================
 ARCHETYPE_VECTORS = {
     "COMFORTABLY_NUMB": (
         np.array([0.6, 0.4, 0.3, 0.2, 0.2, 0.4, 0.5, 0.8, 0.9, 0.7, 0.3, 0.4, 0.5, 0.8, 0.2, 0.2, 0.6, 0.8, 0.4, 0.2, 0.5, 0.3, 0.8, 0.2, 
                   0.3, 0.2, 0.90, 0.85, 0.80, 0.70, 0.75, 0.4]),
-        {
-            "copula_m": "ethereal glowing fog vaseline lens sensory deprivation",
-            "predicate_p": "transcendental isolation floating dreamscape",
-            "alias": "GILMOUR RESONANCE"
-        }
+        {"copula_m": "ethereal glowing fog vaseline lens sensory deprivation", "predicate_p": "transcendental isolation floating dreamscape", "alias": "GILMOUR RESONANCE"}
     ),
     "JOYCEAN_SYLLOGISM": (
         np.array([0.4, 0.8, 0.7, 0.6, 0.8, 0.5, 0.4, 0.6, 0.7, 0.6, 0.8, 0.6, 0.9, 0.5, 0.8, 0.6, 0.3, 0.2, 0.7, 0.6, 0.5, 0.9, 0.3, 0.8, 
                   0.90, 0.95, 0.10, 0.40, 0.50, 0.20, 0.40, 0.6]),
-        {
-            "copula_m": "sharp structural composition golden ratio chiaroscuro",
-            "predicate_p": "absolute resolution Q.E.D focal singularity",
-            "alias": "SYLLOGISM Q.E.D."
-        }
+        {"copula_m": "sharp structural composition golden ratio chiaroscuro", "predicate_p": "absolute resolution Q.E.D focal singularity", "alias": "SYLLOGISM Q.E.D."}
     ),
     "SIBERIAN_POST_PUNK": (
         np.array([0.28, 0.65, 0.78, 0.60, 0.70, 0.20, 0.15, 0.50, 0.40, 0.30, 0.85, 0.80, 0.55, 0.80, 0.75, 0.85, 0.20, 0.10, 0.40, 0.70, 0.20, 0.40, 0.50, 0.60,
                   0.4, 0.5, 0.6, 0.3, 0.7, 0.1, 0.8, 0.9]),
-        {
-            "copula_m": "soviet 35mm svema film scan gloomy overcast light",
-            "predicate_p": "brutalist concrete monolith decayed industrial void",
-            "alias": "SIBERIAN RESIDUAL"
-        }
+        {"copula_m": "soviet 35mm svema film scan gloomy overcast light", "predicate_p": "brutalist concrete monolith decayed industrial void", "alias": "SIBERIAN RESIDUAL"}
     ),
     "ACID_KRAUTROCK": (
         np.array([0.55, 0.75, 0.85, 0.80, 0.65, 0.75, 0.85, 0.70, 0.60, 0.95, 0.40, 0.75, 0.65, 0.25, 0.45, 0.60, 0.85, 0.70, 0.50, 0.10, 0.80, 0.60, 0.20, 0.50,
                   0.5, 0.4, 0.3, 0.7, 0.6, 0.9, 0.2, 0.3]),
-        {
-            "copula_m": "1970s liquid light projection chromatic aberration prismatic",
-            "predicate_p": "kaleidoscopic astral vision cosmic psychedelia",
-            "alias": "ACID KALEIDOSCOPE"
-        }
+        {"copula_m": "1970s liquid light projection chromatic aberration prismatic", "predicate_p": "kaleidoscopic astral vision cosmic psychedelia", "alias": "ACID KALEIDOSCOPE"}
     ),
     "LIMINAL_VOID": (
         np.array([0.50, 0.35, 0.30, 0.20, 0.40, 0.45, 0.20, 0.80, 0.85, 0.40, 0.60, 0.30, 0.40, 0.90, 0.50, 0.15, 0.05, 0.15, 0.20, 0.10, 0.30, 0.70, 0.85, 0.75,
                   0.7, 0.8, 0.85, 0.1, 0.5, 0.1, 0.9, 0.2]),
-        {
-            "copula_m": "diffuse sterile fluorescent light liminal large format",
-            "predicate_p": "infinite desolate transitional space uncanny silence",
-            "alias": "LIMINAL VOID"
-        }
+        {"copula_m": "diffuse sterile fluorescent light liminal large format", "predicate_p": "infinite desolate transitional space uncanny silence", "alias": "LIMINAL VOID"}
     )
 }
 
-# ==============================================================================
-# ИЗВЛЕЧЕНИЕ 32D ТЕНЗОРА (ОПТИКА + СМЫСЛ + АППАРАТНОЕ ЗРЕНИЕ)
-# ==============================================================================
 def extract_32d_consciousness_tensor(img_data: bytes):
     img_pil = Image.open(BytesIO(img_data)).convert('RGB')
     img_pil = img_pil.resize((256, 256))
     img = np.array(img_pil)
-    
     gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
     hsv = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)
     lab = cv2.cvtColor(img, cv2.COLOR_RGB2LAB)
@@ -257,26 +222,81 @@ def extract_32d_consciousness_tensor(img_data: bytes):
 def cosine_similarity(v1, v2):
     return np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2) + 1e-7)
 
+# ==============================================================================
+# КОМБИНАТОРНАЯ ГЕНЕРАЦИЯ СМЫСЛА (ВЕРОЯТНОСТНАЯ ЛИНГВИСТИКА)
+# ==============================================================================
 def synthesize_syllogism_query(tensor: np.ndarray, has_human: bool, raw_title: str, history: list):
     anchor = clean_anchor_title(raw_title)
     depth_iteration = len(history)
 
+    # 1. Проекция на Архитипы (для Предиката и Копулы)
     scores = {}
     for arch_name, (arch_vec, _) in ARCHETYPE_VECTORS.items():
         sim = cosine_similarity(tensor, arch_vec)
-        if any(arch_name in h for h in history[-2:]):
-            sim *= 0.5 
+        if any(arch_name in h for h in history[-2:]): sim *= 0.5  
         scores[arch_name] = sim
-
     dominant_name, dominant_score = sorted(scores.items(), key=lambda x: x[1], reverse=True)[0]
     arch_data = ARCHETYPE_VECTORS[dominant_name][1]
 
+    # 2. ДИНАМИЧЕСКИЙ ЛЕГО-КОНСТРУКТОР СУБЪЕКТА (Матрица Гильотины)
     if anchor and depth_iteration <= 2:
         subject_s = anchor
     elif has_human:
         subject_s = "enigmatic portrait silhouette"
     else:
-        subject_s = "abstract architectural form"
+        # Извлекаем параметры из 32D тензора
+        luminance = tensor[0]
+        entropy = tensor[2]
+        tension = tensor[4]
+        depth = tensor[8]
+        gestalt = tensor[12]
+        pink_noise = tensor[28]
+
+        # --- МАТРИЦА 1: СОСТОЯНИЕ (Текстура, Свет, Хаос) ---
+        state_tensor = np.array([luminance, entropy, pink_noise])
+        # Координаты: [Свет, Хаос, Органика]
+        state_lexicon = {
+            "luminous ethereal": np.array([0.9, 0.2, 0.4]),
+            "fleshy biomechanical": np.array([0.3, 0.8, 0.9]),
+            "decaying rust": np.array([0.2, 0.7, 0.6]),
+            "sterile clinical": np.array([0.9, 0.1, 0.1]),
+            "psychedelic chromatic": np.array([0.6, 0.8, 0.9]),
+            "lo-fi vhs": np.array([0.3, 0.7, 0.8]),
+            "diffuse liminal": np.array([0.4, 0.1, 0.2]),
+            "neon-drenched dystopian": np.array([0.8, 0.7, 0.4]),
+            "iridescent opalescent": np.array([0.7, 0.6, 0.5]),
+            "subatomic particle": np.array([0.9, 0.9, 0.3])
+        }
+        
+        best_state, max_s_prob = "abstract", -1.0
+        for state, vec in state_lexicon.items():
+            prob = np.dot(state_tensor, vec) / (np.linalg.norm(state_tensor) * np.linalg.norm(vec) + 1e-7)
+            if prob > max_s_prob: 
+                max_s_prob = prob; best_state = state
+
+        # --- МАТРИЦА 2: ФОРМА (Геометрия, Глубина, Структура) ---
+        form_tensor = np.array([tension, depth, gestalt])
+        # Координаты: [Напряжение/Резкость, Глубина, Целостность формы]
+        form_lexicon = {
+            "geometric construct": np.array([0.9, 0.6, 0.8]),
+            "concrete monolith": np.array([0.8, 0.7, 0.9]),
+            "fractal topology": np.array([0.5, 0.5, 0.5]), 
+            "microscopic cell": np.array([0.2, 0.4, 0.6]),
+            "gothic cathedral tracery": np.array([0.8, 0.9, 0.8]),
+            "claustrophobic ventilation shaft": np.array([0.7, 0.9, 0.4]),
+            "kinetic wireframe matrix": np.array([0.9, 0.8, 0.5]),
+            "obscure void": np.array([0.1, 0.9, 0.1]),
+            "crystalline anomaly": np.array([0.8, 0.6, 0.7])
+        }
+
+        best_form, max_f_prob = "form", -1.0
+        for form, vec in form_lexicon.items():
+            prob = np.dot(form_tensor, vec) / (np.linalg.norm(form_tensor) * np.linalg.norm(vec) + 1e-7)
+            if prob > max_f_prob: 
+                max_f_prob = prob; best_form = form
+
+        # Склеиваем идеальную форму и состояние на лету!
+        subject_s = f"{best_state} {best_form}"
 
     copula_m = arch_data["copula_m"]
     predicate_p = arch_data["predicate_p"]
@@ -284,7 +304,7 @@ def synthesize_syllogism_query(tensor: np.ndarray, has_human: bool, raw_title: s
     search_query = f"{subject_s} {copula_m} {predicate_p}"
     
     clean_words = [w for w in search_query.split() if len(w) > 2 and w.lower() not in ["and", "the", "with", "from"]]
-    final_query = " ".join(clean_words[:7])
+    final_query = " ".join(clean_words[:9]) # Расширил до 9 слов, чтобы вся фраза влезла
 
     if tensor[25] > 0.8:
         display_vibe = f"Q.E.D. // {arch_data['alias']}"
@@ -295,19 +315,16 @@ def synthesize_syllogism_query(tensor: np.ndarray, has_human: bool, raw_title: s
     return final_query, display_vibe, resonance_pct, dominant_name
 
 # ==============================================================================
-# СХЕМА ДЛЯ СИНЕСТЕЗИИ (ЗВУК -> КАРТИНКА)
+# СХЕМА И ЭНДПОИНТЫ API
 # ==============================================================================
 class TensorPayload(BaseModel):
     anchor: str
     visual_tensor: List[float]
     history: Optional[List[str]] = []
 
-# ==============================================================================
-# API ENDPOINTS
-# ==============================================================================
 @app.get("/")
 def health():
-    return {"status": "ORACLE_9_ONLINE", "core": "Lexical Centrifuge & Ulysses Manifold", "dimensions": 32}
+    return {"status": "ORACLE_9_ONLINE", "core": "Combinatorial Lexical Generation", "dimensions": 32}
 
 @app.post("/api/mutate")
 async def mutate_endpoint(request: Request):
@@ -321,25 +338,18 @@ async def mutate_endpoint(request: Request):
             image_url = payload.get("image_url")
             raw_title = payload.get("title", "")
             history = payload.get("history", [])
-            
-            if not image_url:
-                raise HTTPException(status_code=400, detail="Missing image_url")
-            
+            if not image_url: raise HTTPException(status_code=400, detail="Missing image_url")
             req = urllib.request.Request(image_url, headers={'User-Agent': 'Mozilla/5.0'})
             with urllib.request.urlopen(req, timeout=10) as response:
                 body_bytes = response.read()
         else:
             body_bytes = await request.body()
-            if not body_bytes:
-                raise HTTPException(status_code=400, detail="Empty image data")
+            if not body_bytes: raise HTTPException(status_code=400, detail="Empty image data")
 
         tensor, has_human = extract_32d_consciousness_tensor(body_bytes)
+        smart_query, display_vibe, resonance_pct, dominant_archetype = synthesize_syllogism_query(tensor, has_human, raw_title, history)
 
-        smart_query, display_vibe, resonance_pct, dominant_archetype = synthesize_syllogism_query(
-            tensor, has_human, raw_title, history
-        )
-
-        print(f"\n[ORACLE 9.0: LEXICAL CENTRIFUGE] ------------------------")
+        print(f"\n[ORACLE 9.0: DYNAMIC GENERATOR] ------------------------")
         print(f" > RAW ANCHOR IN   : '{raw_title}'")
         print(f" > PURIFIED ANCHOR : '{clean_anchor_title(raw_title)}'")
         print(f" > NUMBNESS INDEX  : {tensor[26]:.3f} | GILMOUR PEAK: {tensor[27]:.3f}")
@@ -355,17 +365,9 @@ async def mutate_endpoint(request: Request):
             "hasHuman": has_human,
             "archetype": dominant_archetype
         }
-
     except Exception as e:
-        print(f"[ORACLE 9.0 CRITICAL FAILURE] {e}")
-        return {
-            "status": "error",
-            "displayVibe": "RESONANCE VOID",
-            "smartQuery": "cinematic film still",
-            "message": str(e)
-        }
+        return {"status": "error", "displayVibe": "RESONANCE VOID", "smartQuery": "cinematic abstract blur", "message": str(e)}
 
-# 🔥 ЭНДПОИНТ СИНЕСТЕЗИИ: ПРИНИМАЕТ МАТЕМАТИКУ ОТ SONIC ENGINE 🔥
 @app.post("/api/mutate_from_tensor")
 async def mutate_from_tensor_endpoint(payload: TensorPayload):
     try:
@@ -373,13 +375,9 @@ async def mutate_from_tensor_endpoint(payload: TensorPayload):
             raise HTTPException(status_code=400, detail="Tensor must be exactly 32-dimensional")
 
         tensor = np.array(payload.visual_tensor)
-        
-        # Аудио абстрактно, поэтому человеческих лиц по умолчанию нет
         has_human = False 
 
-        smart_query, display_vibe, resonance_pct, dominant_archetype = synthesize_syllogism_query(
-            tensor, has_human, payload.anchor, payload.history
-        )
+        smart_query, display_vibe, resonance_pct, dominant_archetype = synthesize_syllogism_query(tensor, has_human, payload.anchor, payload.history)
 
         print(f"\n[ORACLE 9.0: SYNESTHESIA BRIDGE] -----------------")
         print(f" > SONIC ANCHOR IN : '{payload.anchor}'")
@@ -395,15 +393,8 @@ async def mutate_from_tensor_endpoint(payload: TensorPayload):
             "hasHuman": has_human,
             "archetype": dominant_archetype
         }
-
     except Exception as e:
-        print(f"[ORACLE 9.0 SYNESTHESIA FAILURE] {e}")
-        return {
-            "status": "error",
-            "displayVibe": "SONIC VOID",
-            "smartQuery": "cinematic abstract blur",
-            "message": str(e)
-        }
+        return {"status": "error", "displayVibe": "SONIC VOID", "smartQuery": "cinematic abstract blur", "message": str(e)}
 
 if __name__ == "__main__":
     import uvicorn

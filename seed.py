@@ -2,8 +2,7 @@ import psycopg2
 import numpy as np
 
 # АРТЕРИЯ К БАЗЕ ДАННЫХ SUPABASE
-DATABASE_URL = "postgresql://postgres:JonasKessler18@db.kefdjxsmyarwfqqkfgcx.supabase.co:5432/postgres"
-
+DATABASE_URL = "postgresql://postgres.kefdjxsmyarwfqqkfgcx:JonasKessler18@aws-1-eu-central-1.pooler.supabase.com:5432/postgres"
 def vector_to_str(vec: np.ndarray) -> str:
     """Конвертирует массив numpy в строку формата '[0.1, 0.2]', которую понимает pgvector"""
     return "[" + ",".join(map(str, vec)) + "]"

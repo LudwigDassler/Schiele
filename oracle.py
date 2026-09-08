@@ -12,8 +12,7 @@ import asyncpg
 from contextlib import asynccontextmanager
 
 # АРТЕРИЯ К БАЗЕ ДАННЫХ SUPABASE
-DATABASE_URL = "postgresql://postgres:JonasKessler18@db.kefdjxsmyarwfqqkfgcx.supabase.co:5432/postgres"
-
+DATABASE_URL = "postgresql://postgres.kefdjxsmyarwfqqkfgcx:JonasKessler18@aws-1-eu-central-1.pooler.supabase.com:5432/postgres"
 # Инициализация пула соединений с БД при старте сервера
 @asynccontextmanager
 async def lifespan(app: FastAPI):

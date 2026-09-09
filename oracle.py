@@ -13,6 +13,7 @@ from contextlib import asynccontextmanager
 
 # АРТЕРИЯ К БАЗЕ ДАННЫХ SUPABASE (С ПРАВИЛЬНЫМ ПАРОЛЕМ И SESSION POOLER)
 DATABASE_URL = "postgresql://postgres.kefdjxsmyarwfqqkfgcx:LudwigDassler@aws-1-eu-central-1.pooler.supabase.com:6543/postgres"
+
 # Инициализация пула соединений с БД при старте сервера
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -31,6 +32,18 @@ app.add_middleware(
 )
 
 FACE_CASCADE = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+
+# ==============================================================================
+# СИСТЕМА ЖИЗНЕОБЕСПЕЧЕНИЯ (ПРОТИВ СНА RENDER)
+# ==============================================================================
+@app.get("/health")
+async def health_check():
+    """Эндпоинт для автозапуска. cron-job.org или фронтенд будут дергать его для пробуждения."""
+    return {"status": "AWAKE", "message": "The Oracle is listening."}
+
+@app.get("/")
+def health():
+    return {"status": "ORACLE_11_0_ONLINE", "core": "PostgreSQL pgvector Engine"}
 
 # ==============================================================================
 # 1. ЛЕКСИЧЕСКАЯ ЦЕНТРИФУГА
@@ -53,7 +66,8 @@ def clean_anchor_title(raw_title: str) -> str:
         if len(word) > 15 or HASH_REGEX.match(word) or CONSONANT_CLUSTER_REGEX.search(word): continue
         if len(word) == 1 and word.lower() not in ['a', 'i', 'о', 'у', 'а', 'я', 'и', 'к', 'в', 'с']: continue
         valid_words.append(word)
-    final_anchor = " ".join(valid_words[:4]).strip()
+    # Берем якорь полно, чтобы не резать слишком коротко (берем до 8 слов, а не 4)
+    final_anchor = " ".join(valid_words[:8]).strip()
     return "" if len(final_anchor) <= 2 else final_anchor
 
 def vector_to_str(vec: np.ndarray) -> str:
@@ -108,7 +122,6 @@ def extract_32d_consciousness_tensor(img_data: bytes):
 # ==============================================================================
 async def synthesize_query_from_db(pool, tensor: np.ndarray, has_human: bool, raw_title: str, history: list, context_text: str):
     anchor = clean_anchor_title(raw_title)
-    depth_iteration = len(history)
 
     async with pool.acquire() as conn:
         # 1. АНАЛИЗ СЕМАНТИКИ СЛОВ ЧЕРЕЗ БД (Вычисляем 8D Тензор Ужаса/Эйфории)
@@ -116,7 +129,6 @@ async def synthesize_query_from_db(pool, tensor: np.ndarray, has_human: bool, ra
         semantic_tensor = np.zeros(8)
         
         if words:
-            # SQL высчитывает вес совпавших слов по осям
             query = """
                 SELECT axis, SUM(weight) as total_weight 
                 FROM semantic_ontology 
@@ -134,7 +146,7 @@ async def synthesize_query_from_db(pool, tensor: np.ndarray, has_human: bool, ra
         ideational, sensate, dread, euphoria, nostalgia = semantic_tensor[0:5]
         luminance, entropy, tension, depth, chronos, gestalt, harmonics, grain, pink_noise = tensor[0], tensor[2], tensor[4], tensor[8], tensor[11], tensor[12], tensor[13], tensor[15], tensor[28]
 
-        # 2. ПОИСК ИДЕАЛЬНОГО АРХЕТИПА ЧЕРЕЗ PGVECTOR (<=> Это косинусное расстояние)
+        # 2. ПОИСК ИДЕАЛЬНОГО АРХЕТИПА ЧЕРЕЗ PGVECTOR
         arch_query = "SELECT alias, (1 - (vector_32d <=> $1::vector)) as similarity FROM archetypes ORDER BY vector_32d <=> $1::vector LIMIT 1"
         arch_row = await conn.fetchrow(arch_query, vector_to_str(tensor))
         dominant_alias = arch_row['alias'] if arch_row else "UNKNOWN ANOMALY"
@@ -150,25 +162,32 @@ async def synthesize_query_from_db(pool, tensor: np.ndarray, has_human: bool, ra
         form_row = await conn.fetchrow("SELECT phrase FROM lexicon_matrix WHERE category = 'FORM' ORDER BY vector_5d <=> $1::vector LIMIT 1", form_t)
         medium_row = await conn.fetchrow("SELECT phrase FROM lexicon_matrix WHERE category = 'MEDIUM' ORDER BY vector_5d <=> $1::vector LIMIT 1", medium_t)
 
-        best_state = state_row['phrase'] if state_row else "abstract"
-        best_form = form_row['phrase'] if form_row else "form"
-        best_medium = medium_row['phrase'] if medium_row else "aesthetic"
+        best_state = state_row['phrase'] if state_row else "ethereal"
+        best_form = form_row['phrase'] if form_row else "structure"
+        best_medium = medium_row['phrase'] if medium_row else "cinematic photography"
 
     # ==========================================
-    # СБОРКА И БРИТВА ОККАМА
+    # СБОРКА И БРИТВА ОККАМА (ИДЕАЛЬНЫЙ РОУТЕР)
     # ==========================================
-    if anchor and depth_iteration <= 2:
-        search_query = f"{anchor} {best_state} {best_medium}"
+    core_vibe = dominant_alias.lower()
+    stop_words = {"and", "the", "with", "from"}
+
+    if anchor:
+        # ПРАВИЛО 1: Якорь неприкосновенен.
+        final_query = f"{anchor} {best_medium}"
     elif has_human:
-        search_query = f"enigmatic portrait {best_state} {best_medium}"
+        # ПРАВИЛО 2: Портретный режим (Бритва включена)
+        raw_query = f"{core_vibe} {best_state} portrait"
+        clean_words = [w for w in raw_query.split() if w.lower() not in stop_words]
+        final_query = " ".join(clean_words[:6])
     else:
-        search_query = f"{best_state} {best_form} {best_medium}"
+        # ПРАВИЛО 3: Абсолютная абстракция (Бритва включена)
+        raw_query = f"{core_vibe} {best_state} {best_form}"
+        clean_words = [w for w in raw_query.split() if w.lower() not in stop_words]
+        final_query = " ".join(clean_words[:6])
     
-    clean_words = [w for w in search_query.split() if len(w) > 2 and w.lower() not in ["and", "the", "with", "from"]]
-    final_query = " ".join(clean_words[:8]) 
-
-    display_vibe = f"Q.E.D. // {dominant_alias}" if (tensor[25] > 0.8 or dread > 0.6 or euphoria > 0.6) else dominant_alias
-    return final_query, display_vibe, resonance_pct, dominant_alias, semantic_tensor
+    display_vibe = f"RESONANCE: {dominant_alias}"
+    return final_query.strip(), display_vibe, resonance_pct, dominant_alias, semantic_tensor
 
 # ==============================================================================
 # API ЭНДПОИНТЫ
@@ -178,10 +197,6 @@ class TensorPayload(BaseModel):
     visual_tensor: List[float]
     history: Optional[List[str]] = []
     context_text: Optional[str] = None  
-
-@app.get("/")
-def health():
-    return {"status": "ORACLE_11_0_ONLINE", "core": "PostgreSQL pgvector Engine"}
 
 @app.post("/api/mutate")
 async def mutate_endpoint(request: Request):
@@ -212,7 +227,7 @@ async def mutate_endpoint(request: Request):
             request.app.state.db_pool, tensor, has_human, raw_title, history, text_to_analyze
         )
 
-        print(f"\n[ORACLE 11.0: DATABASE GENERATOR] -----------------")
+        print(f"\n[ORACLE 11.0: MATRIX ALIGNED] -----------------")
         print(f" > ANCHOR IN       : '{raw_title}'")
         print(f" > DREAD / EUPHORIA: {st[2]:.2f} / {st[3]:.2f}")
         print(f" > FINAL QUERY     : \"{smart_query}\"")

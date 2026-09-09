@@ -11,8 +11,9 @@ import urllib.request
 import asyncpg
 from contextlib import asynccontextmanager
 
-# АРТЕРИЯ К БАЗЕ ДАННЫХ SUPABASE
-DATABASE_URL = "postgresql://postgres.kefdjxsmyarwfqqkfgcx:JonasKessler18@aws-1-eu-central-1.pooler.supabase.com:5432/postgres"
+# АРТЕРИЯ К БАЗЕ ДАННЫХ SUPABASE (С ПРАВИЛЬНЫМ ПАРОЛЕМ И SESSION POOLER)
+DATABASE_URL = "postgresql://postgres.kefdjxsmyarwfqqkfgcx:LudwigDassler@aws-1-eu-central-1.pooler.supabase.com:5432/postgres"
+
 # Инициализация пула соединений с БД при старте сервера
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -240,4 +241,4 @@ async def mutate_from_tensor_endpoint(request: Request, payload: TensorPayload):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("oracle_server:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("oracle:app", host="0.0.0.0", port=8000, reload=True)

@@ -10,18 +10,18 @@ import re
 import urllib.request
 import asyncpg
 from contextlib import asynccontextmanager
+import base64
 
-# АРТЕРИЯ К БАЗЕ ДАННЫХ SUPABASE (С ПРАВИЛЬНЫМ ПАРОЛЕМ И SESSION POOLER)
+# АРТЕРИЯ К БАЗЕ ДАННЫХ SUPABASE
 DATABASE_URL = "postgresql://postgres.kefdjxsmyarwfqqkfgcx:LudwigDassler@aws-1-eu-central-1.pooler.supabase.com:6543/postgres"
 
-# Инициализация пула соединений с БД при старте сервера
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.db_pool = await asyncpg.create_pool(DATABASE_URL)
     yield
     await app.state.db_pool.close()
 
-app = FastAPI(title="GELBET Oracle 11.0 (Supabase Vector Engine)", version="11.0.0", lifespan=lifespan)
+app = FastAPI(title="GELBET Oracle 12.0 (Acid Morph Edition)", version="12.0.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -34,16 +34,15 @@ app.add_middleware(
 FACE_CASCADE = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
 
 # ==============================================================================
-# СИСТЕМА ЖИЗНЕОБЕСПЕЧЕНИЯ (ПРОТИВ СНА RENDER)
+# СИСТЕМА ЖИЗНЕОБЕСПЕЧЕНИЯ
 # ==============================================================================
 @app.get("/health")
 async def health_check():
-    """Эндпоинт для автозапуска. cron-job.org или фронтенд будут дергать его для пробуждения."""
-    return {"status": "AWAKE", "message": "The Oracle is listening."}
+    return {"status": "AWAKE", "message": "The Acid Oracle is listening."}
 
 @app.get("/")
 def health():
-    return {"status": "ORACLE_11_0_ONLINE", "core": "PostgreSQL pgvector Engine"}
+    return {"status": "ORACLE_12_0_ONLINE", "core": "PostgreSQL + Acid Math Engine"}
 
 # ==============================================================================
 # 1. ЛЕКСИЧЕСКАЯ ЦЕНТРИФУГА
@@ -66,7 +65,6 @@ def clean_anchor_title(raw_title: str) -> str:
         if len(word) > 15 or HASH_REGEX.match(word) or CONSONANT_CLUSTER_REGEX.search(word): continue
         if len(word) == 1 and word.lower() not in ['a', 'i', 'о', 'у', 'а', 'я', 'и', 'к', 'в', 'с']: continue
         valid_words.append(word)
-    # Берем якорь полно, чтобы не резать слишком коротко (берем до 8 слов, а не 4)
     final_anchor = " ".join(valid_words[:8]).strip()
     return "" if len(final_anchor) <= 2 else final_anchor
 
@@ -74,11 +72,13 @@ def vector_to_str(vec: np.ndarray) -> str:
     return "[" + ",".join(map(str, vec)) + "]"
 
 # ==============================================================================
-# 2. ФИЗИКА ОПТИКИ И ЗВУКА
+# 2. ФИЗИКА ОПТИКИ И ЗВУКА + БАЙЕСОВСКАЯ СЕНСОРИКА
 # ==============================================================================
 def extract_32d_consciousness_tensor(img_data: bytes):
     img_pil = Image.open(BytesIO(img_data)).convert('RGB')
-    img_pil = img_pil.resize((256, 256))
+    
+    # Делаем ресайз не слишком мелким, чтобы сохранить детали для кислоты
+    img_pil = img_pil.resize((512, 512)) 
     img = np.array(img_pil)
     gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
     hsv = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)
@@ -91,18 +91,28 @@ def extract_32d_consciousness_tensor(img_data: bytes):
     y, x = np.ogrid[:h, :w]
     gauss_kernel = np.exp(-((x - cx)**2 + (y - cy)**2) / (2.0 * (50**2)))
 
+    # --- БАЙЕСОВСКАЯ СЕНСОРИКА ---
+    # Шум (Дисперсия Лапласиана)
+    laplacian_var = cv2.Laplacian(gray, cv2.CV_64F).var()
+    
+    # Энтропия Шеннона (Хаос)
+    hist = cv2.calcHist([gray], [0], None, [256], [0, 256]).ravel()
+    hist_norm = hist / (hist.sum() + 1e-7)
+    non_zero_hist = hist_norm[hist_norm > 0]
+    shannon_entropy = -np.sum(non_zero_hist * np.log2(non_zero_hist))
+    
+    # Стандартные метрики Оракула
     luminance = np.mean(gray) / 255.0
-    hist = cv2.calcHist([gray], [0], None, [256], [0, 256])
-    entropy = -np.sum(hist * np.log2(hist + 1e-7)) / 8.0
-
+    entropy_old = -np.sum(hist_norm * np.log2(hist_norm + 1e-7)) / 8.0 # Оставил для старого тензора
+    
     f_transform = np.fft.fft2(gray)
     mag_spectrum = np.log(np.abs(np.fft.fftshift(f_transform)) + 1)
     high_freq_mask = (x - cx)**2 + (y - cy)**2 > (64**2)
     fft_rhythm = np.clip(np.mean(mag_spectrum[high_freq_mask]) / 14.0, 0.0, 1.0)
     
     edges = cv2.Canny(gray, 80, 180)
-    tension = np.clip((np.sum(edges > 0) / (256 * 256)) * 6.0, 0.0, 1.0)
-    depth = np.clip(1.0 - (cv2.Laplacian(gray, cv2.CV_64F).var() / 800.0), 0.0, 1.0)
+    tension = np.clip((np.sum(edges > 0) / (h * w)) * 6.0, 0.0, 1.0)
+    depth = np.clip(1.0 - (laplacian_var / 800.0), 0.0, 1.0)
     chronos = np.clip((np.percentile(gray, 4) / 255.0 * 2.2) + (fft_rhythm * 0.4), 0.0, 1.0)
     gestalt = np.clip(np.sum(edges * gauss_kernel) / (np.sum(edges) + 1e-5) * 1.5, 0.0, 1.0)
 
@@ -114,17 +124,66 @@ def extract_32d_consciousness_tensor(img_data: bytes):
     pink_noise = np.clip((np.sum(mag_spectrum[low_freq_mask]) / (np.sum(mag_spectrum[high_freq_mask]) + 1e-5)) / 5.0, 0.0, 1.0)
 
     tensor = np.zeros(32)
-    tensor[0], tensor[2], tensor[4], tensor[8], tensor[11], tensor[12], tensor[13], tensor[15], tensor[28] = luminance, entropy, tension, depth, chronos, gestalt, harmonics, grain, pink_noise
-    return tensor, has_human
+    tensor[0], tensor[2], tensor[4], tensor[8], tensor[11], tensor[12], tensor[13], tensor[15], tensor[28] = luminance, entropy_old, tension, depth, chronos, gestalt, harmonics, grain, pink_noise
+    
+    # Возвращаем сам BGR массив картинки (для кислоты), тензор, флаг лица и сенсорику
+    img_bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+    return img_bgr, tensor, has_human, shannon_entropy, laplacian_var
 
 # ==============================================================================
-# 3. АСИНХРОННЫЙ КОМБИНАТОРНЫЙ SQL-ДВИЖОК
+# 3. ПРОЦЕДУРНЫЙ МОРФИНГ (КИСЛОТА ШИЛЕ)
+# ==============================================================================
+def apply_acid_math(img_bgr, tensor_32d, entropy, variance):
+    """Гнет матрицу пикселей по синусоидам и сдвигает цвета, возвращает Base64 строку."""
+    rows, cols, _ = img_bgr.shape
+
+    # 1. Пространственный сдвиг
+    x_map, y_map = np.meshgrid(np.arange(cols), np.arange(rows))
+    x_map = x_map.astype(np.float32)
+    y_map = y_map.astype(np.float32)
+
+    delta_x = np.zeros_like(x_map)
+    delta_y = np.zeros_like(y_map)
+
+    # Используем первые 16 чисел 32D тензора как амплитуды и частоты
+    for i in range(8):
+        amplitude = tensor_32d[i] * entropy * 4.0
+        frequency = (tensor_32d[i+8] * 100) + 15
+        
+        delta_x += amplitude * np.sin(y_map / frequency)
+        delta_y += amplitude * np.cos(x_map / frequency)
+
+    map_x = x_map + delta_x
+    map_y = y_map + delta_y
+
+    warped_img = cv2.remap(img_bgr, map_x, map_y, interpolation=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
+
+    # 2. Хроматический сдвиг (Вращение RGB)
+    float_img = warped_img.astype(np.float32) / 255.0
+    theta = (variance / 1500.0) * np.mean(tensor_32d)
+    
+    color_matrix = np.array([
+        [np.cos(theta), -np.sin(theta), np.sin(theta)],
+        [np.sin(theta), np.cos(theta), -np.sin(theta)],
+        [-np.sin(theta), np.sin(theta), np.cos(theta)]
+    ])
+    
+    mutated_img = np.dot(float_img, color_matrix.T)
+    mutated_img = np.clip(mutated_img, 0.0, 1.0) * 255.0
+    mutated_img = mutated_img.astype(np.uint8)
+
+    # 3. Конвертация в Base64 для передачи на фронтенд
+    _, buffer = cv2.imencode('.jpg', mutated_img)
+    base64_str = base64.b64encode(buffer).decode('utf-8')
+    return f"data:image/jpeg;base64,{base64_str}"
+
+# ==============================================================================
+# 4. АСИНХРОННЫЙ КОМБИНАТОРНЫЙ SQL-ДВИЖОК
 # ==============================================================================
 async def synthesize_query_from_db(pool, tensor: np.ndarray, has_human: bool, raw_title: str, history: list, context_text: str):
     anchor = clean_anchor_title(raw_title)
 
     async with pool.acquire() as conn:
-        # 1. АНАЛИЗ СЕМАНТИКИ СЛОВ ЧЕРЕЗ БД (Вычисляем 8D Тензор Ужаса/Эйфории)
         words = list(set(re.findall(r'\b[a-zа-яё]+\b', (context_text or "").lower())))
         semantic_tensor = np.zeros(8)
         
@@ -146,18 +205,15 @@ async def synthesize_query_from_db(pool, tensor: np.ndarray, has_human: bool, ra
         ideational, sensate, dread, euphoria, nostalgia = semantic_tensor[0:5]
         luminance, entropy, tension, depth, chronos, gestalt, harmonics, grain, pink_noise = tensor[0], tensor[2], tensor[4], tensor[8], tensor[11], tensor[12], tensor[13], tensor[15], tensor[28]
 
-        # 2. ПОИСК ИДЕАЛЬНОГО АРХЕТИПА ЧЕРЕЗ PGVECTOR
         arch_query = "SELECT alias, (1 - (vector_32d <=> $1::vector)) as similarity FROM archetypes ORDER BY vector_32d <=> $1::vector LIMIT 1"
         arch_row = await conn.fetchrow(arch_query, vector_to_str(tensor))
         dominant_alias = arch_row['alias'] if arch_row else "UNKNOWN ANOMALY"
         resonance_pct = int(np.clip(arch_row['similarity'] * 100.0, 85, 99)) if arch_row else 85
 
-        # 3. ФОРМИРОВАНИЕ 5D ТЕНЗОРОВ
         state_t = vector_to_str(np.array([luminance, entropy, pink_noise, dread, euphoria]))
         form_t = vector_to_str(np.array([tension, depth, gestalt, dread, ideational]))
         medium_t = vector_to_str(np.array([chronos, grain, harmonics, dread, nostalgia]))
 
-        # 4. МГНОВЕННЫЙ ЗАПРОС К ЛЕКСИКОНУ В БД
         state_row = await conn.fetchrow("SELECT phrase FROM lexicon_matrix WHERE category = 'STATE' ORDER BY vector_5d <=> $1::vector LIMIT 1", state_t)
         form_row = await conn.fetchrow("SELECT phrase FROM lexicon_matrix WHERE category = 'FORM' ORDER BY vector_5d <=> $1::vector LIMIT 1", form_t)
         medium_row = await conn.fetchrow("SELECT phrase FROM lexicon_matrix WHERE category = 'MEDIUM' ORDER BY vector_5d <=> $1::vector LIMIT 1", medium_t)
@@ -166,22 +222,16 @@ async def synthesize_query_from_db(pool, tensor: np.ndarray, has_human: bool, ra
         best_form = form_row['phrase'] if form_row else "structure"
         best_medium = medium_row['phrase'] if medium_row else "cinematic photography"
 
-    # ==========================================
-    # СБОРКА И БРИТВА ОККАМА (ИДЕАЛЬНЫЙ РОУТЕР)
-    # ==========================================
     core_vibe = dominant_alias.lower()
     stop_words = {"and", "the", "with", "from"}
 
     if anchor:
-        # ПРАВИЛО 1: Якорь неприкосновенен.
         final_query = f"{anchor} {best_medium}"
     elif has_human:
-        # ПРАВИЛО 2: Портретный режим (Бритва включена)
         raw_query = f"{core_vibe} {best_state} portrait"
         clean_words = [w for w in raw_query.split() if w.lower() not in stop_words]
         final_query = " ".join(clean_words[:6])
     else:
-        # ПРАВИЛО 3: Абсолютная абстракция (Бритва включена)
         raw_query = f"{core_vibe} {best_state} {best_form}"
         clean_words = [w for w in raw_query.split() if w.lower() not in stop_words]
         final_query = " ".join(clean_words[:6])
@@ -219,21 +269,34 @@ async def mutate_endpoint(request: Request):
             body_bytes = await request.body()
             if not body_bytes: raise HTTPException(status_code=400, detail="Empty image data")
 
-        tensor, has_human = extract_32d_consciousness_tensor(body_bytes)
+        # 1. СЕНСОРИКА
+        img_bgr, tensor, has_human, shannon, variance = extract_32d_consciousness_tensor(body_bytes)
         text_to_analyze = context_text if context_text else raw_title
         
-        # Передаем запрос пулу соединений БД
+        # 2. SQL СИНТЕЗ
         smart_query, display_vibe, resonance_pct, dominant_archetype, st = await synthesize_query_from_db(
             request.app.state.db_pool, tensor, has_human, raw_title, history, text_to_analyze
         )
 
-        print(f"\n[ORACLE 11.0: MATRIX ALIGNED] -----------------")
-        print(f" > ANCHOR IN       : '{raw_title}'")
-        print(f" > DREAD / EUPHORIA: {st[2]:.2f} / {st[3]:.2f}")
+        # 3. ГЕНЕРАЦИЯ КИСЛОТЫ В ПАМЯТИ
+        acid_image_base64 = apply_acid_math(img_bgr, tensor, shannon, variance)
+
+        print(f"\n[ORACLE 12.0: ACID MATRIX ALIGNED] -----------------")
+        print(f" > SHANNON ENTROPY : {shannon:.2f}")
+        print(f" > LAPLACIAN NOISE : {variance:.2f}")
         print(f" > FINAL QUERY     : \"{smart_query}\"")
         print(f"----------------------------------------------------------\n")
 
-        return {"status": "success", "displayVibe": display_vibe, "smartQuery": smart_query, "resonanceScore": resonance_pct, "hasHuman": has_human, "archetype": dominant_archetype}
+        # Теперь мы возвращаем еще и сгенерированную картинку!
+        return {
+            "status": "success", 
+            "displayVibe": display_vibe, 
+            "smartQuery": smart_query, 
+            "resonanceScore": resonance_pct, 
+            "hasHuman": has_human, 
+            "archetype": dominant_archetype,
+            "acidImageBase64": acid_image_base64  # <--- ВОТ ОНА, МАГИЯ
+        }
     except Exception as e:
         return {"status": "error", "displayVibe": "RESONANCE VOID", "smartQuery": "cinematic abstract blur", "message": str(e)}
 

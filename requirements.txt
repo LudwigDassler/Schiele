@@ -1,12 +1,6 @@
 opencv-python-headless==4.9.0.80
 numpy
 Pillow
-librosa
-scipy
 fastapi
-uvicorn
 pydantic
 asyncpg
-soundfile
-mediapipe
-gradio

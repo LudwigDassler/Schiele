@@ -103,17 +103,26 @@ export async function POST(req: Request) {
     console.log(`[PARSER] Файл захвачен. Байт: ${imageBuffer.byteLength}. Отправка в монолит Оракула...`);
 
     // ==========================================
-    // 3. ОТПРАВКА В ПИТОН (ТЕПЕРЬ ОН ДЕЛАЕТ ВСЁ)
+    // 3. ОТПРАВКА В ПИТОН (НА ТОТ ЖЕ СЕРВЕР VERCEL)
     // ==========================================
-    const ORACLE_URL = process.env.ORACLE_URL || "https://kashmir-oracle.onrender.com/api/mutate";
-    
+    const origin = new URL(req.url).origin;
+    const oracleBase = (
+      process.env.ORACLE_URL ||
+      process.env.NEXT_PUBLIC_ORACLE_URL ||
+      `${origin}/api/py_oracle`
+    ).replace(/\/(api\/mutate)?\/?$/, "");
+    const ORACLE_URL = `${oracleBase}/api/mutate`;
+
     let oracleData: any;
     try {
       const oracleRes = await fetch(ORACLE_URL, {
         method: "POST",
-        headers: { "Content-Type": "application/octet-stream" },
+        headers: { 
+          "Content-Type": "application/octet-stream",
+          "x-anchor-title": encodeURIComponent(coreSubject || altText)
+        },
         body: imageBuffer,
-        signal: AbortSignal.timeout(15000) // 15 секунд на физику + OCR
+        signal: AbortSignal.timeout(15000)
       });
 
       if (!oracleRes.ok) throw new Error(`Oracle HTTP ${oracleRes.status}`);
@@ -131,7 +140,6 @@ export async function POST(req: Request) {
       });
     }
 
-    // Забираем прочитанный текст от Питона
     const ocrText = oracleData.extracted_text || "";
     if (ocrText) {
       console.log(`[ORACLE OCR] Символический Глаз прочитал: "${ocrText}"`);
@@ -140,20 +148,16 @@ export async function POST(req: Request) {
     // ==========================================
     // 4. СИНТЕЗ ФИНАЛЬНОГО ЗАПРОСА
     // ==========================================
-    const oracleVibe = oracleData.refined_query || oracleData.style || "aesthetic";
-    const displayVibe = oracleVibe.split(" ").slice(0, 2).join(" ").toUpperCase();
+    const oracleVibe = oracleData.smartQuery || oracleData.refined_query || oracleData.style || "aesthetic";
+    const displayVibe = oracleData.displayVibe || oracleVibe.split(" ").slice(0, 2).join(" ").toUpperCase();
     
-    // Гравитация (защита от падения старого API)
     const gravity = (oracleData.tensor && oracleData.tensor.length > 10) ? oracleData.tensor[10] : 0.5; 
-
-    // 🔥 АБСОЛЮТНЫЙ ЯКОРЬ: Семантика -> Гарпун -> Прочитанный Текст из Питона
     const finalSubject = coreSubject || ocrText;
 
     let finalQuery = oracleVibe;
-    if (finalSubject) {
+    if (finalSubject && !oracleVibe.toLowerCase().includes(finalSubject.toLowerCase())) {
       const subjectWordCount = finalSubject.split(" ").length;
 
-      // Прибиваем гвоздями ТОЛЬКО короткие субъекты при высокой гравитации
       if (gravity > 0.6 && subjectWordCount <= 3) {
         finalQuery = `"${finalSubject}" ${oracleVibe}`;
         console.log(`[ORACLE] Высокая гравитация. Зафиксирован субъект: "${finalSubject}"`);
@@ -170,7 +174,11 @@ export async function POST(req: Request) {
       query: finalQuery,
       smartQuery: finalQuery,
       tensor: oracleData.tensor,
-      style: oracleData.style,
+      style: oracleData.style || oracleData.archetype,
+      archetype: oracleData.archetype,
+      resonanceScore: oracleData.resonanceScore,
+      hasHuman: oracleData.hasHuman,
+      acidImageBase64: oracleData.acidImageBase64,
       displayVibe: displayVibe,
       source: "oracle_math_core"
     });

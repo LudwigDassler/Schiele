@@ -1,0 +1,8 @@
+{
+  "rewrites": [
+    {
+      "source": "/api/py_oracle/:path*",
+      "destination": "/api/py_oracle"
+    }
+  ]
+}

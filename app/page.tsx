@@ -35,9 +35,9 @@ export default function Home() {
   const [sonicLogs, setSonicLogs] = useState<string[]>([]);
   const [displayVibe, setDisplayVibe] = useState("");
   
-  // 🔥 АКТУАЛЬНЫЕ УЗЛЫ ГЕЛЬБЕТА 🔥
-  const ORACLE_URL = "https://kashmir-oracle.onrender.com"; 
-  const SONIC_URL = "https://gelbet-sonic-engine.onrender.com";
+  // 🔥 АКТУАЛЬНЫЕ УЗЛЫ ГЕЛЬБЕТА (МОНОЛИТ VERCEL) 🔥
+  const ORACLE_URL = process.env.NEXT_PUBLIC_ORACLE_URL || "/api/py_oracle";
+  const SONIC_URL = process.env.NEXT_PUBLIC_SONIC_URL || "/api/py_oracle";
   
   // Стейты данных
   const [photos, setPhotos] = useState<Photo[]>([]);
@@ -210,6 +210,8 @@ export default function Home() {
     setDisplayVibe("TRANSLATING WAVES...");
     
     try {
+      if (!SONIC_URL || !ORACLE_URL) throw new Error("NEXT_PUBLIC_SONIC_URL / NEXT_PUBLIC_ORACLE_URL не заданы");
+
       // АКТ 1: БОГ-ОТЕЦ
       const sonicRes = await fetch(`${SONIC_URL}/api/resonate`, {
         method: "POST",
@@ -468,7 +470,7 @@ export default function Home() {
         .nav-link { font-size: 11px; text-transform: uppercase; letter-spacing: 2px; color: var(--text-muted); transition: color 0.3s; cursor: pointer; border: none; background: transparent; }
         .nav-link:hover, .nav-link.active { color: #fff; }
 
-        /* ЭЛЕГАНТНЫЕ КОМПОНЕНТЫ */
+        /* ЭЛЕГАНТНЫЕ КОМПОНЕНЕНТЫ */
         .glass-panel { background: rgba(255, 255, 255, 0.02); backdrop-filter: blur(20px); border: 1px solid rgba(255, 255, 255, 0.05); border-radius: 16px; box-shadow: 0 10px 30px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.03); }
         .btn-elegant { background: transparent; border: 1px solid rgba(255,255,255,0.2); color: #fff; font-family: 'Inter', sans-serif; font-size: 9px; font-weight: 500; text-transform: uppercase; letter-spacing: 2px; padding: 8px 16px; cursor: pointer; transition: all 0.3s ease; border-radius: 99px; display: flex; align-items: center; justify-content: center; gap: 6px; }
         .btn-elegant:hover:not(:disabled) { background: #fff; color: #000; box-shadow: 0 0 15px rgba(255,255,255,0.2); }

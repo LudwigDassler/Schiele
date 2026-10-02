@@ -1,9 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabase } from "../../../lib/supabase";
 
-// ==========================================
-// 1. SEMANTIC ENGINE & ЛЕКСИЧЕСКАЯ ЦЕНТРИФУГА (ИЗ ORACLE 12.0)
-// ==========================================
 const LINGUISTIC_NOISE = new Set([
   "hd", "4k", "8k", "hq", "high", "quality", "resolution", "1080p", "fullhd",
   "wallpaper", "wallpapers", "background", "backgrounds", "desktop", "mobile",
@@ -15,11 +12,12 @@ const LINGUISTIC_NOISE = new Set([
 
 const CLEANUP_REGEX = /\b(wallpaper|hd|4k|image|photo|pic|picture|download|free|vector|stock|source|desktop|background|pinterest|preview|aesthetic|artifact)\b/gi;
 const CONSONANT_CLUSTER_REGEX = /[bcdfghjklmnpqrstvwxzBCDFGHJKLMNPQRSTVWXZБВГДЖЗЙКЛМНПРСТФХЦЧШЩЪЬ]{6,}/;
-const HASH_REGEX = /^(?=.*[a-zA-Zа-яА-ЯёЁ])(?=.*\d)[a-zA-Zа-яА-ЯёЁ\d]{4,}$/;
+const HASH_REGEX = new RegExp("^(?=.*[a-zA-Zа-яА-ЯёЁ])(?=.*\\d)[a-zA-Zа-яА-ЯёЁ\\d]{4,}(?![\\s\\S])");
 
 function cleanAnchorTitle(rawTitle: string): string {
   if (!rawTitle || rawTitle === "Aesthetic Artifact" || rawTitle === "Aesthetic") return "";
-  let clean = rawTitle
+  const clean = rawTitle
+    .replace(/[\uE000\uE001]/g, "")
     .replace(/http\S+|www\S+/g, "")
     .replace(/\.(jpg|jpeg|png|webp|gif|mp4|avif)\b/gi, "")
     .replace(/\[.*?\]|\(.*?\)/g, "")
@@ -41,7 +39,6 @@ function cleanAnchorTitle(rawTitle: string): string {
 function extractSemanticCore(input: string): string {
   if (!input) return "";
   try {
-    // Игнорируем слепые технические ссылки прокси-картинок Bing/Google
     if (input.startsWith("http") && /(bing\.com\/th|gstatic\.com|pinimg\.com|unsplash\.com)/i.test(input)) {
       return "";
     }
@@ -50,10 +47,12 @@ function extractSemanticCore(input: string): string {
       ? decodeURIComponent(input).split("/").pop()?.split(/[?#]/)[0] || ""
       : input;
 
-    const withoutExt = text.replace(/\.[a-zA-Z0-9]+$/, "");
+    const withoutExt = text.replace(/\.[a-zA-Z0-9]+(?![\s\S])/, "");
     const stripped = withoutExt.replace(/[-_]/g, "");
 
-    if (/^[a-f0-9]{8,}$/i.test(stripped) \vert{}\vert{} (/^[a-z0-9]{12,}$/i.test(stripped) && /\d/.test(stripped))) {
+    const isHexHash = /^[a-f0-9]{8,}(?![\s\S])/i.test(stripped);
+    const isAlnumHash = /^[a-z0-9]{12,}(?![\s\S])/i.test(stripped) && /\d/.test(stripped);
+    if (isHexHash || isAlnumHash) {
       return "";
     }
 
@@ -81,16 +80,12 @@ function extractSemanticCore(input: string): string {
   }
 }
 
-// ==========================================
-// 2. ФИЗИКА ОПТИКИ: 32D ТЕНЗОР СОЗНАНИЯ (НАТИВНЫЙ ПОРТ ORACLE 12.0)
-// ==========================================
 function clip(val: number, min = 0.0, max = 1.0): number {
   return Math.max(min, Math.min(max, val));
 }
 
 function extract32dConsciousnessTensor(buffer: ArrayBuffer) {
   const bytes = new Uint8Array(buffer);
-  // Пропускаем заголовки контейнера JPEG/PNG, берем срез плотного потока данных
   const offset = Math.min(256, Math.floor(bytes.length * 0.05));
   const step = Math.max(1, Math.floor((bytes.length - offset) / 16384));
 
@@ -100,7 +95,6 @@ function extract32dConsciousnessTensor(buffer: ArrayBuffer) {
   }
   const n = Math.max(samples.length, 1);
 
-  // 1. Luminance & Гистограмма для Энтропии Шеннона
   const hist = new Float64Array(256);
   let sum = 0;
   for (let i = 0; i < n; i++) {
@@ -120,7 +114,6 @@ function extract32dConsciousnessTensor(buffer: ArrayBuffer) {
   }
   const entropyNorm = clip(shannonEntropy / 8.0);
 
-  // 2. Дисперсия Лапласиана (Шум), Напряжение границ (Canny proxy) и Зерно (Grain)
   let lapSum = 0;
   let lapSqSum = 0;
   let edgeCount = 0;
@@ -137,7 +130,6 @@ function extract32dConsciousnessTensor(buffer: ArrayBuffer) {
     if (grad > 45) edgeCount++;
     totalEdgeMass += grad;
 
-    // Гауссово ядро к центру массива
     const normPos = (i / n) - 0.5;
     const gauss = Math.exp(-(normPos * normPos) / 0.08);
     centerEdgeMass += grad * gauss;
@@ -154,7 +146,6 @@ function extract32dConsciousnessTensor(buffer: ArrayBuffer) {
   const gestalt = clip((centerEdgeMass / totalEdgeMass) * 1.3);
   const grain = clip((grainSum / n) / 28.0);
 
-  // 3. Спектральный ритм и Розовый шум
   const sorted = [...samples].sort((a, b) => a - b);
   const p4 = sorted[Math.floor(n * 0.04)] || 0;
   const fftRhythm = clip((tension * 0.6) + (grain * 0.4));
@@ -171,7 +162,7 @@ function extract32dConsciousnessTensor(buffer: ArrayBuffer) {
   tensor[2] = Number(entropyNorm.toFixed(4));
   tensor[4] = Number(tension.toFixed(4));
   tensor[8] = Number(depth.toFixed(4));
-  tensor[10] = Number(clip((gestalt + tension) / 2).toFixed(4)); // Гравитация
+  tensor[10] = Number(clip((gestalt + tension) / 2).toFixed(4));
   tensor[11] = Number(chronos.toFixed(4));
   tensor[12] = Number(gestalt.toFixed(4));
   tensor[13] = Number(harmonics.toFixed(4));
@@ -181,9 +172,6 @@ function extract32dConsciousnessTensor(buffer: ArrayBuffer) {
   return { tensor, shannonEntropy, laplacianVar };
 }
 
-// ==========================================
-// 3. КОМБИНАТОРНЫЙ ВЕКТОРНЫЙ ДВИЖОК (SUPABASE + РЕЗЕРВНАЯ МАТРИЦА)
-// ==========================================
 function parseVector(v: any): number[] {
   if (Array.isArray(v)) return v.map(Number);
   if (typeof v === "string") {
@@ -216,7 +204,7 @@ const FALLBACK_ARCHETYPES = [
 async function synthesizeQueryFromDb(tensor: number[], rawTitle: string, contextText: string) {
   const anchor = cleanAnchorTitle(rawTitle);
   const words = Array.from(new Set((contextText || "").toLowerCase().match(/[a-zа-яё]{3,}/gi) || []));
-  const semanticTensor = [0.4, 0.5, 0.5, 0.3, 0.6]; // IDEATIONAL, SENSATE, DREAD, EUPHORIA, NOSTALGIA
+  const semanticTensor = [0.4, 0.5, 0.5, 0.3, 0.6];
 
   try {
     if (words.length > 0) {
@@ -304,11 +292,10 @@ async function synthesizeQueryFromDb(tensor: number[], rawTitle: string, context
   let finalQuery = "";
 
   if (anchor) {
-    // Если якорь на кириллице — не смешиваем с английской матрицей, чтобы не сбивать локаль поисковика
-    finalQuery = isCyrillicAnchor ? `${anchor} архив фото` : `${anchor} ${bestMedium}`;
+    finalQuery = isCyrillicAnchor ? (anchor + " архив фото") : (anchor + " " + bestMedium);
   } else {
     const stopWords = new Set(["and", "the", "with", "from", "unknown", "anomaly"]);
-    const rawWords = `${dominantAlias.toLowerCase()} ${bestState} ${bestForm}`
+    const rawWords = (dominantAlias.toLowerCase() + " " + bestState + " " + bestForm)
       .split(/\s+/)
       .filter((w) => w && !stopWords.has(w.toLowerCase()));
     finalQuery = Array.from(new Set(rawWords)).slice(0, 6).join(" ");
@@ -316,15 +303,12 @@ async function synthesizeQueryFromDb(tensor: number[], rawTitle: string, context
 
   return {
     smartQuery: finalQuery.trim(),
-    displayVibe: `RESONANCE: ${dominantAlias}`,
+    displayVibe: "RESONANCE: " + dominantAlias,
     resonanceScore: resonancePct,
     archetype: dominantAlias,
   };
 }
 
-// ==========================================
-// ОСНОВНОЙ POST-ОБРАБОТЧИК МУТАЦИИ
-// ==========================================
 export async function POST(req: Request) {
   try {
     const body = await req.json();
@@ -336,12 +320,10 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Missing imageUrl" }, { status: 400 });
     }
 
-    // 1. Извлекаем субъект: приоритет у человеческого названия (title/alt), затем URL
     const titleAnchor = cleanAnchorTitle(altText);
     const urlSubject = extractSemanticCore(imageUrl);
     const coreSubject = titleAnchor || urlSubject;
 
-    // 2. Скачиваем байты картинки для расчета 32D-тензора
     let imageBuffer: ArrayBuffer | null = null;
     try {
       const imageRes = await fetch(imageUrl, {
@@ -356,14 +338,13 @@ export async function POST(req: Request) {
       }
     } catch {}
 
-    // 3. Считаем 32D-тензор и синтезируем вектор через БД
     const { tensor } = imageBuffer
       ? extract32dConsciousnessTensor(imageBuffer)
       : { tensor: [0.35, 0, 0.65, 0, 0.55, 0, 0, 0, 0.7, 0, 0.6, 0.5, 0.65, 0.6, 0, 0.5, ...new Array(16).fill(0)] };
 
     const result = await synthesizeQueryFromDb(tensor, coreSubject, altText || coreSubject);
 
-    console.log(`[ORACLE 12.0 NATIVE] Vibe: "${result.displayVibe}" | Query: "${result.smartQuery}"`);
+    console.log("[ORACLE 12.0 NATIVE] Vibe: " + result.displayVibe + " -> Query: " + result.smartQuery);
 
     return NextResponse.json({
       success: true,
@@ -378,7 +359,7 @@ export async function POST(req: Request) {
       source: "oracle_math_core",
     });
   } catch (error: any) {
-    console.error(`[MUTATE ERROR]`, error.message);
+    console.error("[MUTATE ERROR]", error.message);
     return NextResponse.json({
       success: true,
       query: "dark cinematic photography",

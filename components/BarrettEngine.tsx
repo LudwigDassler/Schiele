@@ -5,7 +5,7 @@ interface Tensor5D {
   energy: number;    // E: скорость фазового сдвига и яркость
   chaos: number;     // C: нелинейная турбулентность ("Madcap" девиация)
   tone: number;      // H: базовый спектральный угол (Hue)
-  structure: number; // St: баланс между стоячими волнами Хладни и аттрактором
+  structure: number; // St: баланс между стоящими волнами Хладни и аттрактором
   symmetry: number;  // Sy: порядок калейдоскопической группы вращений C_k
 }
 
@@ -119,7 +119,7 @@ function compileLexicalManifold(rawText: string): { tensor: Tensor5D; coeffs: Di
 }
 
 export default function BarrettEngine({ query, onSecureArtifact }: Props) {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
 
   const initialData = compileLexicalManifold(query || "SHINE ON CRAZY DIAMOND");
   const [tensor, setTensor] = useState<Tensor5D>(initialData.tensor);
@@ -172,7 +172,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const ctx = canvas.getContext("2d", { preserveDrawingBuffer: true });
+    const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
     let animId = 0;
@@ -365,8 +365,8 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
   };
 
   const handleRecordWebm = () => {
-    const canvas = canvasRef.current;
-    if (!canvas || isRecording) return;
+    const canvas = canvasRef.current as (HTMLCanvasElement & { captureStream?: (fps?: number) => MediaStream }) | null;
+    if (!canvas || !canvas.captureStream || isRecording) return;
     try {
       const stream = canvas.captureStream(60);
       const recorder = new MediaRecorder(stream, {

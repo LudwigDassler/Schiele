@@ -198,7 +198,6 @@ function compileLexicalManifold(rawText: string): { tensor: Tensor5D; coeffs: Di
   };
 }
 
-// Билинейная выборка скалярного поля (для идеально гладкой трассировки и шейдера Currents)
 function sampleBilinearScalar(field: Float32Array, w: number, h: number, fx: number, fy: number): number {
   const x0 = Math.max(0, Math.min(w - 1, Math.floor(fx)));
   const y0 = Math.max(0, Math.min(h - 1, Math.floor(fy)));
@@ -306,7 +305,6 @@ function buildMatrixFromImage(img: HTMLImageElement): MatrixBuffer {
     }
   }
 
-  // Оператор Щарра
   let maxEdge = 1e-5;
   for (let y = 1; y < h - 1; y++) {
     for (let x = 1; x < w - 1; x++) {
@@ -336,7 +334,6 @@ function buildMatrixFromImage(img: HTMLImageElement): MatrixBuffer {
     edge[i] = clip(edge[i] / maxEdge);
   }
 
-  // Двухпроходное сглаживание касательного поля ETF (обеспечивает плавные векторы вдоль прямых граней и кривых)
   const tempTx = new Float32Array(total);
   const tempTy = new Float32Array(total);
 
@@ -376,9 +373,6 @@ function buildMatrixFromImage(img: HTMLImageElement): MatrixBuffer {
     }
   }
 
-  // ==========================================
-  // БИЛИНЕЙНАЯ СУБПИКСЕЛЬНАЯ ТРАССИРОВКА С 4-КРАТНЫМ ГАУССОВЫМ СГЛАЖИВАНИЕМ КРИВЫХ
-  // ==========================================
   const visited = new Uint8Array(total);
   const tier1Seeds: { idx: number; score: number }[] = [];
   const tier2Seeds: { idx: number; score: number }[] = [];
@@ -444,7 +438,6 @@ function buildMatrixFromImage(img: HTMLImageElement): MatrixBuffer {
       const curLum = sampleBilinearScalar(lum, w, h, cx, cy);
       if (curEdge < minEdge && curLum < 0.14) break;
 
-      // Билинейная выборка касательного вектора (убирает ступенчатый шум пиксельной сетки!)
       let tx = sampleBilinearScalar(etfX, w, h, cx, cy) * dirSign;
       let ty = sampleBilinearScalar(etfY, w, h, cx, cy) * dirSign;
       const tLen = Math.sqrt(tx * tx + ty * ty) + 1e-6;
@@ -457,7 +450,6 @@ function buildMatrixFromImage(img: HTMLImageElement): MatrixBuffer {
       }
       if (s > 0 && tx * prevTx + ty * prevTy < 0.22) break;
 
-      // Инерционный фильтр направления (превращает ломаную в идеальную дугу)
       const smoothTx = prevTx * 0.55 + tx * 0.45;
       const smoothTy = prevTy * 0.55 + ty * 0.45;
       const normT = Math.sqrt(smoothTx * smoothTx + smoothTy * smoothTy) + 1e-6;
@@ -470,7 +462,6 @@ function buildMatrixFromImage(img: HTMLImageElement): MatrixBuffer {
       visited[cIdx] = 1;
       rawChain.push({ x: cx, y: cy });
 
-      // Мягкое субпиксельное удержание на вершине градиента
       const nX = -finalTy;
       const nY = finalTx;
       const ePlus = sampleBilinearScalar(edge, w, h, cx + nX * 0.85, cy + nY * 0.85);
@@ -483,7 +474,6 @@ function buildMatrixFromImage(img: HTMLImageElement): MatrixBuffer {
     return rawChain;
   };
 
-  // Многопроходный фильтр Гаусса + расчет аналитических нормалей кривой
   const smoothAndComputeNormals = (rawPts: { x: number; y: number }[], passes: number) => {
     let curr = rawPts.map((p) => ({ x: p.x, y: p.y }));
     const n = curr.length;
@@ -574,7 +564,6 @@ function buildMatrixFromImage(img: HTMLImageElement): MatrixBuffer {
     }
   };
 
-  // 4 прохода сглаживания на главных контурах делают линии идеально шелковыми!
   processTier(tier1Seeds, 1, 1150, 48, 1.4, 0.075, 5, 4);
   processTier(tier2Seeds, 2, 1250, 26, 1.2, 0.035, 4, 3);
   processTier(tier3Seeds, 3, 700, 18, 1.5, 0.0, 4, 3);
@@ -939,7 +928,6 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
       if (!s.isPaused) {
         s.time += 0.015 * (0.35 + t.energy * 1.25);
         if (s.traceProgress < 1.0) {
-          // Медленная, гипнотически плавная развертка контуров (~5.5 секунд)
           s.traceProgress = Math.min(1.0, s.traceProgress + 0.0024 * (0.5 + t.energy * 1.1));
         }
       }
@@ -1007,7 +995,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
       const mNormY = (s.mouseY - oy) / Math.max(1, drawH);
 
       // ==========================================
-      // ГЕНЕРАЦИЯ ОПТИЧЕСКОГО БУФЕРА (ДЛЯ ACID И ПОДЛОЖКИ УЗНАВАЕМОСТИ)
+      // ГЕНЕРАЦИЯ ОПТИЧЕСКОГО БУФЕРА
       // ==========================================
       if (acidCtx && s.topology !== "LIDAR" && s.topology !== "CURRENTS") {
         if (acidCanvas.width !== m.w || acidCanvas.height !== m.h) {
@@ -1101,7 +1089,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
       }
 
       // ==========================================
-      // РЕЖИМ 1: TRACE 3.0 (СУБПИКСЕЛЬНАЯ СПЛАЙН-ИНТЕРПОЛЯЦИЯ + ГЛАДКОЕ ПОЛЕ ВОЛН)
+      // РЕЖИМ 1: TRACE 3.0
       // ==========================================
       if (s.topology === "TRACE") {
         const easedGlobal = smoothstep(0.0, 1.0, s.traceProgress);
@@ -1117,13 +1105,11 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
 
         const strokes = m.strokes;
         const totalStrokes = strokes.length;
-        // Широкое окно одновременного рисования (280 контуров рисуются параллельно с S-кривой развертки)
         const windowSpan = 280;
         const headFloat = s.traceProgress * (totalStrokes + windowSpan);
 
         const waveSpeed = time * (2.2 + t.energy * 2.5);
         const foldMirror = t.symmetry > 0.65;
-        // Когерентная амплитуда: плавное дыхание без излома прямых линий!
         const coherentAmp = t.chaos * 3.2 * (1.15 - t.structure * 0.75);
 
         for (let i = 0; i < totalStrokes; i++) {
@@ -1135,12 +1121,10 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
           const pts = st.pts;
           const nPts = pts.length;
 
-          // Вычисляем индивидуальный прогресс штриха [0..1] через гладкую S-кривую smoothstep
           const rawLocal = s.traceProgress >= 0.999 ? 1.0 : clip((headFloat - i) / windowSpan, 0.0, 1.0);
           const localProg = smoothstep(0.0, 1.0, rawLocal);
           if (localProg <= 0.01) continue;
 
-          // Точная дробная координата кончика пера между вершинами (никаких рывков!)
           const exactPtFloat = localProg * (nPts - 1);
           const fullIdx = Math.floor(exactPtFloat);
           const frac = exactPtFloat - fullIdx;
@@ -1152,7 +1136,6 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
             const sNorm = k / Math.max(1, nPts - 1);
             const env = Math.sin(sNorm * Math.PI);
 
-            // Гладкое 2D пространственное поле смещения (не ломает прямые грани в червяков!)
             const spatialPhase = (pt.u * 4.5 + pt.v * 4.5) * Math.PI + waveSpeed + st.phase * 0.25;
             const dxWave = Math.sin(spatialPhase) * env * coherentAmp;
             const dyWave = Math.cos(spatialPhase * 0.85) * env * coherentAmp;
@@ -1177,7 +1160,6 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
             });
           }
 
-          // Добавляем субпиксельно-интерполированный кончик штриха
           if (fullIdx < nPts - 1 && frac > 0.001) {
             const pA = pts[fullIdx];
             const pB = pts[fullIdx + 1];
@@ -1214,19 +1196,16 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
 
           buildSmoothPath(coords);
 
-          // Мягкий ореол свечения (Bloom) вокруг главных контуров
           if (st.tier === 1) {
             ctx.strokeStyle = glowStyle;
             ctx.lineWidth = 3.2 + st.meanEdge * 2.0;
             ctx.stroke();
           }
 
-          // Четкое каллиграфическое ядро линии
           ctx.strokeStyle = coreStyle;
           ctx.lineWidth = st.tier === 1 ? (1.1 + st.meanEdge * 1.1) : st.tier === 2 ? 0.85 : 0.55;
           ctx.stroke();
 
-          // Нежная лазерная жемчужина на кончике рисуемого сплайна
           if (isDrawingTip) {
             const tip = coords[coords.length - 1];
             ctx.fillStyle = "rgba(255, 255, 255, 0.9)";
@@ -1249,7 +1228,6 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
         const dst = outImg.data;
         const src = m.rgba;
 
-        // Плавно скользящий фокус вихревого обтекания (без резких дыр и наклеенных шаров!)
         const goalU = s.mouseActive && mNormX >= 0 && mNormX <= 1 ? mNormX : 0.5 + Math.cos(time * 0.45) * 0.24;
         const goalV = s.mouseActive && mNormY >= 0 && mNormY <= 1 ? mNormY : 0.5 + Math.sin(time * 0.65) * 0.18;
         s.vortexU += (goalU - s.vortexU) * 0.06;
@@ -1258,7 +1236,6 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
         const vu = s.vortexU;
         const vv = s.vortexV;
 
-        // Плотность ламинарных полос жидкого хрома и сила завихрения
         const striationFreq = 26.0 + t.symmetry * 48.0;
         const shearAmp = (0.015 + t.chaos * 0.065) * m.w;
         const reliefContourBend = 1.6 + t.structure * 2.8;
@@ -1273,22 +1250,18 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
 
             const u = x / m.w;
             const lOrig = m.lum[baseIdx];
-            const eOrig = m.edge[baseIdx];
 
-            // 1. Векторное поле вихревой дорожки Кармана + обтекание рельефа объекта
             const du = u - vu;
             const dv = v - vv;
             const distSq = du * du + dv * dv + 0.004;
             const dist = Math.sqrt(distSq);
 
-            // Мягкая дипольная закрутка вокруг фокуса (как в расплавленном металле)
             const swirlEnvelope = Math.exp(-distSq * 9.5);
             const vortexAngle = swirlEnvelope * (1.2 + t.chaos * 2.4) * Math.sin(time * 1.5 - dist * 8.0);
             const wakeWave =
               Math.sin((u * 3.5 - v * 1.8) * Math.PI * c.nHarmonic - time * 2.6) *
               Math.cos((v * 4.2 + u * 1.5) * Math.PI * c.mHarmonic + time * 1.9);
 
-            // Сдвиг вдоль касательных самого изображения сохраняет 100% четкость силуэта и деталей!
             const dispX =
               (m.etfX[baseIdx] * wakeWave + (-dv * vortexAngle - du * swirlEnvelope * 0.35)) * shearAmp;
             const dispY =
@@ -1298,10 +1271,9 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
             const sy = clip(y + dispY * (1.1 - t.structure * 0.45), 0, m.h - 1);
 
             const [rSample, gSample, bSample] = sampleBilinearRGB(src, m.w, m.h, sx, sy);
-            const lAdv = sampleBilinearScalar(lum, m.w, m.h, sx, sy);
-            const eAdv = sampleBilinearScalar(edge, m.w, m.h, sx, sy);
+            const lAdv = sampleBilinearScalar(m.lum, m.w, m.h, sx, sy);
+            const eAdv = sampleBilinearScalar(m.edge, m.w, m.h, sx, sy);
 
-            // 2. Функция тока Ψ(u,v) для ламинарных серебряно-неоновых полос Роберта Битти
             const streamPsi =
               (v * 0.82 - u * 0.38) * striationFreq +
               lAdv * reliefContourBend +
@@ -1310,24 +1282,20 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
               wakeWave * (0.4 + t.chaos * 1.4) -
               time * (1.2 + t.energy * 1.8);
 
-            // Гладкая антиалиасинговая гребенка жидкого хрома
             const sinBand = Math.sin(streamPsi * Math.PI);
             const chromeSpecular = Math.pow(0.5 + 0.5 * sinBand, 3.2);
             const darkGroove = 0.32 + 0.68 * (0.5 + 0.5 * Math.cos(streamPsi * Math.PI));
 
-            // 3. Фирменная палитра Tame Impala — Currents (Пурпур / Индиго / Циан / Золото + Жидкое серебро)
             const iridPhase = hueShiftRad + lAdv * 3.4 + swirlEnvelope * 2.5 + sinBand * 0.9;
             const curR = 145 + 110 * Math.sin(iridPhase + 0.2);
             const curG = 55 + 95 * Math.sin(iridPhase + 2.35);
             const curB = 185 + 70 * Math.cos(iridPhase - 0.4);
 
-            // Смешиваем оригинальный детальный образ с жидким хромом и иридисцентным спектром
             const photoBlend = 0.45 + t.structure * 0.35;
             let rOut = (rSample * photoBlend + curR * (1.0 - photoBlend)) * darkGroove;
             let gOut = (gSample * photoBlend + curG * (1.0 - photoBlend)) * darkGroove;
             let bOut = (bSample * photoBlend + curB * (1.0 - photoBlend)) * darkGroove;
 
-            // Блик жидкого серебра на гребнях ламинарных полос и гранях объекта
             const chromeIntensity = chromeSpecular * (0.35 + lOrig * 0.65 + eAdv * 0.85) * 210.0;
             rOut += chromeIntensity * 0.96;
             gOut += chromeIntensity * 0.98;

@@ -2157,7 +2157,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
             );
 
             // Плавный переход между пурпурно-неоновыми полосами и темным обсидианом
-            constsmoothRibbon = 0.35 + 0.65 * smoothstep(-0.55, 0.55, bandWave);
+           const smoothRibbon = 0.35 + 0.65 * smoothstep(-0.55, 0.55, bandWave);
             const effRibbon = smoothRibbon * (1.0 - detailShield * 0.75) + detailShield * 0.75;
 
             const keepPhoto = art.foundationDepth * 0.75;

@@ -2,11 +2,11 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
 
 interface Tensor5D {
-  energy: number;    // E: скорость волн и частота фазового сдвига
-  chaos: number;     // C: амплитуда деформации пространства и RGB-аберрации
-  tone: number;      // H: сдвиг цветовой фазы спектра
-  structure: number; // St: резкость контуров Собеля и детализация объекта
-  symmetry: number;  // Sy: зеркальная/радиальная симметрия
+  energy: number;    // E: фазовая скорость волн и частота импульсов
+  chaos: number;     // C: амплитуда нелинейной турбулентности и хроматической дисперсии
+  tone: number;      // H: угол поворота цветовой матрицы SO(3)
+  structure: number; // St: рельефность граней Собеля и плотность линий
+  symmetry: number;  // Sy: зеркальная/калейдоскопическая складка пространства
 }
 
 interface DifferentialConstants {
@@ -20,6 +20,15 @@ interface DifferentialConstants {
   lyapunov: number;
 }
 
+interface SilkParticle {
+  x: number;
+  y: number;
+  x0: number;
+  y0: number;
+  age: number;
+  maxAge: number;
+}
+
 interface MatrixBuffer {
   w: number;
   h: number;
@@ -28,10 +37,11 @@ interface MatrixBuffer {
   edge: Float32Array;
   gx: Float32Array;
   gy: Float32Array;
-  nodes: { x: number; y: number; vx: number; vy: number; r: number; g: number; b: number; e: number }[];
+  mask: Float32Array; // Косинусная маска плавного растворения краев в пустоте
+  spawnIndices: number[];
 }
 
-type ManifoldTopology = "ACID" | "ENGRAVE" | "GLYPH" | "PLEXUS";
+type ManifoldTopology = "ACID" | "ENGRAVE" | "SILK" | "GLYPH";
 
 interface Props {
   query: string;
@@ -39,8 +49,9 @@ interface Props {
 }
 
 const PHI = 1.618033988749;
-const MATRIX_RES = 480;
-const MATH_GLYPHS = ["∑", "∫", "∂", "∇", "π", "λ", "Φ", "∆", "∞", "Ω", "ψ", "0", "1"];
+const MATRIX_RES = 460;
+const SILK_COUNT = 4200;
+const MATH_GLYPHS = ["∑", "∫", "∂", "∇", "π", "λ", "Φ", "∆", "∞", "Ω", "ψ", "≡", "≈"];
 const VOWELS = new Set(["a", "e", "i", "o", "u", "y", "а", "е", "ё", "и", "о", "у", "ы", "э", "ю", "я"]);
 
 function clip(v: number, min = 0.0, max = 1.0): number {
@@ -64,7 +75,7 @@ function computeShannonEntropy(str: string): number {
 }
 
 function compileLexicalManifold(rawText: string): { tensor: Tensor5D; coeffs: DifferentialConstants } {
-  const clean = (rawText || "LED ZEPPELIN").trim().toLowerCase();
+  const clean = (rawText || "JOY DIVISION").trim().toLowerCase();
   const entropy = computeShannonEntropy(clean);
 
   let hash1 = 2166136261;
@@ -91,7 +102,7 @@ function compileLexicalManifold(rawText: string): { tensor: Tensor5D; coeffs: Di
   const consonantRatio = consonantCount / totalLetters;
 
   const energy = clip(((abs1 % 1000) / 1000) * 0.45 + 0.35, 0.35, 0.85);
-  const chaos = clip((entropy / 4.5) * 0.25 + 0.15, 0.15, 0.45);
+  const chaos = clip((entropy / 4.5) * 0.22 + 0.12, 0.12, 0.42);
   const tone = clip(((abs1 >> 8) % 360) / 360, 0.0, 1.0);
   const structure = clip(0.78 + consonantRatio * 0.18, 0.75, 0.95);
   const symmetry = 0.05;
@@ -129,18 +140,18 @@ function compileLexicalManifold(rawText: string): { tensor: Tensor5D; coeffs: Di
 }
 
 // ==========================================
-// ДЕКОДИРОВАНИЕ ВЫСОКОТОЧНОЙ МАТРИЦЫ ОБЪЕКТА + ГРАДИЕНТЫ СОБЕЛЯ
+// ДЕКОДИРОВАНИЕ ОПТИЧЕСКОЙ МАТРИЦЫ + МАСКА РАСТВОРЕНИЯ КРАЕВ
 // ==========================================
 function buildMatrixFromImage(img: HTMLImageElement): MatrixBuffer {
   const aspect = img.width / Math.max(1, img.height);
   let w = MATRIX_RES;
   let h = MATRIX_RES;
-  if (aspect > 1.25) {
+  if (aspect > 1.2) {
     w = MATRIX_RES;
-    h = Math.round(MATRIX_RES / Math.min(aspect, 1.6));
-  } else if (aspect < 0.8) {
+    h = Math.round(MATRIX_RES / Math.min(aspect, 1.55));
+  } else if (aspect < 0.85) {
     h = MATRIX_RES;
-    w = Math.round(MATRIX_RES * Math.max(aspect, 0.65));
+    w = Math.round(MATRIX_RES * Math.max(aspect, 0.68));
   }
 
   const off = document.createElement("canvas");
@@ -153,13 +164,13 @@ function buildMatrixFromImage(img: HTMLImageElement): MatrixBuffer {
   const edge = new Float32Array(total);
   const gx = new Float32Array(total);
   const gy = new Float32Array(total);
-  const nodes: MatrixBuffer["nodes"] = [];
+  const mask = new Float32Array(total);
+  const spawnIndices: number[] = [];
 
   if (!octx) {
-    return { w, h, rgba: new Uint8ClampedArray(total * 4), lum, edge, gx, gy, nodes };
+    return { w, h, rgba: new Uint8ClampedArray(total * 4), lum, edge, gx, gy, mask, spawnIndices };
   }
 
-  // Заполняем кадр с сохранением пропорций (cover/contain гибрид)
   octx.fillStyle = "#020104";
   octx.fillRect(0, 0, w, h);
   const scale = Math.min(w / img.width, h / img.height);
@@ -169,9 +180,20 @@ function buildMatrixFromImage(img: HTMLImageElement): MatrixBuffer {
 
   const rgba = octx.getImageData(0, 0, w, h).data;
 
-  for (let i = 0; i < total; i++) {
-    const p = i * 4;
-    lum[i] = (0.299 * rgba[p] + 0.587 * rgba[p + 1] + 0.114 * rgba[p + 2]) / 255.0;
+  // Косинусная виньетка (убирает жесткую прямоугольную рамку вокруг картинки)
+  for (let y = 0; y < h; y++) {
+    const ny = (y / (h - 1)) * 2.0 - 1.0;
+    const wy = ny * ny > 0.64 ? Math.max(0, Math.cos(((Math.abs(ny) - 0.8) / 0.2) * (Math.PI * 0.5))) : 1.0;
+    for (let x = 0; x < w; x++) {
+      const nx = (x / (w - 1)) * 2.0 - 1.0;
+      const wx = nx * nx > 0.64 ? Math.max(0, Math.cos(((Math.abs(nx) - 0.8) / 0.2) * (Math.PI * 0.5))) : 1.0;
+      const i = y * w + x;
+      const mVal = wx * wy;
+      mask[i] = mVal;
+
+      const p = i * 4;
+      lum[i] = ((0.299 * rgba[p] + 0.587 * rgba[p + 1] + 0.114 * rgba[p + 2]) / 255.0) * mVal;
+    }
   }
 
   let maxEdge = 1e-5;
@@ -187,7 +209,7 @@ function buildMatrixFromImage(img: HTMLImageElement): MatrixBuffer {
         -lum[(y - 1) * w + (x - 1)] - 2 * lum[(y - 1) * w + x] - lum[(y - 1) * w + (x + 1)] +
         lum[(y + 1) * w + (x - 1)] + 2 * lum[(y + 1) * w + x] + lum[(y + 1) * w + (x + 1)];
 
-      const mag = Math.sqrt(sx * sx + sy * sy);
+      const mag = Math.sqrt(sx * sx + sy * sy) * mask[idx];
       edge[idx] = mag;
       if (mag > maxEdge) maxEdge = mag;
 
@@ -199,37 +221,19 @@ function buildMatrixFromImage(img: HTMLImageElement): MatrixBuffer {
 
   for (let i = 0; i < total; i++) {
     edge[i] = clip(edge[i] / maxEdge);
-  }
-
-  // Собираем структурные узлы для режима PLEXUS
-  const step = Math.max(4, Math.floor(Math.min(w, h) / 48));
-  for (let y = step; y < h - step; y += step) {
-    for (let x = step; x < w - step; x += step) {
-      const idx = y * w + x;
-      if (edge[idx] > 0.18 || lum[idx] > 0.25) {
-        const p = idx * 4;
-        nodes.push({
-          x: x / w,
-          y: y / h,
-          vx: -gy[idx],
-          vy: gx[idx],
-          r: rgba[p],
-          g: rgba[p + 1],
-          b: rgba[p + 2],
-          e: edge[idx],
-        });
-      }
+    if (edge[i] > 0.14 || lum[i] > 0.22) {
+      spawnIndices.push(i);
     }
   }
 
-  return { w, h, rgba, lum, edge, gx, gy, nodes };
+  return { w, h, rgba, lum, edge, gx, gy, mask, spawnIndices };
 }
 
 export default function BarrettEngine({ query, onSecureArtifact }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
-  const initialData = compileLexicalManifold(query || "LED ZEPPELIN");
+  const initialData = compileLexicalManifold(query || "JOY DIVISION");
   const [tensor, setTensor] = useState<Tensor5D>(initialData.tensor);
   const [coeffs, setCoeffs] = useState<DifferentialConstants>(initialData.coeffs);
   const [topology, setTopology] = useState<ManifoldTopology>("ACID");
@@ -245,6 +249,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
     topology: "ACID" as ManifoldTopology,
     matrix: null as MatrixBuffer | null,
     time: 0,
+    needsSilkReset: true,
     isPaused: false,
   });
 
@@ -255,18 +260,19 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
     img.onload = () => {
       const buf = buildMatrixFromImage(img);
       stateRef.current.matrix = buf;
+      stateRef.current.needsSilkReset = true;
       setFieldStatus(
-        "MATRIX LOCKED // " + String(buf.w) + "x" + String(buf.h) + " SOBEL FIELD (" + String(buf.nodes.length) + " NODES)"
+        "MATRIX LOCKED // " + String(buf.w) + "x" + String(buf.h) + " SOBEL FIELD"
       );
     };
     img.onerror = () => {
-      setFieldStatus("FALLBACK WAVE SYNTHESIS");
+      setFieldStatus("PARAMETRIC WAVE SYNTHESIS");
     };
     img.src = "/api/mutate?proxy=" + encodeURIComponent(rawUrl);
   }, []);
 
   useEffect(() => {
-    const cleanQ = (query || "LED ZEPPELIN").trim();
+    const cleanQ = (query || "JOY DIVISION").trim();
     const next = compileLexicalManifold(cleanQ);
     setTensor(next.tensor);
     setCoeffs(next.coeffs);
@@ -342,9 +348,36 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
     let viewW = 900;
     let viewH = 660;
 
-    // Вспомогательный буфер для ACID MORPH
     const acidCanvas = document.createElement("canvas");
     const acidCtx = acidCanvas.getContext("2d");
+
+    // Пул шелковых частиц для режима SILK
+    const silkParticles: SilkParticle[] = [];
+    for (let i = 0; i < SILK_COUNT; i++) {
+      silkParticles.push({ x: 0.5, y: 0.5, x0: 0.5, y0: 0.5, age: 0, maxAge: 60 });
+    }
+
+    const resetSilkParticles = (m: MatrixBuffer | null) => {
+      for (let i = 0; i < SILK_COUNT; i++) {
+        if (m && m.spawnIndices.length > 0) {
+          const pick = m.spawnIndices[Math.floor(((i * PHI) % 1) * m.spawnIndices.length)];
+          const u = (pick % m.w) / m.w;
+          const v = Math.floor(pick / m.w) / m.h;
+          silkParticles[i] = {
+            x: u,
+            y: v,
+            x0: u,
+            y0: v,
+            age: Math.floor(Math.random() * 50),
+            maxAge: 45 + Math.floor(Math.random() * 55),
+          };
+        } else {
+          const u = Math.random();
+          const v = Math.random();
+          silkParticles[i] = { x: u, y: v, x0: u, y0: v, age: 0, maxAge: 70 };
+        }
+      }
+    };
 
     const updateSize = () => {
       const rect = container.getBoundingClientRect();
@@ -359,7 +392,6 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
       }
     };
 
-    // ResizeObserver гарантирует, что после снятия display:none холст мгновенно обретет Retina-разрешение
     const ro = new ResizeObserver(() => updateSize());
     ro.observe(container);
     updateSize();
@@ -371,21 +403,33 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
       const m = s.matrix;
 
       if (!s.isPaused) {
-        s.time += 0.018 * (0.3 + t.energy * 1.4);
+        s.time += 0.016 * (0.35 + t.energy * 1.4);
       }
       const time = s.time;
 
-      ctx.globalCompositeOperation = "source-over";
-      ctx.fillStyle = "#020104";
-      ctx.fillRect(0, 0, viewW, viewH);
+      if (m && s.needsSilkReset) {
+        resetSilkParticles(m);
+        s.needsSilkReset = false;
+      }
 
-      // Если матрица еще грузится — рисуем параметрическую фигуру Лиссажу-Хладни
+      // Для режима SILK используем плавное затухание шлейфа, для остальных — полную очистку кадра
+      if (s.topology === "SILK" && m) {
+        ctx.globalCompositeOperation = "source-over";
+        ctx.fillStyle = "rgba(2, 1, 4, 0.065)";
+        ctx.fillRect(0, 0, viewW, viewH);
+      } else {
+        ctx.globalCompositeOperation = "source-over";
+        ctx.fillStyle = "#020104";
+        ctx.fillRect(0, 0, viewW, viewH);
+      }
+
+      // Пока матрица грузится — рисуем параметрический резонанс Лиссажу
       if (!m) {
         ctx.globalCompositeOperation = "lighter";
         const cx = viewW * 0.5;
         const cy = viewH * 0.5;
         const rad = Math.min(viewW, viewH) * 0.34;
-        for (let l = 0; l < 45; l++) {
+        for (let l = 0; l < 42; l++) {
           ctx.beginPath();
           const hue = Math.floor((t.tone * 360 + l * 4 + time * 20) % 360);
           ctx.strokeStyle = "hsla(" + String(hue) + ", 85%, 65%, 0.45)";
@@ -407,23 +451,21 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
         return;
       }
 
-      // Вычисляем геометрии области отрисовки на холсте с сохранением пропорций объекта
-      const pad = 32;
+      const pad = 28;
       const availW = viewW - pad * 2;
-      const availH = viewH - 110;
+      const availH = viewH - 115;
       const scale = Math.min(availW / m.w, availH / m.h);
       const drawW = m.w * scale;
       const drawH = m.h * scale;
       const ox = (viewW - drawW) * 0.5;
-      const oy = (viewH - drawH) * 0.46;
+      const oy = (viewH - drawH) * 0.45;
 
-      // Поворот цветовой матрицы SO(3) от ползунка TONE
       const theta = t.tone * Math.PI * 2;
       const cosT = Math.cos(theta);
       const sinT = Math.sin(theta);
 
       // ==========================================
-      // РЕЖИМ 1: ACID MORPH (ЖИВАЯ КИСЛОТА ШИЛЕ 60 FPS + НЕОН СОБЕЛЯ)
+      // РЕЖИМ 1: ACID (ОПТИЧЕСКИЙ МОРФИНГ + ФАЗОВЫЙ ПУЛЬС СОБЕЛЯ + ВИНЬЕТКА)
       // ==========================================
       if (s.topology === "ACID" && acidCtx) {
         if (acidCanvas.width !== m.w || acidCanvas.height !== m.h) {
@@ -434,46 +476,52 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
         const dst = outImg.data;
         const src = m.rgba;
 
-        const waveAmpX = t.chaos * 22.0;
-        const waveAmpY = t.chaos * 18.0;
-        const freq1 = (0.025 * c.nHarmonic);
-        const freq2 = (0.025 * c.mHarmonic);
-        // Хроматический сдвиг каналов R и B
-        const rgbSplit = Math.round(t.chaos * 12.0 + t.energy * 3.0);
-        const edgeGlowBoost = t.structure * 190.0;
+        const waveAmp = t.chaos * 16.0;
+        const freq1 = 0.022 * c.nHarmonic;
+        const freq2 = 0.022 * c.mHarmonic;
+        const rgbSplit = t.chaos * 10.0 + t.energy * 2.5;
+        const edgeGlowBoost = t.structure * 210.0;
         const foldMirror = t.symmetry > 0.5;
 
         for (let y = 0; y < m.h; y++) {
-          const waveX = Math.sin(y * freq1 + time * 2.4) * waveAmpX + Math.cos(y * freq2 - time * 1.7) * (waveAmpX * 0.4);
+          const ny = y / m.h - 0.5;
+          const rowWaveX = Math.sin(y * freq1 + time * 2.2) * waveAmp;
           for (let x = 0; x < m.w; x++) {
+            const baseIdx = y * m.w + x;
+            const vMask = m.mask[baseIdx];
+            if (vMask <= 0.005) continue;
+
             const srcXBase = foldMirror && x > m.w / 2 ? m.w - 1 - x : x;
-            const waveY = Math.cos(srcXBase * freq2 + time * 2.1) * waveAmpY;
+            const nx = srcXBase / m.w - 0.5;
+            const radDist = Math.sqrt(nx * nx + ny * ny);
 
-            const sx = Math.min(m.w - 1, Math.max(0, Math.round(srcXBase + waveX)));
-            const sy = Math.min(m.h - 1, Math.max(0, Math.round(y + waveY)));
+            // Смещение вдоль нормалей Собеля + гармоническая волна
+            const radialRipple = Math.sin(radDist * 18.0 - time * 3.2) * waveAmp * 0.45;
+            const sx = clip(srcXBase + rowWaveX + m.gx[baseIdx] * radialRipple, 0, m.w - 1);
+            const sy = clip(y + Math.cos(srcXBase * freq2 + time * 1.9) * waveAmp * 0.75 + m.gy[baseIdx] * radialRipple, 0, m.h - 1);
 
-            const sxR = Math.min(m.w - 1, Math.max(0, sx + rgbSplit));
-            const sxB = Math.min(m.w - 1, Math.max(0, sx - rgbSplit));
+            const sxI = Math.floor(sx);
+            const syI = Math.floor(sy);
+            const sxR = Math.min(m.w - 1, Math.max(0, Math.floor(sx + rgbSplit)));
+            const sxB = Math.min(m.w - 1, Math.max(0, Math.floor(sx - rgbSplit)));
 
-            const idx = sy * m.w + sx;
+            const idx = syI * m.w + sxI;
             const pG = idx * 4;
-            const pR = (sy * m.w + sxR) * 4;
-            const pB = (sy * m.w + sxB) * 4;
+            const pR = (syI * m.w + sxR) * 4;
+            const pB = (syI * m.w + sxB) * 4;
 
             let r = src[pR];
             let g = src[pG + 1];
             let b = src[pB + 2];
 
-            // Вращение цвета при сдвиге ползунка TONE
             if (t.tone > 0.03) {
               const avg = (r + g + b) * 0.333;
               const dr = r - avg;
               const dg = g - avg;
               const db = b - avg;
-              // Если исходник Ч/Б — окрашиваем через спектральную фазу яркости
-              if (Math.abs(dr) + Math.abs(dg) + Math.abs(db) < 12) {
+              if (Math.abs(dr) + Math.abs(dg) + Math.abs(db) < 14) {
                 const lNorm = m.lum[idx];
-                const ph = theta + lNorm * Math.PI * 1.5;
+                const ph = theta + lNorm * Math.PI * 1.6 + radDist * 2.0;
                 r = Math.min(255, Math.max(0, Math.round(avg * (0.75 + 0.55 * Math.sin(ph)))));
                 g = Math.min(255, Math.max(0, Math.round(avg * (0.75 + 0.55 * Math.sin(ph + 2.094)))));
                 b = Math.min(255, Math.max(0, Math.round(avg * (0.75 + 0.55 * Math.sin(ph + 4.188)))));
@@ -484,20 +532,20 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
               }
             }
 
-            // Неоновая подсветка граней Собеля |∇I|
+            // Бегущий фазовый импульс вдоль контуров Собеля
             const eVal = m.edge[idx];
-            if (eVal > 0.15) {
-              const pulse = 0.7 + 0.3 * Math.sin(time * 4.0 + (x + y) * 0.03);
-              const glow = eVal * edgeGlowBoost * pulse;
-              r = Math.min(255, r + Math.round(glow * (0.7 + 0.3 * Math.cos(theta))));
-              g = Math.min(255, g + Math.round(glow * (0.4 + 0.4 * Math.sin(theta))));
+            if (eVal > 0.12) {
+              const travelingWave = 0.55 + 0.45 * Math.sin(radDist * 22.0 - time * 4.5);
+              const glow = eVal * edgeGlowBoost * travelingWave;
+              r = Math.min(255, r + Math.round(glow * (0.75 + 0.25 * Math.cos(theta))));
+              g = Math.min(255, g + Math.round(glow * (0.35 + 0.45 * Math.sin(theta))));
               b = Math.min(255, b + Math.round(glow));
             }
 
-            const outP = (y * m.w + x) * 4;
-            dst[outP] = r;
-            dst[outP + 1] = g;
-            dst[outP + 2] = b;
+            const outP = baseIdx * 4;
+            dst[outP] = Math.round(r * vMask);
+            dst[outP + 1] = Math.round(g * vMask);
+            dst[outP + 2] = Math.round(b * vMask);
             dst[outP + 3] = 255;
           }
         }
@@ -508,78 +556,149 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
       }
 
       // ==========================================
-      // РЕЖИМ 2: ENGRAVE (ВЕКТОРНАЯ ГРАВЮРА / ОСЦИЛЛОГРАФ ВЫСОКОЙ ПЛОТНОСТИ)
+      // РЕЖИМ 2: ENGRAVE (JOY DIVISION / PULSAR CP 1919 TOPOGRAPHY С ПЕРЕКРЫТИЕМ ЛИНИЙ)
       // ==========================================
       else if (s.topology === "ENGRAVE") {
-        ctx.globalCompositeOperation = "lighter";
-        const numLines = Math.floor(110 + t.structure * 65);
-        const numCols = 240;
-        const waveHeight = (drawH / numLines) * (1.2 + t.chaos * 2.2);
+        ctx.globalCompositeOperation = "source-over";
+        const numLines = Math.floor(85 + t.structure * 50);
+        const numCols = 180;
+        const maxElevation = (drawH / numLines) * (3.2 + t.structure * 3.5);
 
         for (let rIdx = 0; rIdx < numLines; rIdx++) {
           const vNorm = rIdx / (numLines - 1);
           const sy = Math.min(m.h - 1, Math.floor(vNorm * m.h));
           const baseScreenY = oy + vNorm * drawH;
 
-          for (let cIdx = 0; cIdx < numCols - 1; cIdx++) {
-            const uNorm0 = cIdx / (numCols - 1);
-            const uNorm1 = (cIdx + 1) / (numCols - 1);
-            const sx0 = Math.min(m.w - 1, Math.floor(uNorm0 * m.w));
-            const sx1 = Math.min(m.w - 1, Math.floor(uNorm1 * m.w));
+          ctx.beginPath();
+          ctx.moveTo(ox, baseScreenY + 4);
 
-            const cell0 = sy * m.w + sx0;
-            const cell1 = sy * m.w + sx1;
+          for (let cIdx = 0; cIdx < numCols; cIdx++) {
+            const uNorm = cIdx / (numCols - 1);
+            const sx = Math.min(m.w - 1, Math.floor(uNorm * m.w));
+            const cell = sy * m.w + sx;
 
-            const l0 = m.lum[cell0];
-            const l1 = m.lum[cell1];
-            const e0 = m.edge[cell0];
+            const l = m.lum[cell];
+            const e = m.edge[cell];
+            const vMask = m.mask[cell];
 
-            if (l0 < 0.06 && e0 < 0.08) continue;
+            // Высокочастотная пульсация на контурах и ярких областях объекта
+            const carrierFreq = 28.0 + e * 55.0;
+            const vibration =
+              Math.sin(uNorm * carrierFreq + time * 4.5 + rIdx * 0.55) *
+              (e * 0.55 + l * 0.25 + t.chaos * 0.25) *
+              vMask;
 
-            const freq = 25.0 + e0 * 60.0 + t.energy * 30.0;
-            const osc0 = Math.sin(uNorm0 * freq + time * 4.5 + rIdx * 0.4) * (e0 * 0.75 + l0 * 0.25 + t.chaos * 0.3);
-            const osc1 = Math.sin(uNorm1 * freq + time * 4.5 + rIdx * 0.4) * (m.edge[cell1] * 0.75 + l1 * 0.25 + t.chaos * 0.3);
+            const elevation = (l * 0.82 + e * 0.48 + vibration * 0.45) * maxElevation * vMask;
+            const px = ox + uNorm * drawW;
+            const py = baseScreenY - elevation;
 
-            const y0 = baseScreenY - l0 * waveHeight * 0.85 + osc0 * waveHeight * 0.55;
-            const y1 = baseScreenY - l1 * waveHeight * 0.85 + osc1 * waveHeight * 0.55;
-
-            const p = cell0 * 4;
-            const hue = Math.floor((t.tone * 360 + l0 * 120 + e0 * 90) % 360);
-            const alpha = clip(0.18 + l0 * 0.65 + e0 * 0.45, 0.1, 0.92);
-
-            if (t.tone < 0.05) {
-              ctx.strokeStyle =
-                "rgba(" +
-                String(Math.min(255, m.rgba[p] + 40)) +
-                "," +
-                String(Math.min(255, m.rgba[p + 1] + 40)) +
-                "," +
-                String(Math.min(255, m.rgba[p + 2] + 55)) +
-                "," +
-                String(alpha.toFixed(2)) +
-                ")";
-            } else {
-              ctx.strokeStyle = "hsla(" + String(hue) + ", 85%, " + String(Math.floor(45 + l0 * 45)) + "%, " + String(alpha.toFixed(2)) + ")";
-            }
-
-            ctx.lineWidth = 0.8 + l0 * 1.6 + e0 * 1.2;
-            ctx.beginPath();
-            ctx.moveTo(ox + uNorm0 * drawW, y0);
-            ctx.lineTo(ox + uNorm1 * drawW, y1);
-            ctx.stroke();
+            ctx.lineTo(px, py);
           }
+
+          ctx.lineTo(ox + drawW, baseScreenY + 4);
+          ctx.closePath();
+
+          // Черная заливка под гребнем волны перекрывает задние волны (эффект Unknown Pleasures)
+          ctx.fillStyle = "#020104";
+          ctx.fill();
+
+          const hue = Math.floor((t.tone * 360 + vNorm * 95 + time * 10) % 360);
+          ctx.strokeStyle =
+            t.tone < 0.06
+              ? "rgba(240, 240, 250, 0.88)"
+              : "hsla(" + String(hue) + ", 85%, 72%, 0.88)";
+          ctx.lineWidth = 1.25;
+          ctx.stroke();
         }
       }
 
       // ==========================================
-      // РЕЖИМ 3: GLYPH (КВАНТОВОЕ ПОЛЕ МАТЕМАТИЧЕСКИХ СИМВОЛОВ)
+      // РЕЖИМ 3: SILK (ШЕЛКОВЫЕ ПОТОКИ ВДОЛЬ КАСАТЕЛЬНЫХ СОБЕЛЯ)
+      // ==========================================
+      else if (s.topology === "SILK") {
+        ctx.globalCompositeOperation = "lighter";
+
+        for (let i = 0; i < SILK_COUNT; i++) {
+          const pt = silkParticles[i];
+          const prevX = pt.x;
+          const prevY = pt.y;
+
+          const gxIdx = Math.min(m.w - 1, Math.max(0, Math.floor(pt.x * m.w)));
+          const gyIdx = Math.min(m.h - 1, Math.max(0, Math.floor(pt.y * m.h)));
+          const cell = gyIdx * m.w + gxIdx;
+
+          const e = m.edge[cell];
+          const l = m.lum[cell];
+          const vMask = m.mask[cell];
+
+          // Касательный вектор (-gy, gx) + возвратная пружина к якорю (x0, y0)
+          const tx = -m.gy[cell];
+          const ty = m.gx[cell];
+          const curlAngle = Math.sin(pt.x * 12.0 + time * 2.0) * Math.cos(pt.y * 12.0 - time * 1.6) * Math.PI * t.chaos;
+          const speed = (0.0025 + e * 0.0055) * (0.5 + t.energy);
+
+          const dir = i % 2 === 0 ? 1 : -1;
+          const vx =
+            (tx * dir * Math.cos(curlAngle) - ty * dir * Math.sin(curlAngle)) * speed +
+            (pt.x0 - pt.x) * (0.08 * t.structure);
+          const vy =
+            (ty * dir * Math.cos(curlAngle) + tx * dir * Math.sin(curlAngle)) * speed +
+            (pt.y0 - pt.y) * (0.08 * t.structure);
+
+          pt.x += vx;
+          pt.y += vy;
+          pt.age++;
+
+          if (pt.age >= pt.maxAge || pt.x < 0.02 || pt.x > 0.98 || pt.y < 0.02 || pt.y > 0.98 || vMask < 0.05) {
+            if (m.spawnIndices.length > 0) {
+              const pick = m.spawnIndices[Math.floor(Math.random() * m.spawnIndices.length)];
+              const u = (pick % m.w) / m.w;
+              const v = Math.floor(pick / m.w) / m.h;
+              pt.x = u;
+              pt.y = v;
+              pt.x0 = u;
+              pt.y0 = v;
+              pt.age = 0;
+            }
+            continue;
+          }
+
+          const p = cell * 4;
+          const alpha = clip((0.12 + l * 0.35 + e * 0.45) * vMask, 0.05, 0.65);
+
+          if (t.tone < 0.05) {
+            ctx.strokeStyle =
+              "rgba(" +
+              String(Math.min(255, m.rgba[p] + 45)) +
+              "," +
+              String(Math.min(255, m.rgba[p + 1] + 45)) +
+              "," +
+              String(Math.min(255, m.rgba[p + 2] + 60)) +
+              "," +
+              String(alpha.toFixed(3)) +
+              ")";
+          } else {
+            const hue = Math.floor((t.tone * 360 + l * 130 + e * 85 + (i % 30)) % 360);
+            ctx.strokeStyle = "hsla(" + String(hue) + ", 85%, " + String(Math.floor(48 + l * 40)) + "%, " + String(alpha.toFixed(3)) + ")";
+          }
+
+          ctx.lineWidth = 0.9 + e * 1.3;
+          ctx.beginPath();
+          ctx.moveTo(ox + prevX * drawW, oy + prevY * drawH);
+          ctx.lineTo(ox + pt.x * drawW, oy + pt.y * drawH);
+          ctx.stroke();
+        }
+      }
+
+      // ==========================================
+      // РЕЖИМ 4: GLYPH (ПОТОКОВОЕ ПОЛЕ МАТЕМАТИЧЕСКИХ ОПЕРАТОРОВ С ВИНЬЕТКОЙ)
       // ==========================================
       else if (s.topology === "GLYPH") {
         ctx.globalCompositeOperation = "lighter";
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
 
-        const cols = Math.floor(54 + t.structure * 36);
+        const cols = Math.floor(52 + t.structure * 32);
         const cellW = drawW / cols;
         const rows = Math.floor(drawH / cellW);
 
@@ -591,18 +710,24 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
             const sx = Math.min(m.w - 1, Math.floor(u * m.w));
             const idx = sy * m.w + sx;
 
+            const vMask = m.mask[idx];
             const l = m.lum[idx];
             const e = m.edge[idx];
-            if (l < 0.1 && e < 0.12) continue;
+            if ((l < 0.09 && e < 0.11) || vMask < 0.08) continue;
 
-            const waveShift = Math.sin(u * 12 + v * 12 + time * 3.0) * t.chaos * 6.0;
-            const glyphIdx = Math.floor((l * 8 + e * 5 + time * 1.5 + (r + cIdx) * 0.1) % MATH_GLYPHS.length);
+            // Смещение вдоль касательных Собеля + фазовая волна
+            const phase = u * 10.0 + v * 10.0 - time * 3.2;
+            const shiftX = (-m.gy[idx] * Math.sin(phase) * 5.0) * (0.3 + t.chaos);
+            const shiftY = (m.gx[idx] * Math.cos(phase) * 5.0) * (0.3 + t.chaos);
+
+            const glyphIdx = Math.floor((l * 9 + e * 6 + time * 1.8 + (r * 3 + cIdx) * 0.2) % MATH_GLYPHS.length);
             const ch = MATH_GLYPHS[glyphIdx];
 
-            const fontSize = Math.max(7, Math.floor(cellW * (0.65 + l * 0.55 + e * 0.35)));
+            const fontSize = Math.max(7, Math.floor(cellW * (0.55 + l * 0.65 + e * 0.45) * vMask));
             ctx.font = "bold " + String(fontSize) + "px 'Space Mono', monospace";
 
             const p = idx * 4;
+            const alpha = clip((0.2 + l * 0.72 + e * 0.45) * vMask, 0.05, 0.95);
             if (t.tone < 0.05) {
               ctx.fillStyle =
                 "rgba(" +
@@ -612,79 +737,14 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
                 "," +
                 String(Math.min(255, m.rgba[p + 2] + 60)) +
                 "," +
-                String(clip(0.25 + l * 0.7 + e * 0.4).toFixed(2)) +
+                String(alpha.toFixed(2)) +
                 ")";
             } else {
               const hue = Math.floor((t.tone * 360 + l * 130 + e * 80) % 360);
-              ctx.fillStyle = "hsla(" + String(hue) + ", 85%, " + String(Math.floor(48 + l * 42)) + "%, " + String(clip(0.3 + l * 0.65).toFixed(2)) + ")";
+              ctx.fillStyle = "hsla(" + String(hue) + ", 85%, " + String(Math.floor(48 + l * 42)) + "%, " + String(alpha.toFixed(2)) + ")";
             }
 
-            ctx.fillText(ch, ox + u * drawW + waveShift, oy + v * drawH + waveShift * 0.5);
-          }
-        }
-      }
-
-      // ==========================================
-      // РЕЖИМ 4: PLEXUS (ГЕОМЕТРИЧЕСКАЯ СЕТКА ГРАФОВ ПОВЕРХ ОБЪЕКТА)
-      // ==========================================
-      else if (s.topology === "PLEXUS") {
-        // Легкая призрачная проекция базового рельефа для 100% читаемости лиц и деталей
-        if (acidCtx && acidCanvas.width === m.w) {
-          ctx.globalAlpha = 0.28 * t.structure;
-          ctx.drawImage(acidCanvas, ox, oy, drawW, drawH);
-          ctx.globalAlpha = 1.0;
-        }
-
-        ctx.globalCompositeOperation = "lighter";
-        const nodes = m.nodes;
-        const len = nodes.length;
-        const maxDist = (18 + (1.0 - t.structure) * 16);
-        const maxDistSq = maxDist * maxDist;
-
-        const screenPts: { x: number; y: number; r: number; g: number; b: number; e: number }[] = [];
-
-        for (let i = 0; i < len; i++) {
-          const nd = nodes[i];
-          const phase = i * PHI + time * (2.5 + t.energy * 3.0);
-          const amp = (2.5 + t.chaos * 18.0);
-          const sx = ox + nd.x * drawW + (nd.vx * Math.sin(phase) + Math.cos(phase * 0.7) * t.chaos) * amp;
-          const sy = oy + nd.y * drawH + (nd.vy * Math.sin(phase) + Math.sin(phase * 0.7) * t.chaos) * amp;
-          screenPts.push({ x: sx, y: sy, r: nd.r, g: nd.g, b: nd.b, e: nd.e });
-        }
-
-        ctx.lineWidth = 0.85;
-        for (let i = 0; i < len; i++) {
-          const p1 = screenPts[i];
-          let links = 0;
-          for (let j = i + 1; j < len; j++) {
-            const p2 = screenPts[j];
-            const dx = p1.x - p2.x;
-            const dy = p1.y - p2.y;
-            const dSq = dx * dx + dy * dy;
-            if (dSq < maxDistSq) {
-              const alpha = (1.0 - Math.sqrt(dSq) / maxDist) * 0.65;
-              if (t.tone < 0.05) {
-                ctx.strokeStyle =
-                  "rgba(" +
-                  String(Math.min(255, p1.r + 50)) +
-                  "," +
-                  String(Math.min(255, p1.g + 50)) +
-                  "," +
-                  String(Math.min(255, p1.b + 65)) +
-                  "," +
-                  String(alpha.toFixed(2)) +
-                  ")";
-              } else {
-                const hue = Math.floor((t.tone * 360 + p1.e * 120 + (i % 40)) % 360);
-                ctx.strokeStyle = "hsla(" + String(hue) + ", 85%, 65%, " + String(alpha.toFixed(2)) + ")";
-              }
-              ctx.beginPath();
-              ctx.moveTo(p1.x, p1.y);
-              ctx.lineTo(p2.x, p2.y);
-              ctx.stroke();
-              links++;
-              if (links >= 4) break;
-            }
+            ctx.fillText(ch, ox + u * drawW + shiftX, oy + v * drawH + shiftY);
           }
         }
       }
@@ -753,7 +813,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
 
   return (
     <div className="w-full max-w-[1600px] mx-auto mb-16 grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
-      {/* МАТЕМАТИЧЕСКИЙ ХОЛСТ BARRETT С ЖЕСТКОЙ ФИКСАЦИЕЙ РАЗМЕРА */}
+      {/* МАТЕМАТИЧЕСКИЙ ХОЛСТ BARRETT */}
       <div
         ref={containerRef}
         className="lg:col-span-8 relative h-[560px] md:h-[700px] rounded-2xl overflow-hidden border border-white/10 bg-[#020104] shadow-[0_20px_60px_rgba(0,0,0,0.85)]"
@@ -766,7 +826,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
         {/* ВЕРХНИЙ ТЕЛЕМЕТРИЧЕСКИЙ ОВЕРЛЕЙ */}
         <div className="absolute top-4 left-4 right-4 flex flex-wrap justify-between items-start pointer-events-none gap-2">
           <div className="bg-black/75 backdrop-blur-md border border-white/10 px-3 py-2 rounded font-mono text-[9px] uppercase tracking-widest text-neutral-300">
-            <div className="text-white font-bold">BARRETT PRISM // {(query || "LED ZEPPELIN").toUpperCase()}</div>
+            <div className="text-white font-bold">BARRETT PRISM // {(query || "JOY DIVISION").toUpperCase()}</div>
             <div className="text-[#a855f7] mt-0.5">{fieldStatus}</div>
             <div className="text-neutral-500 mt-0.5">
               α={coeffs.alpha} | β={coeffs.beta} | γ={coeffs.gamma} | δ={coeffs.delta}
@@ -809,11 +869,14 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
 
           <div className="flex flex-wrap justify-between items-center gap-2">
             <div className="flex gap-1.5 bg-black/80 backdrop-blur-md p-1.5 rounded-full border border-white/10">
-              {(["ACID", "ENGRAVE", "GLYPH", "PLEXUS"] as ManifoldTopology[]).map((mode) => (
+              {(["ACID", "ENGRAVE", "SILK", "GLYPH"] as ManifoldTopology[]).map((mode) => (
                 <button
                   key={mode}
                   type="button"
-                  onClick={() => setTopology(mode)}
+                  onClick={() => {
+                    setTopology(mode);
+                    if (mode === "SILK") stateRef.current.needsSilkReset = true;
+                  }}
                   className={
                     "px-3 py-1 rounded-full font-mono text-[9px] tracking-widest uppercase transition-all cursor-pointer " +
                     (topology === mode
@@ -860,7 +923,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
                 { key: "energy", label: "Energy (Wave Frequency)" },
                 { key: "chaos", label: "Chaos (Spatial Warp & RGB Split)" },
                 { key: "tone", label: "Tone (SO3 Spectrum Shift)" },
-                { key: "structure", label: "Structure (Sobel Edge Glow)" },
+                { key: "structure", label: "Structure (Sobel Relief)" },
                 { key: "symmetry", label: "Symmetry (Mirror Fold)" },
               ] as { key: keyof Tensor5D; label: string }[]
             ).map((item) => (
@@ -884,9 +947,9 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
 
           <div className="mt-6 p-4 rounded-xl bg-black/50 border border-white/5 font-mono text-[9px] text-neutral-400 leading-relaxed space-y-1">
             <div className="text-white uppercase mb-1">Barrett Differential System:</div>
-            <div>u&apos;(x,y,t) = x + A_chaos · sin(ω_n·y + t)</div>
-            <div>v&apos;(x,y,t) = y + A_chaos · cos(ω_m·x + t)</div>
-            <div>I_out = SO(3, θ) · I(u&apos;±δ_rgb, v&apos;) + |∇I| · St</div>
+            <div>u&apos;(x,y,t) = x + A_chaos · sin(ω_n·y + t) + ∂I/∂x</div>
+            <div>W_pulsar(x,y) = Lum(x,y)·St + |∇I|·sin(ω·x + t)</div>
+            <div>I_out = Mask_cos(x,y) · SO(3, θ) · I(u&apos;, v&apos;)</div>
           </div>
         </div>
 

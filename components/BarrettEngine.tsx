@@ -382,7 +382,7 @@ function buildMatrixFromImage(img: HTMLImageElement, isMobileDevice: boolean): M
   const rawRgba = octx.getImageData(0, 0, w, h).data;
   const smoothRgba = new Uint8ClampedArray(rawRgba.length);
 
-  // 1. Автоконтраст гистограммы (растягивает динамический диапазон от 0 до 1 для идеального деления на тона!)
+  // 1. Автоконтраст гистограммы
   let minL = 1.0;
   let maxL = 0.0;
   const rawLArr = new Float32Array(total);
@@ -405,12 +405,11 @@ function buildMatrixFromImage(img: HTMLImageElement, isMobileDevice: boolean): M
       const i = y * w + x;
       mask[i] = wx * wy;
       const normL = clip((rawLArr[i] - minL) / spanL);
-      // Легкий S-контраст + подъем полутонов
       lum[i] = Math.pow(normL, 0.82);
     }
   }
 
-  // 2. Краесохраняющий билатеральный фильтр (сглаживает кожу и одежду в чистые плакатные заливки, сохраняя глаза и струны!)
+  // 2. Краесохраняющий билатеральный фильтр
   for (let y = 2; y < h - 2; y++) {
     for (let x = 2; x < w - 2; x++) {
       const idx = y * w + x;
@@ -438,16 +437,14 @@ function buildMatrixFromImage(img: HTMLImageElement, isMobileDevice: boolean): M
     }
   }
 
-  // 3. ОПЕРАТОР XDoG (Extended Difference of Gaussians — создаёт настоящую комикс-тушь как на обоих референсах Сида!)
-  const g Narrow = gaussianBlurField(lum, w, h, 1);
+  // 3. ОПЕРАТОР XDoG (Extended Difference of Gaussians)
+  const gNarrow = gaussianBlurField(lum, w, h, 1);
   const gWide = gaussianBlurField(lum, w, h, 4);
   const smoothLum = gaussianBlurField(lum, w, h, 12);
 
-  const pSharp = 21.0; // Сила вытягивания мелких линий (ресницы, щетина, пальцы, лады гитары)
+  const pSharp = 21.0;
   for (let i = 0; i < total; i++) {
-    // Разность гауссиан с локальной привязкой к тону
     const diff = (1.0 + pSharp) * gNarrow[i] - pSharp * gWide[i];
-    // Комбинируем с глубокими тенями самого портрета (чтобы глазницы и волосы заливались густой черной тушью!)
     xdog[i] = clip(diff * 0.65 + lum[i] * 0.35);
   }
 
@@ -495,7 +492,7 @@ function buildMatrixFromImage(img: HTMLImageElement, isMobileDevice: boolean): M
     }
   }
 
-  // 5. Математический детектор фона (оценивает цвет углов кадра и однородность, чтобы заливать фон психоделическим градиентом!)
+  // 5. Математический детектор фона
   let borderL = 0;
   let borderCount = 0;
   for (let x = 0; x < w; x += 4) {
@@ -512,7 +509,6 @@ function buildMatrixFromImage(img: HTMLImageElement, isMobileDevice: boolean): M
       const i = y * w + x;
       const radialDist = Math.sqrt(nx * nx + ny * ny) * 1.4;
       const lumDiffFromBorder = Math.abs(smoothLum[i] - borderL);
-      // Пиксель считается фоном, если он близок по тону к краям кадра, имеет низкую плотность контуров и ближе к периферии
       const isBg =
         (1.0 - smoothstep(0.04, 0.22, edgeDensity[i])) *
         (1.0 - smoothstep(0.08, 0.32, lumDiffFromBorder)) *
@@ -521,7 +517,7 @@ function buildMatrixFromImage(img: HTMLImageElement, isMobileDevice: boolean): M
     }
   }
 
-  // Сглаживаем поле касательных ETF (для идеальных длинных прядей волос)
+  // Сглаживание поля касательных ETF
   const tempTx = new Float32Array(total);
   const tempTy = new Float32Array(total);
   for (let y = 2; y < h - 2; y++) {
@@ -735,13 +731,12 @@ function buildMatrixFromImage(img: HTMLImageElement, isMobileDevice: boolean): M
     });
   }
 
-  // Дополнительные вылетающие пряди волос и штриховка полутонов вдоль поля ETF (как на портрете Сида!)
+  // Вылетающие пряди волос и штриховка полутонов вдоль поля ETF
   for (let y = 5; y < h - 5; y += 4) {
     for (let x = 5; x < w - 5; x += 4) {
       if (strokes.length >= maxStrokes + 750) break;
       const idx = y * w + x;
       if (visited[idx] || mask[idx] < 0.1 || bgProb[idx] > 0.6) continue;
-      // Выбираем зоны волос и густых полутонов (низкая яркость + наличие градиента)
       if (lum[idx] < 0.48 && edge[idx] > 0.045) {
         const strandPts: { u: number; v: number; nx: number; ny: number }[] = [];
         let cx = x + 0.5;
@@ -865,9 +860,9 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
     primaryHex: "#ff5500",
     secondaryHex: "#ffe600",
     strokeWeight: 1.0,
-    inkThreshold: 0.48,    // Баланс глубокой черной туши XDoG
-    stippleDensity: 0.55,  // Точечный растр в полутонах как на референсе 1
-    rippleStrength: 0.45,  // Жидкие зеркальные круги внизу/под курсором
+    inkThreshold: 0.48,
+    stippleDensity: 0.55,
+    rippleStrength: 0.45,
   });
 
   const [isRecording, setIsRecording] = useState(false);
@@ -896,7 +891,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
     smoothYaw: 0,
     smoothPitch: -0.18,
     fluidU: 0.5,
-    fluidV: 0.86, // По умолчанию фокус капли в нижней части, как пипетка на референсе 1!
+    fluidV: 0.86,
   });
 
   const applyMasterPreset = (preset: MasterPreset) => {
@@ -1016,7 +1011,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
     ]).then(([d1, d2]) => {
       if (cancelled) return;
       const a1 = d1 ? (Array.isArray(d1) ? d1 : d1.data || d1.photos || []) : [];
-      const a2 = d2 ? (Array.isArray(d2) ? d2 : d2.data || d2.data || d2.photos || []) : [];
+      const a2 = d2 ? (Array.isArray(d2) ? d2 : d2.data || d2.photos || []) : [];
       const combined = [...a1, ...a2];
 
       const uniqueUrls: string[] = [];
@@ -1168,11 +1163,9 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
     let viewW = 900;
     let viewH = 680;
 
-    // Буфер полной XDoG / Stencil иллюстрации (тональная основа + пуантилизм + глубокая тушь)
     const illustrationCanvas = document.createElement("canvas");
     const illustrationCtx = illustrationCanvas.getContext("2d");
 
-    // Буфер для живой водной ряби (как внизу референса 1) и шейдерных режимов
     const shaderCanvas = document.createElement("canvas");
     const shaderCtx = shaderCanvas.getContext("2d");
 
@@ -1223,7 +1216,6 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
     ro.observe(container);
     updateSize();
 
-    // Отрисовка каллиграфического штриха с заострением на концах (как настоящая кисть/тушь на волосах Сида!)
     const strokeTaperedSpline = (
       coords: { x: number; y: number }[],
       maxW: number,
@@ -1242,25 +1234,21 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
         return;
       }
 
-      // Разбиваем длинный штрих на 3 сегмента (основание -> широкая середина -> острое жало на конце!)
       const p1 = Math.floor(len * 0.25);
       const p2 = Math.floor(len * 0.72);
 
-      // 1. Вход пера
       ctx.beginPath();
       ctx.moveTo(coords[0].x, coords[0].y);
       for (let i = 1; i <= p1; i++) ctx.lineTo(coords[i].x, coords[i].y);
       ctx.lineWidth = maxW * 0.65;
       ctx.stroke();
 
-      // 2. Сочное тело штриха
       ctx.beginPath();
       ctx.moveTo(coords[p1].x, coords[p1].y);
       for (let i = p1 + 1; i <= p2; i++) ctx.lineTo(coords[i].x, coords[i].y);
       ctx.lineWidth = maxW;
       ctx.stroke();
 
-      // 3. Острое перо на вылете (Tapered Tip — создает живые кончики прядей волос!)
       ctx.beginPath();
       ctx.moveTo(coords[p2].x, coords[p2].y);
       for (let i = p2 + 1; i < len; i++) ctx.lineTo(coords[i].x, coords[i].y);
@@ -1279,8 +1267,8 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
       const dst = imgData.data;
       const sRgba = m.smoothRgba;
 
-      const inkCutoff = art.inkThreshold; // Порог глубокой черной туши XDoG
-      const phiSharp = 14.0;              // Крутизна перехода tanh в тушь
+      const inkCutoff = art.inkThreshold;
+      const phiSharp = 14.0;
 
       for (let y = 0; y < m.h; y++) {
         const v = y / m.h;
@@ -1296,11 +1284,8 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
           const xd = m.xdog[i];
           const bgW = m.bgProb[i];
 
-          // 1. Вычисляем плотность черной туши XDoG + точечный растр (stippling) в полутонах!
-          // Оператор Виннемёллера: 1 + tanh(φ · (xd - ε))
           let inkTone = xd >= inkCutoff ? 1.0 : clip(1.0 + Math.tanh(phiSharp * (xd - inkCutoff)), 0.0, 1.0);
 
-          // Процедурный пуантилизм (Stippling / Halftone как на щеках и пальцах Сида на референсе 1!)
           if (art.stippleDensity > 0.02 && l > 0.18 && l < 0.68 && bgW < 0.5) {
             const hashNoise = Math.sin(x * 12.9898 + y * 78.233) * 43758.5453;
             const grain = hashNoise - Math.floor(hashNoise);
@@ -1309,22 +1294,17 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
 
             const midShadow = 1.0 - (l - 0.18) / 0.5;
             if (pattern < midShadow * art.stippleDensity * 0.85) {
-              inkTone *= 0.18; // Ставим черную растровую точку туши!
+              inkTone *= 0.18;
             }
           }
 
           let outR = 0, outG = 0, outB = 0;
 
-          // ==========================================
-          // МАСТЕР-ПРЕСЕТ 1: ESQUIRE '67 (РЕФЕРЕНС 1 — ОРАНЖЕВО-ЖЕЛТЫЙ ПОП-АРТ + КРЕМОВЫЙ СВЕТ + ЧЕРНАЯ ТУШЬ)
-          // ==========================================
           if (art.master === "ESQUIRE_67") {
-            // Психоделический градиент фона: от огненно-оранжевого сверху (#ff5500) к солнечно-желтому внизу (#ffe800)
             const bgR = 255;
             const bgG = Math.round(82 + v * 158);
             const bgB = Math.round(5 + v * 15);
 
-            // Постеризованный цвет самого портрета (квантование на 4 сочных плакатных уровня)
             const quantL = Math.floor(l * 4.5) / 4.0;
             let subjR = sRgba[p];
             let subjG = sRgba[p + 1];
@@ -1332,17 +1312,14 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
 
             const satCheck = Math.max(subjR, subjG, subjB) - Math.min(subjR, subjG, subjB);
             if (l > 0.68) {
-              // Теплый свет кожи и бликов (как лицо Сида и белый пикгард гитары на референсе 1)
               subjR = Math.round(238 + (l - 0.68) * 50);
               subjG = Math.round(224 + (l - 0.68) * 60);
               subjB = Math.round(212 + (l - 0.68) * 65);
             } else if (satCheck < 28) {
-              // Если исходное фото Ч/Б — раскрашиваем одежду и полутона в фирменную палитру Esquire '67 (оохра/янтарь/пурпур)
               subjR = Math.round(145 + quantL * 105);
               subjG = Math.round(95 + quantL * 110);
               subjB = Math.round(80 + quantL * 95);
             } else {
-              // Усиливаем сочность родных цветов (желтые зеркала, полосатый шарф)
               const avg = (subjR + subjG + subjB) * 0.333;
               subjR = clip(Math.round(avg + (subjR - avg) * 1.65), 20, 255);
               subjG = clip(Math.round(avg + (subjG - avg) * 1.65), 20, 255);
@@ -1353,53 +1330,36 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
             const mixG = subjG * (1.0 - bgW) + bgG * bgW;
             const mixB = subjB * (1.0 - bgW) + bgB * bgW;
 
-            // На фоне черную тушь ослабляем, чтобы оранжево-желтое небо сияло чисто!
             const effectiveInk = bgW > 0.65 ? 1.0 - (1.0 - inkTone) * 0.15 : inkTone;
             outR = mixR * effectiveInk + 10 * (1.0 - effectiveInk);
             outG = mixG * effectiveInk + 7 * (1.0 - effectiveInk);
             outB = mixB * effectiveInk + 8 * (1.0 - effectiveInk);
-          }
-
-          // ==========================================
-          // МАСТЕР-ПРЕСЕТ 2: MADCAP STENCIL (РЕФЕРЕНС 2 — 4-ТОНОВЫЙ ГУАШЕВЫЙ ТРАФАРЕТ НА СЕРО-ОЛИВКОВОМ ХОЛСТЕ)
-          // ==========================================
-          else if (art.master === "MADCAP_STENCIL" || art.styleEngine === "STENCIL_GOUACHE") {
-            // Текстура холста (едва заметное вертикальное плетение кисти)
+          } else if (art.master === "MADCAP_STENCIL" || art.styleEngine === "STENCIL_GOUACHE") {
             const canvasGrain = (Math.sin(x * 0.8) * Math.cos(y * 0.3)) * 4.0;
 
             if (bgW > 0.52 && e < 0.18) {
-              // Оливково-серый фон второго референса (#9ea39d)
               outR = 158 + canvasGrain;
               outG = 163 + canvasGrain;
               outB = 157 + canvasGrain;
             } else if (inkTone < 0.38 || l < inkCutoff * 0.68) {
-              // 1-й тон: Глухой угольно-черный гуашевый массив (волосы, тень носа, глазницы, воротник пальто: #0d0a09)
               outR = 13;
               outG = 10;
               outB = 9;
             } else if (l < inkCutoff * 1.08 || inkTone < 0.78) {
-              // 2-й тон: Холодный серо-стальной полутон на скуле, подбородке и губах (#78807e)
               outR = 120 + canvasGrain;
               outG = 128 + canvasGrain;
               outB = 126 + canvasGrain;
             } else {
-              // 3-й тон: Теплый алебастрово-кремовый свет лица (#ede6d6)
               outR = 237 + canvasGrain * 0.5;
               outG = 230 + canvasGrain * 0.5;
               outB = 214 + canvasGrain * 0.5;
             }
-          }
-
-          // ==========================================
-          // МАСТЕР-ПРЕСЕТ 3: SIN CITY NOIR (ЧЕРНО-БЕЛАЯ ТУШЬ ФРЭНКА МИЛЛЕРА С АЛЫМИ АКЦЕНТАМИ)
-          // ==========================================
-          else if (art.master === "SIN_CITY") {
+          } else if (art.master === "SIN_CITY") {
             if (inkTone < 0.45 || l < inkCutoff * 0.72) {
               outR = 6;
               outG = 5;
               outB = 8;
             } else if (e > 0.28 && l > 0.35 && l < 0.75) {
-              // Кроваво-красный акцент на острых гранях и губах/глазах
               outR = 235;
               outG = 22;
               outB = 35;
@@ -1409,32 +1369,17 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
               outG = paperWhite * inkTone;
               outB = paperWhite * inkTone;
             }
-          }
-
-          // ==========================================
-          // МАСТЕР-ПРЕСЕТ 4: 24K GOLD ETCH (ЗОЛОТАЯ ФОЛЬГА И ЧЕРНЫЙ ОБСИДИАН)
-          // ==========================================
-          else if (art.master === "GOLD_24K") {
+          } else if (art.master === "GOLD_24K") {
             const goldL = smoothstep(0.15, 0.85, l) * inkTone;
             outR = 12 + goldL * 243;
             outG = 9 + goldL * 192;
             outB = 6 + Math.pow(goldL, 2.2) * 115;
-          }
-
-          // ==========================================
-          // МАСТЕР-ПРЕСЕТ 5: BLUEPRINT (ИНЖЕНЕРНАЯ ЦИАНОТИПИЯ)
-          // ==========================================
-          else if (art.master === "BLUEPRINT") {
+          } else if (art.master === "BLUEPRINT") {
             const lineVal = (1.0 - inkTone) * 0.85 + e * 0.65;
             outR = 8 + lineVal * 195;
             outG = 24 + lineVal * 225;
             outB = 52 + lineVal * 203;
-          }
-
-          // ==========================================
-          // МАСТЕР-ПРЕСЕТ 6: TAME CURRENTS (ИРИДИСЦЕНТНЫЙ НЕОН + ЧЕРНАЯ ТУШЬ XDoG)
-          // ==========================================
-          else {
+          } else {
             const phase = (t.tone + u * 0.35 + v * 0.45 + l * 0.6) * Math.PI * 2.0;
             const cR = 155 + 95 * Math.cos(phase);
             const cG = 45 + 135 * Math.cos(phase - 2.094);
@@ -1471,7 +1416,6 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
       if (!s.isPaused) {
         s.time += 0.016 * (0.35 + t.energy * 1.35);
         if (s.traceProgress < 1.0) {
-          // Плавное 3-секундное раскрытие иллюстрации
           s.traceProgress = Math.min(1.0, s.traceProgress + 0.0068 * (0.65 + t.energy * 1.15));
         }
       }
@@ -1538,7 +1482,6 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
       const mNormX = (s.mouseX - ox) / Math.max(1, drawW);
       const mNormY = (s.mouseY - oy) / Math.max(1, drawH);
 
-      // Координата капли пипетки (следует за курсором или капает в нижней части холста, как на референсе 1!)
       const goalU = s.mouseActive && mNormX >= 0.02 && mNormX <= 0.98 ? mNormX : 0.52 + Math.sin(time * 0.4) * 0.08;
       const goalV = s.mouseActive && mNormY >= 0.02 && mNormY <= 0.98 ? mNormY : 0.87;
       s.fluidU += (goalU - s.fluidU) * 0.08;
@@ -1551,7 +1494,6 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
         const prog = s.traceProgress;
         const baseReveal = smoothstep(0.0, 0.45, prog);
 
-        // 1. Рендерим базовую тональную иллюстрацию (с живыми кругами на воде внизу кадра или под курсором!)
         if (art.rippleStrength > 0.02 && shaderCtx) {
           if (shaderCanvas.width !== m.w || shaderCanvas.height !== m.h) {
             shaderCanvas.width = m.w;
@@ -1567,7 +1509,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
 
           const dropU = s.fluidU;
           const dropV = s.fluidV;
-          const waterLineV = 0.83; // Зеркальная ватерлиния внизу кадра (как на референсе 1 с пипеткой!)
+          const waterLineV = 0.83;
 
           for (let y = 0; y < m.h; y++) {
             const v = y / m.h;
@@ -1577,11 +1519,10 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
               let sy = y;
               let specBoost = 0;
 
-              // Эффект 1: Горизонтальная водная гладь в нижней части постера (с перспективными эллиптическими кругами от пипетки!)
               if (v > waterLineV && !s.mouseActive) {
                 const depthV = (v - waterLineV) / (1.0 - waterLineV);
                 const du = u - dropU;
-                const dv = (v - dropV) * 3.4; // Сжатие по вертикали для 3D-перспективы воды!
+                const dv = (v - dropV) * 3.4;
                 const rWave = Math.sqrt(du * du + dv * dv);
                 const ripple =
                   Math.sin(rWave * 58.0 - time * 6.5) *
@@ -1592,9 +1533,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
                 sx = clip(x + ripple * m.w * 0.14, 0, m.w - 1);
                 sy = clip(y + ripple * m.h * 0.08, 0, m.h - 1);
                 if (ripple > 0.012) specBoost = ripple * 1800.0;
-              }
-              // Эффект 2: Если пользователь ведет мышью/пальцем — круги расходятся прямо от курсора!
-              else if (s.mouseActive) {
+              } else if (s.mouseActive) {
                 const du = u - dropU;
                 const dv = v - dropV;
                 const rWave = Math.sqrt(du * du + dv * dv);
@@ -1628,7 +1567,6 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
           ctx.globalAlpha = 1.0;
         }
 
-        // 2. ПОВЕРХ ТОНАЛЬНЫХ ПЯТЕН ВЫЧЕРЧИВАЕМ 3 800 КАЛЛИГРАФИЧЕСКИХ ШТРИХОВ ТУШЬЮ И ПРЯДЕЙ ВОЛОС!
         const isDarkInkMode =
           art.master === "ESQUIRE_67" ||
           art.master === "MADCAP_STENCIL" ||
@@ -1666,7 +1604,6 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
           const fullIdx = Math.floor(exactPtFloat);
           const frac = exactPtFloat - fullIdx;
 
-          // Свободный кончик пряди волос (Tier 3 и длинные Tier 1) плавно колышется на ветру!
           const isHairStrand = st.tier === 3 || st.arcLen > 24;
           const strandMove = isHairStrand ? 1.0 : 0.12;
 
@@ -1674,7 +1611,6 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
           for (let k = 0; k <= fullIdx && k < nPts; k++) {
             const pt = pts[k];
             const sNorm = k / Math.max(1, nPts - 1);
-            // Корень волоса закреплен (sNorm = 0), а кончик свободно колышется!
             const tipFreedom = isHairStrand ? sNorm * sNorm : Math.sin(sNorm * Math.PI);
 
             const spatialPhase = (pt.u * 3.5 + pt.v * 3.5) * Math.PI + waveSpeed + st.phase * 0.2;
@@ -1703,7 +1639,6 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
 
           let inkColor = "";
           if (isDarkInkMode) {
-            // Густая черная художественная тушь (#080607) поверх цветных заливок!
             inkColor = "rgba(8, 6, 7, " + String(alpha.toFixed(2)) + ")";
           } else if (art.master === "GOLD_24K") {
             inkColor = "rgba(255, 215, 95, " + String((alpha * 0.85).toFixed(2)) + ")";
@@ -1715,7 +1650,6 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
 
           strokeTaperedSpline(coords, maxW, inkColor);
 
-          // Тонкий золотисто-кремовый блик на отдельных прядях волос и гранях гитары
           if (st.tier === 1 && st.meanLum > 0.52 && i % 4 === 0 && prog >= 0.95) {
             const hiColor =
               art.master === "ESQUIRE_67"
@@ -1729,7 +1663,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
       }
 
       // ==========================================
-      // РЕЖИМ 2: CURRENTS 7.0 (XDoG COMIC ILLUSTRATION + LAMINAR LIQUID CHROME RIBBONS)
+      // РЕЖИМ 2: CURRENTS 7.0
       // ==========================================
       else if (s.topology === "CURRENTS" && shaderCtx) {
         if (shaderCanvas.width !== m.w || shaderCanvas.height !== m.h) {
@@ -1764,7 +1698,6 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
             const rDist = Math.sqrt(du * du + dv * dv);
             const wake = Math.sin(rDist * 32.0 - time * 4.5) * Math.exp(-rDist * 4.5) * t.chaos * 0.25;
 
-            // Ламинарные ленты обтекают фигуру Сида (сильнее на фоне и в воде, мягче на лице!)
             const psi = (v * 0.8 - u * 0.4 + wake) * silkFreq + smL * 2.8 - time * (0.9 + t.energy * 1.2);
             const sinPsi = Math.sin(psi * Math.PI * 2.0);
             const chromeSpec = Math.pow(Math.max(0.0, sinPsi), 5.0) * (0.35 + bgW * 0.65);
@@ -1774,7 +1707,6 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
             const ribG = 45 + 140 * Math.cos(phase - 2.094);
             const ribB = 220 + 35 * Math.cos(phase + 2.094);
 
-            // На портрете сохраняем четкую тушь XDoG, а вокруг разливаем ленты Tame Impala!
             const keepPortrait = clip((1.0 - bgW * 0.75) * t.structure + e * 0.6, 0.25, 0.95);
             const rOut = illData[p] * keepPortrait + ribR * (1.0 - keepPortrait) + chromeSpec * 210.0;
             const gOut = illData[p + 1] * keepPortrait + ribG * (1.0 - keepPortrait) + chromeSpec * 220.0;
@@ -1793,7 +1725,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
       }
 
       // ==========================================
-      // РЕЖИМ 3: PIPER (1967 UFO CLUB OIL & DYE LIQUID LIGHT SHOW)
+      // РЕЖИМ 3: PIPER
       // ==========================================
       else if (s.topology === "PIPER" && shaderCtx) {
         if (shaderCanvas.width !== m.w || shaderCanvas.height !== m.h) {
@@ -1838,7 +1770,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
       }
 
       // ==========================================
-      // РЕЖИМ 4: PRISM (DARK-FIELD CAUSTICS)
+      // РЕЖИМ 4: PRISM
       // ==========================================
       else if (s.topology === "PRISM" && shaderCtx) {
         if (shaderCanvas.width !== m.w || shaderCanvas.height !== m.h) {
@@ -2475,7 +2407,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
 
           {activeTab === "STUDIO" ? (
             <div className="flex flex-col gap-3.5 font-mono text-[9px] uppercase tracking-widest">
-              {/* 6 МАСТЕР-ПРЕСЕТОВ (ПЕРВЫЕ ДВА — ТОЧНЫЕ КОПИИ ТВОИХ РЕФЕРЕНСОВ СИДА БАРРЕТТА!) */}
+              {/* 6 МАСТЕР-ПРЕСЕТОВ */}
               <div>
                 <div className="flex justify-between items-center text-neutral-400 mb-1.5">
                   <span>Master Edition (1-Click):</span>

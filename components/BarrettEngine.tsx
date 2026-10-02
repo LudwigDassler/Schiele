@@ -2,35 +2,33 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
 
 interface Tensor5D {
-  energy: number;    // E: скорость анимации кисти, волн и водных кругов
-  chaos: number;     // C: амплитуда ветра в прядях волос и жидких отражений
-  tone: number;      // H: сдвиг цветовой палитры
-  structure: number; // St: плотность черной туши XDoG и четкость граней
-  symmetry: number;  // Sy: частота растра / ламинарных волн
+  energy: number;    // E: скорость потоков света, лучей и фазовых волн
+  chaos: number;     // C: амплитуда ветра в прядях и частота спирографа Guilloche
+  tone: number;      // H: сдвиг спектральной фазы
+  structure: number; // St: жесткость анатомического замка FDoG
+  symmetry: number;  // Sy: количество лучей Sunburst и плотность лент Currents
 }
 
 type MasterPreset =
-  | "ESQUIRE_67"      // Референс 1: Оранжево-желтый поп-арт, черная тушь XDoG, пуантилизм и круги на воде
-  | "MADCAP_STENCIL"  // Референс 2: Оливково-серый холст, алебастровый свет, стальной полутон и густая черная тушь
-  | "TAME_CURRENTS"   // Ламинарный хром + черная тушь
+  | "ESQUIRE_67"      // Оранжево-золотой психоделический поп-арт Сида Барретта (без пятен на фоне!)
+  | "MADCAP_STENCIL"  // 4-тоновый гуашевый трафарет на оливковом холсте
+  | "ASTRAL_NEON"     // Чистый векторный синтез со световыми кометами в темном вакууме
+  | "GUILLOCHE_LUX"   // Королевская гравюра модулированными волнами (Золото / Платина)
   | "SIN_CITY"        // Угольный нуар Фрэнка Миллера с кроваво-красными акцентами
-  | "GOLD_24K"        // Имперское золото и черная гравюра
-  | "BLUEPRINT";      // Инженерная цианотипия
+  | "BLUEPRINT";      // Инженерная цианотипия с астролябией
 
-type StyleEnginePreset = "COMIC_XDOG" | "STENCIL_GOUACHE" | "CROSS_HATCH" | "NEON_LASER";
-type FlowAnimationMode = "INK_REVEAL" | "WATER_DROP" | "BREEZE" | "STILL";
+type TraceVariation = "FDOG_COMIC" | "GUILLOCHE" | "ASTRAL_VECTOR" | "WOODCUT";
+type BgManifoldType = "SUNBURST" | "SACRED_RINGS" | "LIQUID_AURA" | "CLEAN_SOLID";
 
 interface ArtStudioConfig {
   master: MasterPreset;
-  styleEngine: StyleEnginePreset;
-  flowMode: FlowAnimationMode;
+  traceVariation: TraceVariation;
+  bgManifold: BgManifoldType;
   posterFrame: boolean;
-  primaryHex: string;
-  secondaryHex: string;
-  strokeWeight: number;   // 0.4 .. 2.2 (толщина пера и прядей)
-  inkThreshold: number;   // 0.15 .. 0.85 (количество черной туши XDoG)
-  stippleDensity: number; // 0.0 .. 1.0 (зернистость пуантилизма/растра в полутонах)
-  rippleStrength: number; // 0.0 .. 1.0 (сила жидких кругов на воде)
+  strokeWeight: number;   // 0.4 .. 2.2
+  inkThreshold: number;   // 0.18 .. 0.78 (глубина туши FDoG)
+  stippleDensity: number; // 0.0 .. 1.0 (живой тригонометрический растр)
+  rippleStrength: number; // 0.0 .. 1.0 (водная гладь и интерактивные волны)
 }
 
 interface DifferentialConstants {
@@ -74,7 +72,7 @@ interface ContourStroke {
     nx: number;
     ny: number;
   }[];
-  tier: 1 | 2 | 3; // 1: Силовая тушь и пряди волос, 2: Черты лица/пальцы/струны, 3: Штриховка полутонов
+  tier: 1 | 2 | 3;
   r: number;
   g: number;
   b: number;
@@ -90,11 +88,11 @@ interface MatrixBuffer {
   w: number;
   h: number;
   rgba: Uint8ClampedArray;
-  smoothRgba: Uint8ClampedArray; // Сглаженный цвет для чистых иллюстративных заливок
+  smoothRgba: Uint8ClampedArray;
   lum: Float32Array;
   smoothLum: Float32Array;
-  xdog: Float32Array;            // Массив черной туши Extended Difference of Gaussians [0=черная тушь .. 1=свет]
-  bgProb: Float32Array;          // Вероятность принадлежности пикселя фону [0=объект .. 1=фон]
+  fdog: Float32Array;   // Анизотропный потоковый фильтр Канга (0 = чистая тушь, 1 = чистый свет, 0 пятен!)
+  bgProb: Float32Array; // Сглаженная маска фона [0 = объект .. 1 = внешний фон]
   edge: Float32Array;
   gx: Float32Array;
   gy: Float32Array;
@@ -168,7 +166,7 @@ function computeShannonEntropy(str: string): number {
 }
 
 function compileLexicalManifold(rawText: string): { tensor: Tensor5D; coeffs: DifferentialConstants } {
-  const clean = (rawText || "SYD BARRETT").trim().toLowerCase();
+  const clean = (rawText || "SHINE ON CRAZY DIAMOND").trim().toLowerCase();
   const entropy = computeShannonEntropy(clean);
 
   let hash1 = 2166136261;
@@ -194,11 +192,11 @@ function compileLexicalManifold(rawText: string): { tensor: Tensor5D; coeffs: Di
   const totalLetters = Math.max(1, vowelCount + consonantCount);
   const consonantRatio = consonantCount / totalLetters;
 
-  const energy = clip(((abs1 % 1000) / 1000) * 0.35 + 0.5, 0.48, 0.88);
-  const chaos = clip((entropy / 4.5) * 0.14 + 0.12, 0.10, 0.28);
+  const energy = clip(((abs1 % 1000) / 1000) * 0.35 + 0.52, 0.5, 0.88);
+  const chaos = clip((entropy / 4.5) * 0.15 + 0.14, 0.12, 0.32);
   const tone = 0.0;
   const structure = clip(0.88 + consonantRatio * 0.10, 0.88, 0.98);
-  const symmetry = 0.32;
+  const symmetry = 0.36;
 
   const alpha = Number((Math.sin(abs1 * 0.001 * PHI) * 2.2 + (energy - 0.5)).toFixed(4));
   const beta = Number((Math.cos(abs2 * 0.001 * PHI) * 2.2 - (chaos - 0.5)).toFixed(4));
@@ -230,58 +228,6 @@ function compileLexicalManifold(rawText: string): { tensor: Tensor5D; coeffs: Di
       lyapunov,
     },
   };
-}
-
-function sampleBilinearScalar(field: Float32Array, w: number, h: number, fx: number, fy: number): number {
-  const x0 = Math.max(0, Math.min(w - 1, Math.floor(fx)));
-  const y0 = Math.max(0, Math.min(h - 1, Math.floor(fy)));
-  const x1 = Math.min(w - 1, x0 + 1);
-  const y1 = Math.min(h - 1, y0 + 1);
-  const dx = fx - x0;
-  const dy = fy - y0;
-
-  const i00 = y0 * w + x0;
-  const i10 = y0 * w + x1;
-  const i01 = y1 * w + x0;
-  const i11 = y1 * w + x1;
-
-  return (
-    field[i00] * (1 - dx) * (1 - dy) +
-    field[i10] * dx * (1 - dy) +
-    field[i01] * (1 - dx) * dy +
-    field[i11] * dx * dy
-  );
-}
-
-function sampleBilinearRGB(
-  rgba: Uint8ClampedArray,
-  w: number,
-  h: number,
-  fx: number,
-  fy: number
-): [number, number, number] {
-  const x0 = Math.max(0, Math.min(w - 1, Math.floor(fx)));
-  const y0 = Math.max(0, Math.min(h - 1, Math.floor(fy)));
-  const x1 = Math.min(w - 1, x0 + 1);
-  const y1 = Math.min(h - 1, y0 + 1);
-  const dx = fx - x0;
-  const dy = fy - y0;
-
-  const p00 = (y0 * w + x0) * 4;
-  const p10 = (y0 * w + x1) * 4;
-  const p01 = (y1 * w + x0) * 4;
-  const p11 = (y1 * w + x1) * 4;
-
-  const w00 = (1 - dx) * (1 - dy);
-  const w10 = dx * (1 - dy);
-  const w01 = (1 - dx) * dy;
-  const w11 = dx * dy;
-
-  return [
-    rgba[p00] * w00 + rgba[p10] * w10 + rgba[p01] * w01 + rgba[p11] * w11,
-    rgba[p00 + 1] * w00 + rgba[p10 + 1] * w10 + rgba[p01 + 1] * w01 + rgba[p11 + 1] * w11,
-    rgba[p00 + 2] * w00 + rgba[p10 + 2] * w10 + rgba[p01 + 2] * w01 + rgba[p11 + 2] * w11,
-  ];
 }
 
 function gaussianBlurField(src: Float32Array, w: number, h: number, passes: number): Float32Array {
@@ -316,7 +262,7 @@ function gaussianBlurField(src: Float32Array, w: number, h: number, passes: numb
 }
 
 // ==========================================
-// ЯДРО XDoG + BILA-KUWAHARA ПОСТЕРИЗАЦИЯ + ТРАССИРОВКА КАЛЛИГРАФИЧЕСКОЙ ТУШИ
+// ЯДРО FDoG (ANISOTROPIC FLOW-BASED XDoG) + СЕГМЕНТАЦИЯ БЕЗ ФОНОВЫХ КЛЯКС
 // ==========================================
 function buildMatrixFromImage(img: HTMLImageElement, isMobileDevice: boolean): MatrixBuffer {
   const baseRes = isMobileDevice ? 480 : 620;
@@ -338,7 +284,7 @@ function buildMatrixFromImage(img: HTMLImageElement, isMobileDevice: boolean): M
 
   const total = w * h;
   const lum = new Float32Array(total);
-  const xdog = new Float32Array(total);
+  const fdog = new Float32Array(total);
   const bgProb = new Float32Array(total);
   const edge = new Float32Array(total);
   const gx = new Float32Array(total);
@@ -358,7 +304,7 @@ function buildMatrixFromImage(img: HTMLImageElement, isMobileDevice: boolean): M
       smoothRgba: new Uint8ClampedArray(total * 4),
       lum,
       smoothLum: lum,
-      xdog,
+      fdog,
       bgProb,
       edge,
       gx,
@@ -382,7 +328,6 @@ function buildMatrixFromImage(img: HTMLImageElement, isMobileDevice: boolean): M
   const rawRgba = octx.getImageData(0, 0, w, h).data;
   const smoothRgba = new Uint8ClampedArray(rawRgba.length);
 
-  // 1. Автоконтраст гистограммы
   let minL = 1.0;
   let maxL = 0.0;
   const rawLArr = new Float32Array(total);
@@ -405,11 +350,11 @@ function buildMatrixFromImage(img: HTMLImageElement, isMobileDevice: boolean): M
       const i = y * w + x;
       mask[i] = wx * wy;
       const normL = clip((rawLArr[i] - minL) / spanL);
-      lum[i] = Math.pow(normL, 0.82);
+      lum[i] = Math.pow(normL, 0.84);
     }
   }
 
-  // 2. Краесохраняющий билатеральный фильтр
+  // Билатеральное сглаживание цветовых плоскостей
   for (let y = 2; y < h - 2; y++) {
     for (let x = 2; x < w - 2; x++) {
       const idx = y * w + x;
@@ -421,7 +366,7 @@ function buildMatrixFromImage(img: HTMLImageElement, isMobileDevice: boolean): M
         for (let kx = -2; kx <= 2; kx += 2) {
           const nIdx = row + (x + kx);
           const diffL = Math.abs(lum[nIdx] - centerL);
-          const weight = Math.exp(-diffL * 14.0);
+          const weight = Math.exp(-diffL * 15.0);
           const np = nIdx * 4;
           sumR += rawRgba[np] * weight;
           sumG += rawRgba[np + 1] * weight;
@@ -437,18 +382,11 @@ function buildMatrixFromImage(img: HTMLImageElement, isMobileDevice: boolean): M
     }
   }
 
-  // 3. ОПЕРАТОР XDoG (Extended Difference of Gaussians)
   const gNarrow = gaussianBlurField(lum, w, h, 1);
   const gWide = gaussianBlurField(lum, w, h, 4);
   const smoothLum = gaussianBlurField(lum, w, h, 12);
 
-  const pSharp = 21.0;
-  for (let i = 0; i < total; i++) {
-    const diff = (1.0 + pSharp) * gNarrow[i] - pSharp * gWide[i];
-    xdog[i] = clip(diff * 0.65 + lum[i] * 0.35);
-  }
-
-  // 4. Оператор Щарра для векторных штрихов и сегментации фона
+  // Оператор Щарра
   const rawGradMag = new Float32Array(total);
   let globalMaxEdge = 1e-5;
 
@@ -476,44 +414,20 @@ function buildMatrixFromImage(img: HTMLImageElement, isMobileDevice: boolean): M
     }
   }
 
+  // Подавление фонового шума с локальной нормализацией
   const localEnv = gaussianBlurField(rawGradMag, w, h, 6);
-  const absFloor = globalMaxEdge * 0.032;
+  const absFloor = globalMaxEdge * 0.042;
 
   for (let i = 0; i < total; i++) {
     const gVal = rawGradMag[i];
     if (gVal < absFloor) {
       edge[i] = 0.0;
     } else {
-      const denom = Math.max(globalMaxEdge * 0.16, localEnv[i] * 2.1 + globalMaxEdge * 0.08);
-      edge[i] = clip((gVal - absFloor * 0.7) / denom);
+      const denom = Math.max(globalMaxEdge * 0.18, localEnv[i] * 2.2 + globalMaxEdge * 0.08);
+      edge[i] = clip((gVal - absFloor * 0.8) / denom);
     }
     if (edge[i] > 0.12 || (lum[i] > 0.18 && edge[i] > 0.04)) {
       spawnIndices.push(i);
-    }
-  }
-
-  // 5. Математический детектор фона
-  let borderL = 0;
-  let borderCount = 0;
-  for (let x = 0; x < w; x += 4) {
-    borderL += smoothLum[x] + smoothLum[(h - 1) * w + x];
-    borderCount += 2;
-  }
-  borderL /= Math.max(1, borderCount);
-
-  const edgeDensity = gaussianBlurField(edge, w, h, 8);
-  for (let y = 0; y < h; y++) {
-    const ny = (y / h) - 0.5;
-    for (let x = 0; x < w; x++) {
-      const nx = (x / w) - 0.5;
-      const i = y * w + x;
-      const radialDist = Math.sqrt(nx * nx + ny * ny) * 1.4;
-      const lumDiffFromBorder = Math.abs(smoothLum[i] - borderL);
-      const isBg =
-        (1.0 - smoothstep(0.04, 0.22, edgeDensity[i])) *
-        (1.0 - smoothstep(0.08, 0.32, lumDiffFromBorder)) *
-        smoothstep(0.18, 0.65, radialDist);
-      bgProb[i] = clip(isBg);
     }
   }
 
@@ -544,7 +458,65 @@ function buildMatrixFromImage(img: HTMLImageElement, isMobileDevice: boolean): M
   etfY.set(tempTy);
 
   // ==========================================
-  // ТРАССИРОВКА КАЛЛИГРАФИЧЕСКИХ ПРЯДЕЙ И КОНТУРОВ ТУШЬЮ (TAPERED INK SPLINES)
+  // АНИЗОТРОПНЫЙ ОПЕРАТОР КАНГА (FDoG) — УБИРАЕТ КОal-ПЯТНА И ЗВЕЗДНЫЙ МУСОР НА ФОНЕ!
+  // ==========================================
+  const rawDoG = new Float32Array(total);
+  for (let i = 0; i < total; i++) {
+    // Сила вытягивания контуров пропорциональна реальной грани edge[i]
+    // В пустом космосе (где edge[i] == 0) pSharp падает до 0, поэтому звездная пыль НЕ превращается в черные пятна!
+    const pAdaptive = 22.0 * smoothstep(0.02, 0.22, edge[i] + localEnv[i] / globalMaxEdge);
+    const diff = (1.0 + pAdaptive) * gNarrow[i] - pAdaptive * gWide[i];
+    rawDoG[i] = clip(diff * 0.68 + lum[i] * 0.32);
+  }
+
+  // Интегрируем rawDoG вдоль линий касательного потока ETF (5 точек вдоль штриха)
+  for (let y = 3; y < h - 3; y++) {
+    for (let x = 3; x < w - 3; x++) {
+      const i = y * w + x;
+      const tx = etfX[i];
+      const ty = etfY[i];
+      let acc = rawDoG[i] * 0.36;
+      for (let step = 1; step <= 2; step++) {
+        const wgt = step === 1 ? 0.22 : 0.10;
+        const xPlus = Math.min(w - 1, Math.max(0, Math.round(x + tx * step * 1.4)));
+        const yPlus = Math.min(h - 1, Math.max(0, Math.round(y + ty * step * 1.4)));
+        const xMinus = Math.min(w - 1, Math.max(0, Math.round(x - tx * step * 1.4)));
+        const yMinus = Math.min(h - 1, Math.max(0, Math.round(y - ty * step * 1.4)));
+        acc += (rawDoG[yPlus * w + xPlus] + rawDoG[yMinus * w + xMinus]) * wgt;
+      }
+      fdog[i] = clip(acc);
+    }
+  }
+
+  // Математическое выделение внешнего фона с морфологическим сглаживанием (без дырявых пятен!)
+  let borderL = 0;
+  let borderCount = 0;
+  for (let x = 0; x < w; x += 4) {
+    borderL += smoothLum[x] + smoothLum[(h - 1) * w + x];
+    borderCount += 2;
+  }
+  borderL /= Math.max(1, borderCount);
+
+  const edgeDensity = gaussianBlurField(edge, w, h, 10);
+  const rawBg = new Float32Array(total);
+  for (let y = 0; y < h; y++) {
+    const ny = (y / h) - 0.5;
+    for (let x = 0; x < w; x++) {
+      const nx = (x / w) - 0.5;
+      const i = y * w + x;
+      const radialDist = Math.sqrt(nx * nx + ny * ny) * 1.45;
+      const lumDiff = Math.abs(smoothLum[i] - borderL);
+      rawBg[i] =
+        (1.0 - smoothstep(0.05, 0.25, edgeDensity[i])) *
+        (1.0 - smoothstep(0.08, 0.28, lumDiff)) *
+        smoothstep(0.22, 0.62, radialDist);
+    }
+  }
+  const cleanBg = gaussianBlurField(rawBg, w, h, 8);
+  bgProb.set(cleanBg);
+
+  // ==========================================
+  // СКЕЛЕТНАЯ ВЕКТОРИЗАЦИЯ КЭННИ С СОХРАНЕНИЕМ УГЛОВ И МЕЛКОГО ШРИФТА
   // ==========================================
   const isRidgeMap = new Uint8Array(total);
   const subOffsetX = new Float32Array(total);
@@ -731,13 +703,13 @@ function buildMatrixFromImage(img: HTMLImageElement, isMobileDevice: boolean): M
     });
   }
 
-  // Вылетающие пряди волос и штриховка полутонов вдоль поля ETF
+  // Дополнительные вылетающие пряди волос и штриховка объема
   for (let y = 5; y < h - 5; y += 4) {
     for (let x = 5; x < w - 5; x += 4) {
       if (strokes.length >= maxStrokes + 750) break;
       const idx = y * w + x;
-      if (visited[idx] || mask[idx] < 0.1 || bgProb[idx] > 0.6) continue;
-      if (lum[idx] < 0.48 && edge[idx] > 0.045) {
+      if (visited[idx] || mask[idx] < 0.1 || bgProb[idx] > 0.45) continue;
+      if (lum[idx] < 0.48 && edge[idx] > 0.05) {
         const strandPts: { u: number; v: number; nx: number; ny: number }[] = [];
         let cx = x + 0.5;
         let cy = y + 0.5;
@@ -827,7 +799,7 @@ function buildMatrixFromImage(img: HTMLImageElement, isMobileDevice: boolean): M
     smoothRgba,
     lum,
     smoothLum,
-    xdog,
+    fdog,
     bgProb,
     edge,
     gx,
@@ -846,7 +818,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const initialData = compileLexicalManifold(query || "SYD BARRETT");
+  const initialData = compileLexicalManifold(query || "SHINE ON CRAZY DIAMOND");
   const [tensor, setTensor] = useState<Tensor5D>(initialData.tensor);
   const [coeffs, setCoeffs] = useState<DifferentialConstants>(initialData.coeffs);
   const [topology, setTopology] = useState<ManifoldTopology>("TRACE");
@@ -854,14 +826,12 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
 
   const [artConfig, setArtConfig] = useState<ArtStudioConfig>({
     master: "ESQUIRE_67",
-    styleEngine: "COMIC_XDOG",
-    flowMode: "INK_REVEAL",
+    traceVariation: "FDOG_COMIC",
+    bgManifold: "SUNBURST",
     posterFrame: true,
-    primaryHex: "#ff5500",
-    secondaryHex: "#ffe600",
     strokeWeight: 1.0,
-    inkThreshold: 0.48,
-    stippleDensity: 0.55,
+    inkThreshold: 0.46,
+    stippleDensity: 0.48,
     rippleStrength: 0.45,
   });
 
@@ -894,63 +864,64 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
     fluidV: 0.86,
   });
 
+  // 6 мастер-пресетов, каждый из которых переключает и палитру, и математический закон трассировки, и живой фон!
   const applyMasterPreset = (preset: MasterPreset) => {
     let next: ArtStudioConfig = { ...artConfig, master: preset };
     if (preset === "ESQUIRE_67") {
       next = {
         ...next,
-        styleEngine: "COMIC_XDOG",
-        flowMode: "INK_REVEAL",
+        traceVariation: "FDOG_COMIC",
+        bgManifold: "SUNBURST",
         strokeWeight: 1.0,
-        inkThreshold: 0.48,
-        stippleDensity: 0.55,
+        inkThreshold: 0.46,
+        stippleDensity: 0.48,
         rippleStrength: 0.48,
       };
     } else if (preset === "MADCAP_STENCIL") {
       next = {
         ...next,
-        styleEngine: "STENCIL_GOUACHE",
-        flowMode: "BREEZE",
+        traceVariation: "FDOG_COMIC",
+        bgManifold: "CLEAN_SOLID",
         strokeWeight: 1.15,
         inkThreshold: 0.52,
-        stippleDensity: 0.25,
+        stippleDensity: 0.22,
         rippleStrength: 0.0,
       };
-    } else if (preset === "TAME_CURRENTS") {
+    } else if (preset === "ASTRAL_NEON") {
       next = {
         ...next,
-        styleEngine: "COMIC_XDOG",
-        flowMode: "WATER_DROP",
+        traceVariation: "ASTRAL_VECTOR",
+        bgManifold: "SACRED_RINGS",
+        strokeWeight: 0.9,
+        inkThreshold: 0.38,
+        stippleDensity: 0.15,
+        rippleStrength: 0.25,
+      };
+    } else if (preset === "GUILLOCHE_LUX") {
+      next = {
+        ...next,
+        traceVariation: "GUILLOCHE",
+        bgManifold: "SACRED_RINGS",
         strokeWeight: 0.95,
-        inkThreshold: 0.45,
+        inkThreshold: 0.44,
         stippleDensity: 0.3,
-        rippleStrength: 0.75,
+        rippleStrength: 0.2,
       };
     } else if (preset === "SIN_CITY") {
       next = {
         ...next,
-        styleEngine: "CROSS_HATCH",
-        flowMode: "INK_REVEAL",
-        strokeWeight: 1.1,
-        inkThreshold: 0.56,
+        traceVariation: "WOODCUT",
+        bgManifold: "LIQUID_AURA",
+        strokeWeight: 1.05,
+        inkThreshold: 0.55,
         stippleDensity: 0.65,
         rippleStrength: 0.15,
-      };
-    } else if (preset === "GOLD_24K") {
-      next = {
-        ...next,
-        styleEngine: "COMIC_XDOG",
-        flowMode: "BREEZE",
-        strokeWeight: 0.95,
-        inkThreshold: 0.5,
-        stippleDensity: 0.4,
-        rippleStrength: 0.3,
       };
     } else if (preset === "BLUEPRINT") {
       next = {
         ...next,
-        styleEngine: "NEON_LASER",
-        flowMode: "INK_REVEAL",
+        traceVariation: "ASTRAL_VECTOR",
+        bgManifold: "SACRED_RINGS",
         strokeWeight: 0.8,
         inkThreshold: 0.42,
         stippleDensity: 0.2,
@@ -966,7 +937,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
   };
 
   const loadMatrixFromUrl = useCallback((rawUrl: string, idx: number, total: number) => {
-    setFieldStatus("SOLVING XDoG INK & STENCIL PLANES [" + String(idx + 1) + "/" + String(total) + "]...");
+    setFieldStatus("SOLVING ANISOTROPIC FDoG & SPLINES [" + String(idx + 1) + "/" + String(total) + "]...");
     const img = new Image();
     img.crossOrigin = "anonymous";
     img.onload = () => {
@@ -978,7 +949,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
       stateRef.current.needsSilkReset = true;
       stateRef.current.needsIllustrationRebuild = true;
       setFieldStatus(
-        "LOCKED // XDoG + " + String(buf.strokes.length) + " CALLIGRAPHIC SPLINES (" + String(buf.w) + "x" + String(buf.h) + ")"
+        "LOCKED // FDoG + " + String(buf.strokes.length) + " KINETIC SPLINES (" + String(buf.w) + "x" + String(buf.h) + ")"
       );
     };
     img.onerror = () => {
@@ -992,7 +963,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
   }, []);
 
   useEffect(() => {
-    const cleanQ = (query || "SYD BARRETT").trim();
+    const cleanQ = (query || "SHINE ON CRAZY DIAMOND").trim();
     const next = compileLexicalManifold(cleanQ);
     setTensor(next.tensor);
     setCoeffs(next.coeffs);
@@ -1042,7 +1013,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
     if (loadingMore) return;
     setLoadingMore(true);
     const nextPage = loadedPage + 1;
-    const cleanQ = (query || "SYD BARRETT").trim();
+    const cleanQ = (query || "SHINE ON CRAZY DIAMOND").trim();
     try {
       const res = await fetch("/api/search?page=" + String(nextPage) + "&query=" + encodeURIComponent(cleanQ));
       if (res.ok) {
@@ -1150,7 +1121,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
   };
 
   // ==========================================
-  // ЯДРО МАТЕМАТИЧЕСКОЙ ИЛЛЮСТРАЦИИ BARRETT 8.0 (XDoG + STENCIL + LIQUID RIPPLE)
+  // ЯДРО РЕНДЕРИНГА BARRETT 9.0 (4 ТРАССИРОВЩИКА + ЖИВОЙ ФОН + FDoG БЕЗ ПЯТЕН)
   // ==========================================
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -1163,8 +1134,9 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
     let viewW = 900;
     let viewH = 680;
 
-    const illustrationCanvas = document.createElement("canvas");
-    const illustrationCtx = illustrationCanvas.getContext("2d");
+    // Буфер объекта с прозрачным фоном (чтобы позади объекта вращались живые математические лучи!)
+    const subjectCanvas = document.createElement("canvas");
+    const subjectCtx = subjectCanvas.getContext("2d");
 
     const shaderCanvas = document.createElement("canvas");
     const shaderCtx = shaderCanvas.getContext("2d");
@@ -1257,13 +1229,13 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
     };
 
     // ==========================================
-    // СБОРКА БАЗОВОЙ ГРАФИЧЕСКОЙ ИЛЛЮСТРАЦИИ (XDoG / STENCIL / POP-ART)
+    // СБОРКА ЧИСТОГО СЛОЯ СУБЪЕКТА (БЕЗ ЧЕРНЫХ ПЯТЕН НА ФОНЕ!)
     // ==========================================
-    const rebuildIllustrationBase = (m: MatrixBuffer, art: ArtStudioConfig, t: Tensor5D) => {
-      if (!illustrationCtx) return;
-      illustrationCanvas.width = m.w;
-      illustrationCanvas.height = m.h;
-      const imgData = illustrationCtx.createImageData(m.w, m.h);
+    const rebuildSubjectLayer = (m: MatrixBuffer, art: ArtStudioConfig, t: Tensor5D) => {
+      if (!subjectCtx) return;
+      subjectCanvas.width = m.w;
+      subjectCanvas.height = m.h;
+      const imgData = subjectCtx.createImageData(m.w, m.h);
       const dst = imgData.data;
       const sRgba = m.smoothRgba;
 
@@ -1281,30 +1253,28 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
           const p = i * 4;
           const l = m.lum[i];
           const e = m.edge[i];
-          const xd = m.xdog[i];
+          const fd = m.fdog[i];
           const bgW = m.bgProb[i];
 
-          let inkTone = xd >= inkCutoff ? 1.0 : clip(1.0 + Math.tanh(phiSharp * (xd - inkCutoff)), 0.0, 1.0);
+          // ГЛАВНОЕ ИСПРАВЛЕНИЕ ПЯТЕН:
+          // На внешнем фоне (bgW > 0.35) мы полностью выключаем черную тушь, если там нет реальной сильной грани!
+          const rawInk = fd >= inkCutoff ? 1.0 : clip(1.0 + Math.tanh(phiSharp * (fd - inkCutoff)), 0.0, 1.0);
+          const bgCleanShield = smoothstep(0.25, 0.65, bgW) * (1.0 - smoothstep(0.15, 0.45, e));
+          let inkTone = rawInk * (1.0 - bgCleanShield) + 1.0 * bgCleanShield;
 
-          if (art.stippleDensity > 0.02 && l > 0.18 && l < 0.68 && bgW < 0.5) {
-            const hashNoise = Math.sin(x * 12.9898 + y * 78.233) * 43758.5453;
-            const grain = hashNoise - Math.floor(hashNoise);
-            const crossHatch = 0.5 + 0.5 * Math.sin((x + y) * 1.35) * Math.cos((x - y) * 1.35);
-            const pattern = art.styleEngine === "CROSS_HATCH" ? crossHatch : grain;
-
-            const midShadow = 1.0 - (l - 0.18) / 0.5;
-            if (pattern < midShadow * art.stippleDensity * 0.85) {
-              inkTone *= 0.18;
+          // Регулярный тригонометрический поп-арт растр (Halftone Lattice вместо случайной грязи!)
+          if (art.stippleDensity > 0.02 && l > 0.16 && l < 0.68 && bgW < 0.35) {
+            const screenGrid = 0.5 + 0.5 * Math.sin((x * 0.95 + y * 0.95)) * Math.cos((x * 0.95 - y * 0.95));
+            const midShadow = 1.0 - (l - 0.16) / 0.52;
+            if (screenGrid < midShadow * art.stippleDensity * 0.88) {
+              inkTone *= 0.16;
             }
           }
 
           let outR = 0, outG = 0, outB = 0;
+          let outAlpha = 255;
 
           if (art.master === "ESQUIRE_67") {
-            const bgR = 255;
-            const bgG = Math.round(82 + v * 158);
-            const bgB = Math.round(5 + v * 15);
-
             const quantL = Math.floor(l * 4.5) / 4.0;
             let subjR = sRgba[p];
             let subjG = sRgba[p + 1];
@@ -1312,35 +1282,32 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
 
             const satCheck = Math.max(subjR, subjG, subjB) - Math.min(subjR, subjG, subjB);
             if (l > 0.68) {
-              subjR = Math.round(238 + (l - 0.68) * 50);
-              subjG = Math.round(224 + (l - 0.68) * 60);
-              subjB = Math.round(212 + (l - 0.68) * 65);
+              subjR = Math.round(240 + (l - 0.68) * 45);
+              subjG = Math.round(226 + (l - 0.68) * 55);
+              subjB = Math.round(214 + (l - 0.68) * 60);
             } else if (satCheck < 28) {
-              subjR = Math.round(145 + quantL * 105);
-              subjG = Math.round(95 + quantL * 110);
-              subjB = Math.round(80 + quantL * 95);
+              subjR = Math.round(150 + quantL * 100);
+              subjG = Math.round(98 + quantL * 110);
+              subjB = Math.round(82 + quantL * 95);
             } else {
               const avg = (subjR + subjG + subjB) * 0.333;
-              subjR = clip(Math.round(avg + (subjR - avg) * 1.65), 20, 255);
-              subjG = clip(Math.round(avg + (subjG - avg) * 1.65), 20, 255);
-              subjB = clip(Math.round(avg + (subjB - avg) * 1.65), 20, 255);
+              subjR = clip(Math.round(avg + (subjR - avg) * 1.7), 15, 255);
+              subjG = clip(Math.round(avg + (subjG - avg) * 1.7), 15, 255);
+              subjB = clip(Math.round(avg + (subjB - avg) * 1.7), 15, 255);
             }
 
-            const mixR = subjR * (1.0 - bgW) + bgR * bgW;
-            const mixG = subjG * (1.0 - bgW) + bgG * bgW;
-            const mixB = subjB * (1.0 - bgW) + bgB * bgW;
-
-            const effectiveInk = bgW > 0.65 ? 1.0 - (1.0 - inkTone) * 0.15 : inkTone;
-            outR = mixR * effectiveInk + 10 * (1.0 - effectiveInk);
-            outG = mixG * effectiveInk + 7 * (1.0 - effectiveInk);
-            outB = mixB * effectiveInk + 8 * (1.0 - effectiveInk);
-          } else if (art.master === "MADCAP_STENCIL" || art.styleEngine === "STENCIL_GOUACHE") {
-            const canvasGrain = (Math.sin(x * 0.8) * Math.cos(y * 0.3)) * 4.0;
-
-            if (bgW > 0.52 && e < 0.18) {
+            outR = subjR * inkTone + 10 * (1.0 - inkTone);
+            outG = subjG * inkTone + 7 * (1.0 - inkTone);
+            outB = subjB * inkTone + 8 * (1.0 - inkTone);
+            // Прозрачность для фона, чтобы позади фигуры светилось живое солнце Sunburst!
+            outAlpha = Math.round((1.0 - bgCleanShield * 0.92) * vMask * 255);
+          } else if (art.master === "MADCAP_STENCIL") {
+            const canvasGrain = (Math.sin(x * 0.8) * Math.cos(y * 0.3)) * 3.5;
+            if (bgCleanShield > 0.5) {
               outR = 158 + canvasGrain;
               outG = 163 + canvasGrain;
               outB = 157 + canvasGrain;
+              outAlpha = Math.round((1.0 - bgCleanShield * 0.7) * vMask * 255);
             } else if (inkTone < 0.38 || l < inkCutoff * 0.68) {
               outR = 13;
               outG = 10;
@@ -1360,7 +1327,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
               outG = 5;
               outB = 8;
             } else if (e > 0.28 && l > 0.35 && l < 0.75) {
-              outR = 235;
+              outR = 238;
               outG = 22;
               outB = 35;
             } else {
@@ -1369,34 +1336,142 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
               outG = paperWhite * inkTone;
               outB = paperWhite * inkTone;
             }
-          } else if (art.master === "GOLD_24K") {
+            outAlpha = Math.round((1.0 - bgCleanShield * 0.85) * vMask * 255);
+          } else if (art.master === "GUILLOCHE_LUX") {
             const goldL = smoothstep(0.15, 0.85, l) * inkTone;
             outR = 12 + goldL * 243;
             outG = 9 + goldL * 192;
             outB = 6 + Math.pow(goldL, 2.2) * 115;
+            outAlpha = Math.round((1.0 - bgCleanShield * 0.85) * vMask * 255);
           } else if (art.master === "BLUEPRINT") {
             const lineVal = (1.0 - inkTone) * 0.85 + e * 0.65;
             outR = 8 + lineVal * 195;
             outG = 24 + lineVal * 225;
             outB = 52 + lineVal * 203;
+            outAlpha = Math.round((1.0 - bgCleanShield * 0.8) * vMask * 255);
           } else {
             const phase = (t.tone + u * 0.35 + v * 0.45 + l * 0.6) * Math.PI * 2.0;
-            const cR = 155 + 95 * Math.cos(phase);
-            const cG = 45 + 135 * Math.cos(phase - 2.094);
-            const cB = 205 + 50 * Math.cos(phase + 2.094);
-            outR = (sRgba[p] * 0.45 + cR * 0.55) * inkTone;
-            outG = (sRgba[p + 1] * 0.45 + cG * 0.55) * inkTone;
-            outB = (sRgba[p + 2] * 0.45 + cB * 0.55) * inkTone;
+            const cR = 165 + 90 * Math.cos(phase);
+            const cG = 45 + 140 * Math.cos(phase - 2.094);
+            const cB = 215 + 40 * Math.cos(phase + 2.094);
+            outR = (sRgba[p] * 0.5 + cR * 0.5) * inkTone;
+            outG = (sRgba[p + 1] * 0.5 + cG * 0.5) * inkTone;
+            outB = (sRgba[p + 2] * 0.5 + cB * 0.5) * inkTone;
+            outAlpha = Math.round((1.0 - bgCleanShield * 0.85) * vMask * 255);
           }
 
-          dst[p] = Math.min(255, Math.max(0, Math.round(outR * vMask)));
-          dst[p + 1] = Math.min(255, Math.max(0, Math.round(outG * vMask)));
-          dst[p + 2] = Math.min(255, Math.max(0, Math.round(outB * vMask)));
-          dst[p + 3] = 255;
+          dst[p] = Math.min(255, Math.max(0, Math.round(outR)));
+          dst[p + 1] = Math.min(255, Math.max(0, Math.round(outG)));
+          dst[p + 2] = Math.min(255, Math.max(0, Math.round(outB)));
+          dst[p + 3] = outAlpha;
         }
       }
 
-      illustrationCtx.putImageData(imgData, 0, 0);
+      subjectCtx.putImageData(imgData, 0, 0);
+    };
+
+    // Отрисовка ЖИВОГО МАТЕМАТИЧЕСКОГО ФОНА (60 FPS) позади объекта!
+    const renderLivingBackground = (
+      ox: number,
+      oy: number,
+      drawW: number,
+      drawH: number,
+      art: ArtStudioConfig,
+      t: Tensor5D,
+      time: number
+    ) => {
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(ox, oy, drawW, drawH);
+      ctx.clip();
+
+      const cx = ox + drawW * 0.5;
+      const cy = oy + drawH * 0.44;
+      const maxR = Math.hypot(drawW, drawH) * 0.75;
+
+      if (art.master === "ESQUIRE_67") {
+        // Чистейший психоделический закат Esquire '67 (Огненно-оранжевый -> Солнечно-желтый)
+        const bgGrad = ctx.createLinearGradient(ox, oy, ox, oy + drawH);
+        bgGrad.addColorStop(0, "#ff4d00");
+        bgGrad.addColorStop(0.55, "#ff9900");
+        bgGrad.addColorStop(1, "#ffe600");
+        ctx.fillStyle = bgGrad;
+        ctx.fillRect(ox, oy, drawW, drawH);
+      } else if (art.master === "MADCAP_STENCIL") {
+        ctx.fillStyle = "#9ea39d";
+        ctx.fillRect(ox, oy, drawW, drawH);
+      } else if (art.master === "BLUEPRINT") {
+        ctx.fillStyle = "#06152d";
+        ctx.fillRect(ox, oy, drawW, drawH);
+      } else {
+        ctx.fillStyle = "#050308";
+        ctx.fillRect(ox, oy, drawW, drawH);
+      }
+
+      // 1. ЖИВЫЕ ЛУЧИ SUNBURST (Вращающееся геометрическое гало)
+      if (art.bgManifold === "SUNBURST") {
+        const numRays = Math.floor(16 + t.symmetry * 24);
+        const rot = time * 0.15;
+        ctx.fillStyle =
+          art.master === "ESQUIRE_67"
+            ? "rgba(255, 235, 90, 0.22)"
+            : art.master === "MADCAP_STENCIL"
+            ? "rgba(237, 230, 214, 0.16)"
+            : "rgba(168, 85, 247, 0.12)";
+
+        for (let i = 0; i < numRays; i++) {
+          const a0 = rot + (i * Math.PI * 2) / numRays;
+          const a1 = a0 + (Math.PI / numRays) * 0.9;
+          ctx.beginPath();
+          ctx.moveTo(cx, cy);
+          ctx.arc(cx, cy, maxR, a0, a1);
+          ctx.closePath();
+          ctx.fill();
+        }
+      }
+
+      // 2. САКРАЛЬНЫЕ КОЛЬЦА ЗОЛОТОГО СЕЧЕНИЯ И АСТРОЛЯБИЯ (SACRED_RINGS)
+      else if (art.bgManifold === "SACRED_RINGS") {
+        ctx.strokeStyle =
+          art.master === "BLUEPRINT"
+            ? "rgba(56, 189, 248, 0.22)"
+            : art.master === "ESQUIRE_67"
+            ? "rgba(15, 10, 8, 0.18)"
+            : "rgba(245, 158, 11, 0.2)";
+        ctx.lineWidth = 1.0;
+
+        for (let rIdx = 1; rIdx <= 8; rIdx++) {
+          const rad = (rIdx / 8) * maxR * 0.85;
+          ctx.setLineDash(rIdx % 2 === 0 ? [6, 8] : []);
+          ctx.lineDashOffset = (rIdx % 2 === 0 ? 1 : -1) * time * 18.0;
+          ctx.beginPath();
+          ctx.arc(cx, cy, rad, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+        ctx.setLineDash([]);
+      }
+
+      // 3. ЖИДКАЯ ГАРМОНИЧЕСКАЯ АУРА (LIQUID_AURA)
+      else if (art.bgManifold === "LIQUID_AURA") {
+        ctx.strokeStyle =
+          art.master === "SIN_CITY"
+            ? "rgba(239, 68, 68, 0.18)"
+            : "rgba(192, 38, 211, 0.18)";
+        ctx.lineWidth = 1.4;
+        for (let wIdx = 0; wIdx < 18; wIdx++) {
+          const baseY = oy + (wIdx / 17) * drawH;
+          ctx.beginPath();
+          for (let sx = 0; sx <= 60; sx++) {
+            const u = sx / 60;
+            const wy = baseY + Math.sin(u * 8.0 + time * 1.8 + wIdx * 0.5) * 16.0 * t.chaos;
+            if (sx === 0) ctx.moveTo(ox + u * drawW, wy);
+            else ctx.lineTo(ox + u * drawW, wy);
+          }
+          ctx.stroke();
+        }
+      }
+
+      ctx.restore();
     };
 
     const render = () => {
@@ -1406,41 +1481,41 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
       const art = s.art;
       const m = s.matrix;
 
-      const bgHex =
+      const outerBg =
         art.master === "MADCAP_STENCIL"
-          ? "#9ea39d"
+          ? "#1c1e1c"
           : art.master === "BLUEPRINT"
-          ? "#06152d"
-          : "#060408";
+          ? "#030b18"
+          : "#040206";
 
       if (!s.isPaused) {
         s.time += 0.016 * (0.35 + t.energy * 1.35);
         if (s.traceProgress < 1.0) {
-          s.traceProgress = Math.min(1.0, s.traceProgress + 0.0068 * (0.65 + t.energy * 1.15));
+          s.traceProgress = Math.min(1.0, s.traceProgress + 0.0075 * (0.65 + t.energy * 1.15));
         }
       }
       const time = s.time;
 
       if (m && s.needsIllustrationRebuild) {
-        rebuildIllustrationBase(m, art, t);
+        rebuildSubjectLayer(m, art, t);
         s.needsIllustrationRebuild = false;
       }
 
       if (m && s.needsSilkReset) {
         resetSilkParticles(m);
         ctx.globalCompositeOperation = "source-over";
-        ctx.fillStyle = bgHex;
+        ctx.fillStyle = outerBg;
         ctx.fillRect(0, 0, viewW, viewH);
         s.needsSilkReset = false;
       }
 
       if (s.topology === "SILK" && m) {
         ctx.globalCompositeOperation = "source-over";
-        ctx.fillStyle = "rgba(6, 4, 8, 0.08)";
+        ctx.fillStyle = "rgba(4, 2, 6, 0.08)";
         ctx.fillRect(0, 0, viewW, viewH);
       } else {
         ctx.globalCompositeOperation = "source-over";
-        ctx.fillStyle = bgHex;
+        ctx.fillStyle = outerBg;
         ctx.fillRect(0, 0, viewW, viewH);
       }
 
@@ -1488,11 +1563,22 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
       s.fluidV += (goalV - s.fluidV) * 0.08;
 
       // ==========================================
-      // РЕЖИМ 1: TRACE 8.0 (ПОЛНОЦЕННАЯ ИЛЛЮСТРАЦИЯ СИДА БАРРЕТТА: XDoG + STENCIL + КАЛЛИГРАФИЧЕСКИЕ ПРЯДИ + КРУГИ НА ВОДЕ)
+      // РЕЖИМ 1: TRACE 9.0 (4 ВАРИАТИВНЫХ ТРАССИРОВЩИКА + ЖИВОЙ ФОН + ВОДНАЯ ГЛАДЬ)
       // ==========================================
       if (s.topology === "TRACE") {
         const prog = s.traceProgress;
         const baseReveal = smoothstep(0.0, 0.45, prog);
+
+        // 1. Рендерим живой математический фон позади объекта
+        renderLivingBackground(ox, oy, drawW, drawH, art, t, time);
+
+        // 2. В режимах FDOG_COMIC, GUILLOCHE и WOODCUT накладываем чистый тональный слой субъекта
+        const underlayWeight =
+          art.traceVariation === "ASTRAL_VECTOR"
+            ? 0.22
+            : art.traceVariation === "GUILLOCHE"
+            ? 0.55
+            : 0.96;
 
         if (art.rippleStrength > 0.02 && shaderCtx) {
           if (shaderCanvas.width !== m.w || shaderCanvas.height !== m.h) {
@@ -1500,7 +1586,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
             shaderCanvas.height = m.h;
           }
           shaderCtx.clearRect(0, 0, m.w, m.h);
-          shaderCtx.drawImage(illustrationCanvas, 0, 0);
+          shaderCtx.drawImage(subjectCanvas, 0, 0);
 
           const baseData = shaderCtx.getImageData(0, 0, m.w, m.h);
           const outData = shaderCtx.createImageData(m.w, m.h);
@@ -1558,36 +1644,32 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
             }
           }
           shaderCtx.putImageData(outData, 0, 0);
-          ctx.globalAlpha = baseReveal;
+          ctx.globalAlpha = baseReveal * underlayWeight;
           ctx.drawImage(shaderCanvas, ox, oy, drawW, drawH);
           ctx.globalAlpha = 1.0;
         } else {
-          ctx.globalAlpha = baseReveal;
-          ctx.drawImage(illustrationCanvas, ox, oy, drawW, drawH);
+          ctx.globalAlpha = baseReveal * underlayWeight;
+          ctx.drawImage(subjectCanvas, ox, oy, drawW, drawH);
           ctx.globalAlpha = 1.0;
         }
 
-        const isDarkInkMode =
-          art.master === "ESQUIRE_67" ||
-          art.master === "MADCAP_STENCIL" ||
-          art.master === "SIN_CITY" ||
-          art.styleEngine === "COMIC_XDOG" ||
-          art.styleEngine === "STENCIL_GOUACHE";
-
-        ctx.globalCompositeOperation = isDarkInkMode ? "source-over" : "screen";
-        ctx.lineCap = "round";
-        ctx.lineJoin = "round";
-
+        // ==========================================
+        // 3. ЧЕТЫРЕ МАТЕМАТИЧЕСКИХ ПАРАДИГМЫ ВЕКТОРНОЙ ТРАССИРОВКИ:
+        // ==========================================
         const strokes = m.strokes;
         const totalStrokes = strokes.length;
         const windowSpan = Math.max(110, Math.floor(totalStrokes * 0.25));
         const headFloat = prog * (totalStrokes + windowSpan);
+        const waveSpeed = time * (1.8 + t.energy * 2.2);
+        const breezeAmp = t.chaos * 1.5 * (1.05 - t.structure * 0.85);
 
-        const waveSpeed = time * (1.8 + t.energy * 2.0);
-        const breezeAmp =
-          art.flowMode === "STILL"
-            ? 0.0
-            : t.chaos * 1.45 * (1.05 - t.structure * 0.85);
+        const isDarkInk =
+          art.traceVariation === "FDOG_COMIC" ||
+          art.traceVariation === "WOODCUT";
+
+        ctx.globalCompositeOperation = isDarkInk ? "source-over" : "screen";
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
 
         for (let i = 0; i < totalStrokes; i++) {
           if (i > headFloat) break;
@@ -1607,6 +1689,33 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
           const isHairStrand = st.tier === 3 || st.arcLen > 24;
           const strandMove = isHairStrand ? 1.0 : 0.12;
 
+          // ВАРИАЦИЯ 1: GUILLOCHE (Частотно-модулированный спирограф вдоль контуров!)
+          if (art.traceVariation === "GUILLOCHE") {
+            ctx.beginPath();
+            const guillocheFreq = 1.2 + t.chaos * 2.5;
+            const guillocheAmp = (1.5 + st.meanEdge * 4.2) * art.strokeWeight;
+
+            for (let k = 0; k <= fullIdx && k < nPts; k++) {
+              const pt = pts[k];
+              const sNorm = k / Math.max(1, nPts - 1);
+              const env = Math.sin(sNorm * Math.PI);
+              const spiro = Math.sin(k * guillocheFreq - waveSpeed * 1.6 + st.phase) * guillocheAmp * env;
+              const sx = ox + pt.u * drawW + pt.nx * spiro;
+              const sy = oy + pt.v * drawH + pt.ny * spiro;
+              if (k === 0) ctx.moveTo(sx, sy);
+              else ctx.lineTo(sx, sy);
+            }
+            const gAlpha = clip((0.35 + st.meanEdge * 0.55) * localProg, 0.15, 0.9);
+            ctx.strokeStyle =
+              art.master === "GUILLOCHE_LUX" || art.master === "ESQUIRE_67"
+                ? "rgba(255, 220, 110, " + String(gAlpha.toFixed(2)) + ")"
+                : "rgba(" + String(Math.min(255, st.r + 70)) + "," + String(Math.min(255, st.g + 70)) + "," + String(Math.min(255, st.b + 90)) + "," + String(gAlpha.toFixed(2)) + ")";
+            ctx.lineWidth = 0.75 * art.strokeWeight;
+            ctx.stroke();
+            continue;
+          }
+
+          // Собираем базовую геометрию сплайна с живым дыханием на ветру
           const coords: { x: number; y: number }[] = [];
           for (let k = 0; k <= fullIdx && k < nPts; k++) {
             const pt = pts[k];
@@ -1634,43 +1743,100 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
 
           if (coords.length < 2) continue;
 
-          const maxW = (st.tier === 1 ? (1.35 + st.meanEdge * 1.1) : st.tier === 2 ? 0.92 : 1.15) * art.strokeWeight;
-          const alpha = clip((0.55 + st.meanEdge * 0.45) * localProg, 0.2, 0.96);
+          // ВАРИАЦИЯ 2: WOODCUT (Академическая перекрестная гравюра Дюрера / Шиле)
+          if (art.traceVariation === "WOODCUT") {
+            const wAlpha = clip((0.5 + st.meanEdge * 0.45) * localProg, 0.2, 0.95);
+            const woodColor =
+              art.master === "SIN_CITY" && st.meanEdge > 0.35
+                ? "rgba(239, 68, 68, " + String(wAlpha.toFixed(2)) + ")"
+                : "rgba(10, 8, 9, " + String(wAlpha.toFixed(2)) + ")";
 
-          let inkColor = "";
-          if (isDarkInkMode) {
-            inkColor = "rgba(8, 6, 7, " + String(alpha.toFixed(2)) + ")";
-          } else if (art.master === "GOLD_24K") {
-            inkColor = "rgba(255, 215, 95, " + String((alpha * 0.85).toFixed(2)) + ")";
-          } else if (art.master === "BLUEPRINT") {
-            inkColor = "rgba(185, 240, 255, " + String((alpha * 0.85).toFixed(2)) + ")";
-          } else {
-            inkColor = "rgba(" + String(st.r) + "," + String(st.g) + "," + String(st.b) + "," + String(alpha.toFixed(2)) + ")";
+            strokeTaperedSpline(coords, (0.85 + st.meanEdge * 0.9) * art.strokeWeight, woodColor);
+
+            // Перекрестные насечки резцом (cross-hatching)
+            if (st.tier <= 2 && coords.length >= 5) {
+              const hatchLen = (3.2 + (1.0 - st.meanLum) * 5.0) * art.strokeWeight;
+              ctx.beginPath();
+              for (let k = 1; k < coords.length - 1; k += 3) {
+                const pt = pts[k];
+                const rotAng = 0.785 + Math.sin(time * 2.0 + k) * 0.08;
+                const cA = Math.cos(rotAng), sA = Math.sin(rotAng);
+                const hx = (pt.nx * cA - pt.ny * sA) * hatchLen;
+                const hy = (pt.nx * sA + pt.ny * cA) * hatchLen;
+                ctx.moveTo(coords[k].x - hx, coords[k].y - hy);
+                ctx.lineTo(coords[k].x + hx, coords[k].y + hy);
+              }
+              ctx.strokeStyle = woodColor;
+              ctx.lineWidth = 0.55 * art.strokeWeight;
+              ctx.stroke();
+            }
+            continue;
           }
+
+          // ВАРИАЦИЯ 3: ASTRAL_VECTOR (Чистый неоново-спектральный вектор с бегущими кометами)
+          if (art.traceVariation === "ASTRAL_VECTOR") {
+            const vAlpha = clip((0.35 + st.meanEdge * 0.6) * localProg, 0.15, 0.95);
+            const rV = Math.min(255, st.r + 65);
+            const gV = Math.min(255, st.g + 65);
+            const bV = Math.min(255, st.b + 85);
+            const vecColor =
+              art.master === "BLUEPRINT"
+                ? "rgba(125, 211, 252, " + String(vAlpha.toFixed(2)) + ")"
+                : "rgba(" + String(rV) + "," + String(gV) + "," + String(bV) + "," + String(vAlpha.toFixed(2)) + ")";
+
+            strokeTaperedSpline(coords, (0.75 + st.meanEdge * 0.85) * art.strokeWeight, vecColor);
+
+            // Живая комета света, бегущая по контуру
+            if (coords.length >= 7) {
+              const span = Math.max(3, Math.floor(coords.length * 0.3));
+              const pos = ((time * st.speed * 0.9 + st.phase) % 1.4) - 0.2;
+              const hIdx = Math.min(coords.length - 1, Math.floor(pos * coords.length));
+              const tIdx = Math.max(0, hIdx - span);
+              if (hIdx - tIdx >= 2) {
+                strokeTaperedSpline(
+                  coords.slice(tIdx, hIdx + 1),
+                  (1.2 + st.meanEdge) * art.strokeWeight,
+                  "rgba(255, 255, 255, 0.88)"
+                );
+              }
+            }
+            continue;
+          }
+
+          // ВАРИАЦИЯ 4: FDOG_COMIC (Каллиграфическая тушь поверх чистого постера Сида Барретта)
+          const maxW = (st.tier === 1 ? (1.3 + st.meanEdge * 1.1) : st.tier === 2 ? 0.9 : 1.1) * art.strokeWeight;
+          const alpha = clip((0.55 + st.meanEdge * 0.45) * localProg, 0.2, 0.96);
+          const inkColor = "rgba(8, 6, 7, " + String(alpha.toFixed(2)) + ")";
 
           strokeTaperedSpline(coords, maxW, inkColor);
 
-          if (st.tier === 1 && st.meanLum > 0.52 && i % 4 === 0 && prog >= 0.95) {
-            const hiColor =
-              art.master === "ESQUIRE_67"
-                ? "rgba(255, 238, 175, 0.55)"
-                : art.master === "MADCAP_STENCIL"
-                ? "rgba(237, 230, 214, 0.65)"
-                : "rgba(255, 255, 255, 0.5)";
-            strokeTaperedSpline(coords.slice(0, Math.max(2, Math.floor(coords.length * 0.6))), maxW * 0.45, hiColor);
+          // Бегущий золотой блик по прядям волос и главным граням!
+          if (st.tier === 1 && coords.length >= 8 && prog >= 0.85 && i % 3 === 0) {
+            const span = Math.max(3, Math.floor(coords.length * 0.28));
+            const pos = ((time * st.speed * 0.65 + st.phase) % 1.5) - 0.25;
+            const hIdx = Math.min(coords.length - 1, Math.floor(pos * coords.length));
+            const tIdx = Math.max(0, hIdx - span);
+            if (hIdx - tIdx >= 2) {
+              const hiStyle =
+                art.master === "ESQUIRE_67"
+                  ? "rgba(255, 235, 140, 0.65)"
+                  : "rgba(237, 230, 214, 0.65)";
+              strokeTaperedSpline(coords.slice(tIdx, hIdx + 1), maxW * 0.5, hiStyle);
+            }
           }
         }
       }
 
       // ==========================================
-      // РЕЖИМ 2: CURRENTS 7.0
+      // РЕЖИМ 2: CURRENTS (ЛАМИНАРНЫЙ ХРОМ + FDoG СУБЪЕКТ)
       // ==========================================
       else if (s.topology === "CURRENTS" && shaderCtx) {
         if (shaderCanvas.width !== m.w || shaderCanvas.height !== m.h) {
           shaderCanvas.width = m.w;
           shaderCanvas.height = m.h;
         }
-        shaderCtx.drawImage(illustrationCanvas, 0, 0);
+        shaderCtx.clearRect(0, 0, m.w, m.h);
+        shaderCtx.drawImage(subjectCanvas, 0, 0);
         const illData = shaderCtx.getImageData(0, 0, m.w, m.h).data;
 
         const outImg = shaderCtx.createImageData(m.w, m.h);
@@ -1732,7 +1898,8 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
           shaderCanvas.width = m.w;
           shaderCanvas.height = m.h;
         }
-        shaderCtx.drawImage(illustrationCanvas, 0, 0);
+        shaderCtx.clearRect(0, 0, m.w, m.h);
+        shaderCtx.drawImage(subjectCanvas, 0, 0);
         const illData = shaderCtx.getImageData(0, 0, m.w, m.h).data;
         const outImg = shaderCtx.createImageData(m.w, m.h);
         const dst = outImg.data;
@@ -1747,7 +1914,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
             const u = x / m.w;
             const p = baseIdx * 4;
             const smL = m.smoothLum[baseIdx];
-            const xd = m.xdog[baseIdx];
+            const fd = m.fdog[baseIdx];
 
             const oil1 = Math.sin(u * 5.5 + smL * 4.2 + time * 1.1) * Math.cos(v * 5.5 - smL * 3.8 - time * 0.9);
             const oil2 = Math.sin((u * 8.0 - v * 6.0) + oil1 * (1.8 + t.chaos * 2.2) + time * 1.4);
@@ -1757,7 +1924,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
             const oilG = 85 + 140 * Math.cos(ph - 1.8);
             const oilB = 45 + 195 * Math.cos(ph + 2.1);
 
-            const inkMask = xd < art.inkThreshold ? 0.08 : 1.0;
+            const inkMask = fd < art.inkThreshold && m.bgProb[baseIdx] < 0.4 ? 0.08 : 1.0;
             dst[p] = Math.min(255, Math.round((illData[p] * 0.55 + oilR * 0.45) * inkMask * vMask));
             dst[p + 1] = Math.min(255, Math.round((illData[p + 1] * 0.55 + oilG * 0.45) * inkMask * vMask));
             dst[p + 2] = Math.min(255, Math.round((illData[p + 2] * 0.55 + oilB * 0.45) * inkMask * vMask));
@@ -2010,7 +2177,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
       // ==========================================
       else if (s.topology === "ENGRAVE") {
         ctx.globalAlpha = 0.35;
-        ctx.drawImage(illustrationCanvas, ox, oy, drawW, drawH);
+        ctx.drawImage(subjectCanvas, ox, oy, drawW, drawH);
         ctx.globalAlpha = 1.0;
 
         const numLines = 135;
@@ -2054,7 +2221,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
       // ==========================================
       else if (s.topology === "CRYSTAL") {
         ctx.globalAlpha = 0.4;
-        ctx.drawImage(illustrationCanvas, ox, oy, drawW, drawH);
+        ctx.drawImage(subjectCanvas, ox, oy, drawW, drawH);
         ctx.globalAlpha = 1.0;
 
         const cells = m.cells;
@@ -2089,7 +2256,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
       // ==========================================
       else if (s.topology === "GLYPH") {
         ctx.globalAlpha = 0.35;
-        ctx.drawImage(illustrationCanvas, ox, oy, drawW, drawH);
+        ctx.drawImage(subjectCanvas, ox, oy, drawW, drawH);
         ctx.globalAlpha = 1.0;
 
         ctx.globalCompositeOperation = "screen";
@@ -2141,25 +2308,21 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
       // ==========================================
       if (art.posterFrame) {
         ctx.globalCompositeOperation = "source-over";
-        const isLightFrame = art.master === "MADCAP_STENCIL";
-        const frameStroke = isLightFrame ? "rgba(15, 12, 10, 0.45)" : "rgba(255, 255, 255, 0.18)";
-        const textFill = isLightFrame ? "rgba(15, 12, 10, 0.8)" : "rgba(255, 255, 255, 0.6)";
-
-        ctx.strokeStyle = frameStroke;
+        ctx.strokeStyle = "rgba(255, 255, 255, 0.22)";
         ctx.lineWidth = 1.2;
         ctx.strokeRect(ox - 10, oy - 10, drawW + 20, drawH + 26);
 
         ctx.font = "9px 'Space Mono', monospace";
-        ctx.fillStyle = textFill;
+        ctx.fillStyle = "rgba(255, 255, 255, 0.65)";
         ctx.textAlign = "left";
         ctx.fillText(
-          "BARRETT // " + (query || "SYD BARRETT").toUpperCase().slice(0, 24) + " [" + art.master + "]",
+          "BARRETT // " + (query || "SYD BARRETT").toUpperCase().slice(0, 22) + " [" + art.traceVariation + "]",
           ox - 4,
           oy + drawH + 10
         );
         ctx.textAlign = "right";
         ctx.fillText(
-          "XDoG tanh(φ·ΔG) | H(X)=" + String(c.entropy) + "b | PURE MATH",
+          "FDoG ∫G(s)ΔI ds | H(X)=" + String(c.entropy) + "b | PURE MATH",
           ox + drawW + 4,
           oy + drawH + 10
         );
@@ -2232,14 +2395,14 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
       <style dangerouslySetInnerHTML={{ __html: `
         .barrett-scroll::-webkit-scrollbar { height: 3px; }
         .barrett-scroll::-webkit-scrollbar-track { background: rgba(255,255,255,0.03); border-radius: 99px; }
-        .barrett-scroll::-webkit-scrollbar-thumb { background: rgba(168,85,247,0.45); border-radius: 99px; }
-        .barrett-scroll::-webkit-scrollbar-thumb:hover { background: rgba(168,85,247,0.85); }
+        .barrett-scroll::-webkit-scrollbar-thumb { background: rgba(245,158,11,0.5); border-radius: 99px; }
+        .barrett-scroll::-webkit-scrollbar-thumb:hover { background: rgba(245,158,11,0.9); }
       `}} />
 
       {/* МАТЕМАТИЧЕСКИЙ ХОЛСТ BARRETT */}
       <div
         ref={containerRef}
-        className="lg:col-span-8 relative h-[600px] md:h-[760px] rounded-2xl overflow-hidden border border-white/10 bg-[#060408] shadow-[0_20px_60px_rgba(0,0,0,0.85)]"
+        className="lg:col-span-8 relative h-[600px] md:h-[760px] rounded-2xl overflow-hidden border border-white/10 bg-[#040206] shadow-[0_20px_60px_rgba(0,0,0,0.85)]"
       >
         <canvas
           ref={canvasRef}
@@ -2253,12 +2416,12 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
         {/* ВЕРХНИЙ ТЕЛЕМЕТРИЧЕСКИЙ ОВЕРЛЕЙ */}
         <div className="absolute top-4 left-4 right-4 flex flex-wrap justify-between items-start pointer-events-none gap-2">
           <div className="bg-black/75 backdrop-blur-md border border-white/10 px-3 py-2 rounded font-mono text-[9px] uppercase tracking-widest text-neutral-300">
-            <div className="text-white font-bold">BARRETT PRISM // {(query || "SYD BARRETT").toUpperCase()}</div>
+            <div className="text-white font-bold">BARRETT PRISM // {(query || "SHINE ON CRAZY DIAMOND").toUpperCase()}</div>
             <div className="text-[#f59e0b] mt-0.5">{fieldStatus}</div>
           </div>
 
           <div className="bg-black/75 backdrop-blur-md border border-white/10 px-3 py-2 rounded font-mono text-[9px] uppercase tracking-widest text-right text-neutral-400">
-            <div>XDoG KERNEL | H(X): <span className="text-white">{coeffs.entropy} bits</span> | λ: <span className="text-[#10b981]">{coeffs.lyapunov}</span></div>
+            <div>FDoG ANISOTROPIC | H(X): <span className="text-white">{coeffs.entropy} bits</span> | λ: <span className="text-[#10b981]">{coeffs.lyapunov}</span></div>
           </div>
         </div>
 
@@ -2372,7 +2535,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
         </div>
       </div>
 
-      {/* ПРАВАЯ ПАНЕЛЬ: BARRETT ILLUSTRATION STUDIO */}
+      {/* ПРАВАЯ ПАНЕЛЬ: BARRETT ILLUSTRATION STUDIO 9.0 */}
       <div className="lg:col-span-4 glass-panel p-6 flex flex-col justify-between gap-4">
         <div>
           <div className="flex items-center justify-between border-b border-white/10 pb-3 mb-3.5">
@@ -2402,7 +2565,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
                 5D Tensor
               </button>
             </div>
-            <span className="font-mono text-[8px] text-[#f59e0b] uppercase tracking-widest">XDoG ENGINE</span>
+            <span className="font-mono text-[8px] text-[#f59e0b] uppercase tracking-widest">FDoG 9.0</span>
           </div>
 
           {activeTab === "STUDIO" ? (
@@ -2427,12 +2590,12 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
                 <div className="grid grid-cols-2 gap-1.5">
                   {(
                     [
-                      { id: "ESQUIRE_67", label: "Esquire '67 (Pop-Art)", dot: "linear-gradient(135deg,#ff5500,#ffe600)" },
+                      { id: "ESQUIRE_67", label: "Esquire '67 (Pop-Art)", dot: "linear-gradient(135deg,#ff4d00,#ffe600)" },
                       { id: "MADCAP_STENCIL", label: "Madcap (4-Tone Gouache)", dot: "linear-gradient(135deg,#9ea39d,#0d0a09)" },
-                      { id: "TAME_CURRENTS", label: "Currents (Liquid)", dot: "linear-gradient(135deg,#c026d3,#38bdf8)" },
-                      { id: "SIN_CITY", label: "Sin City (Noir Ink)", dot: "linear-gradient(135deg,#ef4444,#09090b)" },
-                      { id: "GOLD_24K", label: "24K Gold Engraving", dot: "linear-gradient(135deg,#f59e0b,#fef08a)" },
-                      { id: "BLUEPRINT", label: "Cyanotype Blueprint", dot: "linear-gradient(135deg,#0284c7,#e0f2fe)" },
+                      { id: "ASTRAL_NEON", label: "Astral Pure Vectors", dot: "linear-gradient(135deg,#c026d3,#38bdf8)" },
+                      { id: "GUILLOCHE_LUX", label: "Guilloché Spirograph", dot: "linear-gradient(135deg,#f59e0b,#fef08a)" },
+                      { id: "SIN_CITY", label: "Sin City Woodcut", dot: "linear-gradient(135deg,#ef4444,#09090b)" },
+                      { id: "BLUEPRINT", label: "Astrolabe Blueprint", dot: "linear-gradient(135deg,#0284c7,#e0f2fe)" },
                     ] as { id: MasterPreset; label: string; dot: string }[]
                   ).map((mp) => (
                     <button
@@ -2453,40 +2616,72 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
                 </div>
               </div>
 
-              {/* 4 графических движка штриха */}
+              {/* 4 МАТЕМАТИЧЕСКИХ ВАРИАЦИИ ТРАССИРОВКИ */}
               <div>
-                <div className="text-neutral-400 mb-1.5">Inking & Shading Technique:</div>
+                <div className="text-neutral-400 mb-1.5">Tracing Paradigm (4 Engines):</div>
                 <div className="grid grid-cols-4 gap-1.5">
                   {(
                     [
-                      { id: "COMIC_XDOG", label: "Comic XDoG" },
-                      { id: "STENCIL_GOUACHE", label: "Stencil" },
-                      { id: "CROSS_HATCH", label: "Cross-Hatch" },
-                      { id: "NEON_LASER", label: "Laser" },
-                    ] as { id: StyleEnginePreset; label: string }[]
-                  ).map((st) => (
+                      { id: "FDOG_COMIC", label: "FDoG Ink" },
+                      { id: "GUILLOCHE", label: "Guilloché" },
+                      { id: "ASTRAL_VECTOR", label: "Pure Vec" },
+                      { id: "WOODCUT", label: "Woodcut" },
+                    ] as { id: TraceVariation; label: string }[]
+                  ).map((tv) => (
                     <button
-                      key={st.id}
+                      key={tv.id}
                       type="button"
-                      onClick={() => updateArt("styleEngine", st.id)}
+                      onClick={() => {
+                        updateArt("traceVariation", tv.id);
+                        stateRef.current.traceProgress = 0;
+                      }}
                       className={
                         "py-1.5 px-1.5 rounded-lg border text-[8px] tracking-wider transition-all cursor-pointer " +
-                        (artConfig.styleEngine === st.id
+                        (artConfig.traceVariation === tv.id
                           ? "bg-[#f59e0b] text-black border-[#f59e0b] font-bold"
                           : "bg-black/40 text-neutral-300 border-white/10 hover:border-white/30")
                       }
                     >
-                      {st.label}
+                      {tv.label}
                     </button>
                   ))}
                 </div>
               </div>
 
-              {/* Ползунки доводки туши, пуантилизма и водных кругов */}
-              <div className="flex flex-col gap-3 pt-1">
+              {/* 4 ЖИВЫХ ФОНОВЫХ ПОЛЯ */}
+              <div>
+                <div className="text-neutral-400 mb-1.5">Living Background Manifold:</div>
+                <div className="grid grid-cols-4 gap-1.5">
+                  {(
+                    [
+                      { id: "SUNBURST", label: "Sunburst" },
+                      { id: "SACRED_RINGS", label: "Astrolabe" },
+                      { id: "LIQUID_AURA", label: "Wave Aura" },
+                      { id: "CLEAN_SOLID", label: "Clean Canvas" },
+                    ] as { id: BgManifoldType; label: string }[]
+                  ).map((bg) => (
+                    <button
+                      key={bg.id}
+                      type="button"
+                      onClick={() => updateArt("bgManifold", bg.id)}
+                      className={
+                        "py-1.5 px-1.5 rounded-lg border text-[8px] tracking-wider transition-all cursor-pointer " +
+                        (artConfig.bgManifold === bg.id
+                          ? "bg-white text-black border-white font-bold"
+                          : "bg-black/40 text-neutral-300 border-white/10 hover:border-white/30")
+                      }
+                    >
+                      {bg.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Ползунки доводки */}
+              <div className="flex flex-col gap-2.5 pt-1">
                 <div className="flex flex-col gap-1">
                   <div className="flex justify-between text-neutral-400">
-                    <span>Black Ink Mass (XDoG Shadows)</span>
+                    <span>Anisotropic FDoG Ink Mass</span>
                     <span className="text-[#f59e0b]">{Math.round(artConfig.inkThreshold * 100)}%</span>
                   </div>
                   <input
@@ -2502,7 +2697,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
 
                 <div className="flex flex-col gap-1">
                   <div className="flex justify-between text-neutral-400">
-                    <span>Stipple & Halftone Shading</span>
+                    <span>Screenprint Halftone Lattice</span>
                     <span className="text-white">{Math.round(artConfig.stippleDensity * 100)}%</span>
                   </div>
                   <input
@@ -2518,7 +2713,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
 
                 <div className="flex flex-col gap-1">
                   <div className="flex justify-between text-neutral-400">
-                    <span>Calligraphic Brush Weight (Hair)</span>
+                    <span>Calligraphic Spline Weight</span>
                     <span className="text-white">{artConfig.strokeWeight.toFixed(2)}x</span>
                   </div>
                   <input
@@ -2553,11 +2748,11 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
             <div className="flex flex-col gap-4 font-mono text-[10px] uppercase tracking-widest">
               {(
                 [
-                  { key: "energy", label: "Energy (Brush & Ripple Speed)" },
-                  { key: "chaos", label: "Chaos (Hair Breeze & Wake)" },
+                  { key: "energy", label: "Energy (Sunburst & Comet Speed)" },
+                  { key: "chaos", label: "Chaos (Guilloché & Breeze Amp)" },
                   { key: "tone", label: "Tone (Spectrum Phase Shift)" },
                   { key: "structure", label: "Structure (Portrait Lock)" },
-                  { key: "symmetry", label: "Symmetry (Wave Frequency)" },
+                  { key: "symmetry", label: "Symmetry (Ray & Wave Count)" },
                 ] as { key: keyof Tensor5D; label: string }[]
               ).map((item) => (
                 <div key={item.key} className="flex flex-col gap-1.5">
@@ -2578,9 +2773,9 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
               ))}
 
               <div className="mt-2 p-3 rounded-xl bg-black/50 border border-white/5 font-mono text-[8px] text-neutral-400 leading-relaxed space-y-1">
-                <div className="text-white uppercase">XDoG & Stencil Differential Kernel:</div>
-                <div>D(x,y) = (1 + p)·G_σ1(I) - p·G_σ2(I) [p = 21]</div>
-                <div>T_xdog = 1 + tanh(φ · (D(x,y) - ε_ink))</div>
+                <div className="text-white uppercase">Anisotropic FDoG & Guilloché Kernel:</div>
+                <div>FDoG(x) = ∫ G_σ(s) · [(1+p)G_1 - pG_2](x + s·t_etf) ds</div>
+                <div>Ψ_guilloche(s,t) = r_0(s) + n(s)·A·sin(ωs - vt)</div>
               </div>
             </div>
           )}

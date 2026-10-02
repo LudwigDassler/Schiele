@@ -2,12 +2,14 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
 
 interface Tensor5D {
-  energy: number;    // E: скорость ламинарного течения и световых импульсов
-  chaos: number;     // C: амплитуда вихревого следа и турбулентности
-  tone: number;      // H: фазовый сдвиг спектра
-  structure: number; // St: жесткость привязки к микро-анатомии объекта
-  symmetry: number;  // Sy: плотность лент Currents и зеркальная ось
+  energy: number;    // E: скорость потоков света и фазовых волн
+  chaos: number;     // C: амплитуда адвекции жидкого шелка и турбулентности
+  tone: number;      // H: фазовый сдвиг спектральной интерференции
+  structure: number; // St: сила удержания четкости объекта (Subject Lock)
+  symmetry: number;  // Sy: частота ламинарных волн и зеркальная симметрия
 }
+
+type MasterPreset = "SYD_1967" | "BLUEPRINT" | "SIN_CITY" | "GOLD_24K" | "DA_VINCI" | "CYBERPUNK";
 
 type PalettePreset =
   | "CURRENTS"
@@ -16,15 +18,17 @@ type PalettePreset =
   | "GOLD"
   | "NOIR"
   | "EMERALD"
+  | "BLUEPRINT"
+  | "SEPIA"
   | "NATIVE"
   | "CUSTOM";
 
-// 4 кардинально разных математических движка отрисовки
-type StyleEnginePreset = "NEON" | "INK_HATCH" | "HALFTONE" | "CHROMATIC";
+type StyleEnginePreset = "RAZOR_VECTOR" | "INK_HATCH" | "HALFTONE" | "RGB_SPLIT";
 type FlowAnimationMode = "COMETS" | "LASER_LOOP" | "PULSE" | "STILL";
-type CanvasTheme = "VOID" | "PAPER";
+type CanvasTheme = "VOID" | "PAPER" | "CYANOTYPE";
 
 interface ArtStudioConfig {
+  master: MasterPreset;
   palette: PalettePreset;
   styleEngine: StyleEnginePreset;
   flowMode: FlowAnimationMode;
@@ -32,9 +36,9 @@ interface ArtStudioConfig {
   posterFrame: boolean;
   primaryHex: string;
   secondaryHex: string;
-  strokeWeight: number;    // 0.35 .. 2.4
-  noiseGate: number;       // 0.02 .. 0.70 (порог мелких деталей)
-  underlayOpacity: number; // 0.0 .. 0.75
+  strokeWeight: number;    // 0.35 .. 2.2
+  noiseGate: number;       // 0.02 .. 0.65
+  subjectClarity: number;  // 0.0 .. 0.85 (четкость исходного образа)
   glowIntensity: number;   // 0.0 .. 1.0
 }
 
@@ -79,7 +83,7 @@ interface ContourStroke {
     nx: number;
     ny: number;
   }[];
-  tier: 1 | 2 | 3; // 1: Силуэт, 2: Микро-анатомия (глаза/гриф/текст), 3: Штриховка объема
+  tier: 1 | 2 | 3;
   r: number;
   g: number;
   b: number;
@@ -95,12 +99,11 @@ interface MatrixBuffer {
   w: number;
   h: number;
   rgba: Uint8ClampedArray;
-  lum: Float32Array;
-  liftedLum: Float32Array; // Вытянутые тени для гитар, волос и темных глаз
-  smoothLum: Float32Array; // Гладкий гидродинамический потенциал для CURRENTS
-  smoothGx: Float32Array;  // Гладкий градиент рельефа по X
-  smoothGy: Float32Array;  // Гладкий градиент рельефа по Y
-  edge: Float32Array;
+  lum: Float32Array;       // Нормализованная яркость без пересветов (Soft-Knee HDR)
+  smoothLum: Float32Array; // Глубоко сглаженный потенциал для жидкого шелка CURRENTS
+  smoothGx: Float32Array;
+  smoothGy: Float32Array;
+  edge: Float32Array;      // 100% точный градиент с локальным вытягиванием теней
   gx: Float32Array;
   gy: Float32Array;
   etfX: Float32Array;
@@ -114,11 +117,11 @@ interface MatrixBuffer {
 type ManifoldTopology =
   | "TRACE"
   | "CURRENTS"
+  | "PIPER"
+  | "PRISM"
   | "SILK"
   | "LIDAR"
-  | "ACID"
   | "ENGRAVE"
-  | "PRISM"
   | "CRYSTAL"
   | "GLYPH";
 
@@ -128,29 +131,19 @@ interface Props {
 }
 
 const PHI = 1.618033988749;
-const SILK_COUNT = 4800;
+const SILK_COUNT = 4600;
 const MATH_GLYPHS = ["∑", "∫", "∂", "∇", "π", "λ", "Φ", "∆", "∞", "Ω", "ψ", "≡", "≈"];
 const VOWELS = new Set(["a", "e", "i", "o", "u", "y", "а", "е", "ё", "и", "о", "у", "ы", "э", "ю", "я"]);
 
-const PALETTE_SWATCHES: { id: PalettePreset; label: string; colors: [string, string] }[] = [
-  { id: "CURRENTS", label: "Currents", colors: ["#c026d3", "#38bdf8"] },
-  { id: "CHROME", label: "Chrome", colors: ["#f8fafc", "#64748b"] },
-  { id: "CYBER", label: "Cyber", colors: ["#ff007f", "#00f5ff"] },
-  { id: "GOLD", label: "Gold", colors: ["#f59e0b", "#fef08a"] },
-  { id: "NOIR", label: "Noir", colors: ["#ef4444", "#ffffff"] },
-  { id: "EMERALD", label: "Emerald", colors: ["#10b981", "#a7f3d0"] },
-  { id: "NATIVE", label: "Native", colors: ["#a855f7", "#ec4899"] },
-  { id: "CUSTOM", label: "Custom", colors: ["#ffffff", "#a855f7"] },
-];
-
+// 7 сбалансированных длин волн Коши (сумма весов нормирована, чтобы исключить белый пересвет!)
 const CAUCHY_SPECTRUM: [number, number, number][] = [
-  [255, 50, 50],
-  [255, 145, 30],
-  [255, 235, 40],
-  [50, 245, 110],
-  [40, 215, 255],
-  [85, 105, 255],
-  [195, 65, 255],
+  [255, 45, 75],   // Ruby Red
+  [255, 135, 25],  // Amber Orange
+  [245, 225, 45],  // Solar Gold
+  [35, 235, 125],  // Emerald Green
+  [30, 210, 255],  // Cyan Ice
+  [75, 105, 255],  // Cobalt Blue
+  [195, 55, 255],  // Deep Violet
 ];
 
 function clip(v: number, min = 0.0, max = 1.0): number {
@@ -162,6 +155,12 @@ function smoothstep(edge0: number, edge1: number, x: number): number {
   return t * t * (3.0 - 2.0 * t);
 }
 
+// Кинематографический компрессор яркости ACES Filmic (полностью исключает выгорание в белый цвет!)
+function acesTonemap(x: number): number {
+  const v = Math.max(0.0, x);
+  return clip((v * (2.51 * v + 0.03)) / (v * (2.43 * v + 0.59) + 0.14), 0.0, 1.0);
+}
+
 function hexToRgb(hex: string): [number, number, number] {
   const clean = hex.replace("#", "");
   const num = parseInt(clean.length === 3 ? clean.replace(/(.)/g, "$1$1") : clean, 16);
@@ -169,7 +168,20 @@ function hexToRgb(hex: string): [number, number, number] {
   return [(num >> 16) & 255, (num >> 8) & 255, num & 255];
 }
 
-// Вычисление цвета с сохранением черного вакуума в тенях (исправляет фиолетовую заливку в SILK!)
+// Тонкопленочная интерференция света в жидкой пленке (Syd Barrett Liquid Light / Tame Impala Iridescence)
+function thinFilmIridescence(phase: number, lum: number, edge: number): [number, number, number] {
+  const p = phase * Math.PI * 2.0;
+  const r = 0.52 + 0.48 * Math.cos(p + 0.0);
+  const g = 0.42 + 0.48 * Math.cos(p - 2.094);
+  const b = 0.58 + 0.42 * Math.cos(p + 2.094);
+  const boost = 0.35 + lum * 0.55 + edge * 0.45;
+  return [
+    Math.min(255, Math.round(acesTonemap(r * boost * 1.4) * 255)),
+    Math.min(255, Math.round(acesTonemap(g * boost * 1.3) * 255)),
+    Math.min(255, Math.round(acesTonemap(b * boost * 1.55) * 255)),
+  ];
+}
+
 function resolveArtColor(
   art: ArtStudioConfig,
   nativeR: number,
@@ -180,58 +192,66 @@ function resolveArtColor(
   toneShift: number,
   preserveDarkness = false
 ): [number, number, number] {
-  const energy = clip(lum * 0.6 + edge * 0.65, 0.0, 1.0);
-  const darkGate = preserveDarkness ? smoothstep(0.02, 0.22, lum + edge * 0.8) : 1.0;
-  const w = clip(energy + (toneShift > 0.02 ? Math.sin(toneShift * Math.PI * 2 + lum * 4) * 0.22 : 0), 0.0, 1.0);
+  const energy = clip(lum * 0.55 + edge * 0.65, 0.0, 1.0);
+  const darkGate = preserveDarkness ? smoothstep(0.02, 0.2, lum + edge * 0.85) : 1.0;
+  const w = clip(energy + (toneShift > 0.02 ? Math.sin(toneShift * Math.PI * 2 + lum * 3.5) * 0.2 : 0), 0.0, 1.0);
+
+  if (art.palette === "SEPIA" || art.theme === "PAPER") {
+    // Архивная тушь Да Винчи / Рембрандта на бумаге (темнее там, где сильнее грань)
+    const inkDarkness = clip(1.0 - edge * 0.75 - (1.0 - lum) * 0.35, 0.08, 0.45);
+    return [
+      Math.round(68 * inkDarkness),
+      Math.round(42 * inkDarkness),
+      Math.round(28 * inkDarkness),
+    ];
+  }
+
+  if (art.palette === "BLUEPRINT" || art.theme === "CYANOTYPE") {
+    // Инженерный чертеж: ослепительно-белый и ледяной циан
+    return [
+      Math.min(255, Math.round(110 + w * 145)),
+      Math.min(255, Math.round(205 + w * 50)),
+      255,
+    ];
+  }
 
   let rOut = nativeR;
   let gOut = nativeG;
   let bOut = nativeB;
 
   if (art.palette === "CHROME") {
-    if (art.theme === "PAPER") {
-      const v = Math.round(12 + (1.0 - w) * 55);
-      return [v, v, v + 5];
-    }
-    const v = Math.min(255, Math.round(150 + w * 105));
-    rOut = Math.max(0, v - 8);
+    const v = Math.min(255, Math.round(145 + w * 110));
+    rOut = Math.max(0, v - 10);
     gOut = v;
-    bOut = Math.min(255, v + 14);
+    bOut = Math.min(255, v + 15);
   } else if (art.palette === "CURRENTS") {
-    if (w < 0.48) {
-      const t = w / 0.48;
-      rOut = Math.round(155 + t * 85);
-      gOut = Math.round(20 + t * 65);
-      bOut = Math.round(210 + t * 45);
-    } else {
-      const t = (w - 0.48) / 0.52;
-      rOut = Math.round(240 - t * 20);
-      gOut = Math.round(85 + t * 165);
-      bOut = 255;
-    }
+    const [irR, irG, irB] = thinFilmIridescence(0.78 + w * 0.55 + toneShift, lum, edge);
+    rOut = irR;
+    gOut = irG;
+    bOut = irB;
   } else if (art.palette === "CYBER") {
-    rOut = Math.min(255, Math.round(255 * (1.0 - w * 0.78) + edge * 45));
-    gOut = Math.min(255, Math.round(20 + w * 235));
-    bOut = Math.min(255, Math.round(155 + w * 100));
+    rOut = Math.min(255, Math.round(255 * (1.0 - w * 0.75) + edge * 50));
+    gOut = Math.min(255, Math.round(25 + w * 230));
+    bOut = Math.min(255, Math.round(165 + w * 90));
   } else if (art.palette === "GOLD") {
-    rOut = Math.min(255, Math.round(190 + w * 65));
-    gOut = Math.min(255, Math.round(130 + w * 110));
-    bOut = Math.min(255, Math.round(30 + w * 150));
+    rOut = Math.min(255, Math.round(195 + w * 60));
+    gOut = Math.min(255, Math.round(140 + w * 105));
+    bOut = Math.min(255, Math.round(35 + w * 140));
   } else if (art.palette === "NOIR") {
-    if (edge > 0.25) {
-      rOut = 255;
-      gOut = Math.round(25 + lum * 55);
-      bOut = Math.round(40 + lum * 55);
+    if (edge > 0.32 && lum < 0.65) {
+      rOut = 245;
+      gOut = 25;
+      bOut = 40;
     } else {
-      const v = Math.round(150 + lum * 105);
+      const v = Math.round(165 + w * 90);
       rOut = v;
       gOut = v;
       bOut = v;
     }
   } else if (art.palette === "EMERALD") {
-    rOut = Math.round(18 + w * 120);
-    gOut = Math.min(255, Math.round(160 + w * 95));
-    bOut = Math.min(255, Math.round(110 + w * 120));
+    rOut = Math.round(20 + w * 115);
+    gOut = Math.min(255, Math.round(165 + w * 90));
+    bOut = Math.min(255, Math.round(115 + w * 115));
   } else if (art.palette === "CUSTOM") {
     const [r1, g1, b1] = hexToRgb(art.primaryHex);
     const [r2, g2, b2] = hexToRgb(art.secondaryHex);
@@ -239,31 +259,11 @@ function resolveArtColor(
     gOut = Math.round(g1 * (1.0 - w) + g2 * w);
     bOut = Math.round(b1 * (1.0 - w) + b2 * w);
   } else {
-    // NATIVE
-    if (toneShift < 0.03) {
-      const boost = art.theme === "PAPER" ? -30 : 55;
-      rOut = clip(nativeR + boost, 0, 255);
-      gOut = clip(nativeG + boost, 0, 255);
-      bOut = clip(nativeB + boost + 12, 0, 255);
-    } else {
-      const theta = toneShift * Math.PI * 2.0 + lum * 1.5;
-      const avg = (nativeR + nativeG + nativeB) * 0.333;
-      const dr = nativeR - avg;
-      const dg = nativeG - avg;
-      const db = nativeB - avg;
-      if (Math.abs(dr) + Math.abs(dg) + Math.abs(db) < 16) {
-        const base = Math.max(120, avg + 55);
-        rOut = Math.min(255, Math.max(20, Math.round(base * (0.78 + 0.48 * Math.sin(theta)))));
-        gOut = Math.min(255, Math.max(20, Math.round(base * (0.78 + 0.48 * Math.sin(theta + 2.094)))));
-        bOut = Math.min(255, Math.max(20, Math.round(base * (0.78 + 0.48 * Math.sin(theta + 4.188)))));
-      } else {
-        const cosT = Math.cos(toneShift * Math.PI * 2.0);
-        const sinT = Math.sin(toneShift * Math.PI * 2.0);
-        rOut = Math.min(255, Math.max(20, Math.round(avg + dr * cosT - dg * sinT + 45)));
-        gOut = Math.min(255, Math.max(20, Math.round(avg + dr * sinT + dg * cosT + 45)));
-        bOut = Math.min(255, Math.max(20, Math.round(avg + db * cosT + dr * sinT * 0.5 + 55)));
-      }
-    }
+    // NATIVE с мягким усилением насыщенности
+    const avg = (nativeR + nativeG + nativeB) * 0.333;
+    rOut = clip(Math.round(avg + (nativeR - avg) * 1.45 + 45), 25, 250);
+    gOut = clip(Math.round(avg + (nativeG - avg) * 1.45 + 45), 25, 250);
+    bOut = clip(Math.round(avg + (nativeB - avg) * 1.45 + 55), 35, 255);
   }
 
   return [
@@ -316,8 +316,8 @@ function compileLexicalManifold(rawText: string): { tensor: Tensor5D; coeffs: Di
   const totalLetters = Math.max(1, vowelCount + consonantCount);
   const consonantRatio = consonantCount / totalLetters;
 
-  const energy = clip(((abs1 % 1000) / 1000) * 0.38 + 0.48, 0.48, 0.88);
-  const chaos = clip((entropy / 4.5) * 0.14 + 0.10, 0.08, 0.28);
+  const energy = clip(((abs1 % 1000) / 1000) * 0.35 + 0.48, 0.48, 0.86);
+  const chaos = clip((entropy / 4.5) * 0.14 + 0.12, 0.10, 0.28);
   const tone = 0.0;
   const structure = clip(0.88 + consonantRatio * 0.10, 0.88, 0.98);
   const symmetry = 0.32;
@@ -375,6 +375,37 @@ function sampleBilinearScalar(field: Float32Array, w: number, h: number, fx: num
   );
 }
 
+function sampleBilinearRGB(
+  rgba: Uint8ClampedArray,
+  w: number,
+  h: number,
+  fx: number,
+  fy: number
+): [number, number, number] {
+  const x0 = Math.max(0, Math.min(w - 1, Math.floor(fx)));
+  const y0 = Math.max(0, Math.min(h - 1, Math.floor(fy)));
+  const x1 = Math.min(w - 1, x0 + 1);
+  const y1 = Math.min(h - 1, y0 + 1);
+  const dx = fx - x0;
+  const dy = fy - y0;
+
+  const p00 = (y0 * w + x0) * 4;
+  const p10 = (y0 * w + x1) * 4;
+  const p01 = (y1 * w + x0) * 4;
+  const p11 = (y1 * w + x1) * 4;
+
+  const w00 = (1 - dx) * (1 - dy);
+  const w10 = dx * (1 - dy);
+  const w01 = (1 - dx) * dy;
+  const w11 = dx * dy;
+
+  return [
+    rgba[p00] * w00 + rgba[p10] * w10 + rgba[p01] * w01 + rgba[p11] * w11,
+    rgba[p00 + 1] * w00 + rgba[p10 + 1] * w10 + rgba[p01 + 1] * w01 + rgba[p11 + 1] * w11,
+    rgba[p00 + 2] * w00 + rgba[p10 + 2] * w10 + rgba[p01 + 2] * w01 + rgba[p11 + 2] * w11,
+  ];
+}
+
 function gaussianBlurField(src: Float32Array, w: number, h: number, passes: number): Float32Array {
   let curr = new Float32Array(src);
   const temp = new Float32Array(w * h);
@@ -407,10 +438,10 @@ function gaussianBlurField(src: Float32Array, w: number, h: number, passes: numb
 }
 
 // ==========================================
-// ДЕКОДИРОВАНИЕ С ЛОКАЛЬНЫМ ВЫТЯГИВАНИЕМ ТЕНЕЙ (RETINEX) + 3-МАСШТАБНЫЙ TRACE 6.0
+// ЯДРО ДЕКОМПОЗИЦИИ С ТОЧНОЙ СКЕЛЕТНОЙ ТРАССИРОВКОЙ КЭННИ (БЕЗ РАЗМЫТИЯ БУКВ И УГЛОВ!)
 // ==========================================
 function buildMatrixFromImage(img: HTMLImageElement, isMobileDevice: boolean): MatrixBuffer {
-  const baseRes = isMobileDevice ? 460 : 580;
+  const baseRes = isMobileDevice ? 480 : 620;
   const aspect = img.width / Math.max(1, img.height);
   let w = baseRes;
   let h = baseRes;
@@ -428,13 +459,10 @@ function buildMatrixFromImage(img: HTMLImageElement, isMobileDevice: boolean): M
   const octx = off.getContext("2d");
 
   const total = w * h;
-  const rawLum = new Float32Array(total);
-  const liftedLum = new Float32Array(total);
+  const lum = new Float32Array(total);
   const edge = new Float32Array(total);
   const gx = new Float32Array(total);
   const gy = new Float32Array(total);
-  const rawTx = new Float32Array(total);
-  const rawTy = new Float32Array(total);
   const etfX = new Float32Array(total);
   const etfY = new Float32Array(total);
   const mask = new Float32Array(total);
@@ -447,9 +475,8 @@ function buildMatrixFromImage(img: HTMLImageElement, isMobileDevice: boolean): M
       w,
       h,
       rgba: new Uint8ClampedArray(total * 4),
-      lum: rawLum,
-      liftedLum,
-      smoothLum: rawLum,
+      lum,
+      smoothLum: lum,
       smoothGx: gx,
       smoothGy: gy,
       edge,
@@ -474,19 +501,20 @@ function buildMatrixFromImage(img: HTMLImageElement, isMobileDevice: boolean): M
   const rawRgba = octx.getImageData(0, 0, w, h).data;
   const sharpRgba = new Uint8ClampedArray(rawRgba.length);
 
+  // 1. HDR-нормализация яркости (Soft-Knee): вытягивает темные гитары/лица И защищает яркие бриллианты от выгорания!
   for (let y = 0; y < h; y++) {
     const ny = (y / (h - 1)) * 2.0 - 1.0;
-    const wy = Math.abs(ny) > 0.91 ? Math.max(0, Math.cos(((Math.abs(ny) - 0.91) / 0.09) * (Math.PI * 0.5))) : 1.0;
+    const wy = Math.abs(ny) > 0.92 ? Math.max(0, Math.cos(((Math.abs(ny) - 0.92) / 0.08) * (Math.PI * 0.5))) : 1.0;
     for (let x = 0; x < w; x++) {
       const nx = (x / (w - 1)) * 2.0 - 1.0;
-      const wx = Math.abs(nx) > 0.91 ? Math.max(0, Math.cos(((Math.abs(nx) - 0.91) / 0.09) * (Math.PI * 0.5))) : 1.0;
+      const wx = Math.abs(nx) > 0.92 ? Math.max(0, Math.cos(((Math.abs(nx) - 0.92) / 0.08) * (Math.PI * 0.5))) : 1.0;
       const i = y * w + x;
       mask[i] = wx * wy;
       const p = i * 4;
-      const l = (0.299 * rawRgba[p] + 0.587 * rawRgba[p + 1] + 0.114 * rawRgba[p + 2]) / 255.0;
-      rawLum[i] = l * mask[i];
-      // Нелинейная гамма-компрессия (вытягивает темный гриф гитары, глаза и складки одежды!)
-      liftedLum[i] = Math.pow(l, 0.62) * mask[i];
+      const rawL = (0.299 * rawRgba[p] + 0.587 * rawRgba[p + 1] + 0.114 * rawRgba[p + 2]) / 255.0;
+      // Кривая с подъемом теней и мягким потолком в светах
+      const balancedL = Math.pow(rawL, 0.68) / (1.0 + 0.25 * rawL * rawL);
+      lum[i] = clip(balancedL * 1.18) * mask[i];
 
       sharpRgba[p] = rawRgba[p];
       sharpRgba[p + 1] = rawRgba[p + 1];
@@ -495,15 +523,8 @@ function buildMatrixFromImage(img: HTMLImageElement, isMobileDevice: boolean): M
     }
   }
 
-  // Легкое подавление JPEG-блоков с сохранением микро-резкости
-  const cleanLifted = gaussianBlurField(liftedLum, w, h, 1);
-  for (let i = 0; i < total; i++) {
-    // Смешиваем 65% сглаженного и 35% субпиксельного сигнала для сохранения мелкого шрифта и глаз
-    liftedLum[i] = cleanLifted[i] * 0.65 + liftedLum[i] * 0.35;
-  }
-
-  // Глубоко сглаженный потенциал и его аналитические производные для CURRENTS 5.0
-  const smoothLum = gaussianBlurField(rawLum, w, h, 10);
+  // Глубоко сглаженный потенциал для жидкого обтекания CURRENTS (14 проходов = идеальный шелк без ряби!)
+  const smoothLum = gaussianBlurField(lum, w, h, 14);
   const smoothGx = new Float32Array(total);
   const smoothGy = new Float32Array(total);
   for (let y = 1; y < h - 1; y++) {
@@ -514,7 +535,7 @@ function buildMatrixFromImage(img: HTMLImageElement, isMobileDevice: boolean): M
     }
   }
 
-  // Оператор Щарра по вытянутому полю liftedLum
+  // 2. Оператор Щарра по НЕРАЗМЫТОМУ полю lum (сохраняет 100% четкость мелких букв, зрачков и граней алмаза!)
   const rawGradMag = new Float32Array(total);
   let globalMaxEdge = 1e-5;
 
@@ -522,13 +543,13 @@ function buildMatrixFromImage(img: HTMLImageElement, isMobileDevice: boolean): M
     for (let x = 1; x < w - 1; x++) {
       const idx = y * w + x;
       const sx =
-        -3 * liftedLum[(y - 1) * w + (x - 1)] + 3 * liftedLum[(y - 1) * w + (x + 1)] +
-        -10 * liftedLum[y * w + (x - 1)] + 10 * liftedLum[y * w + (x + 1)] +
-        -3 * liftedLum[(y + 1) * w + (x - 1)] + 3 * liftedLum[(y + 1) * w + (x + 1)];
+        -3 * lum[(y - 1) * w + (x - 1)] + 3 * lum[(y - 1) * w + (x + 1)] +
+        -10 * lum[y * w + (x - 1)] + 10 * lum[y * w + (x + 1)] +
+        -3 * lum[(y + 1) * w + (x - 1)] + 3 * lum[(y + 1) * w + (x + 1)];
 
       const sy =
-        -3 * liftedLum[(y - 1) * w + (x - 1)] - 10 * liftedLum[(y - 1) * w + x] - 3 * liftedLum[(y - 1) * w + (x + 1)] +
-        3 * liftedLum[(y + 1) * w + (x - 1)] + 10 * liftedLum[(y + 1) * w + x] + 3 * liftedLum[(y + 1) * w + (x + 1)];
+        -3 * lum[(y - 1) * w + (x - 1)] - 10 * lum[(y - 1) * w + x] - 3 * lum[(y - 1) * w + (x + 1)] +
+        3 * lum[(y + 1) * w + (x - 1)] + 10 * lum[(y + 1) * w + x] + 3 * lum[(y + 1) * w + (x + 1)];
 
       const mag = Math.sqrt(sx * sx + sy * sy) * mask[idx];
       rawGradMag[idx] = mag;
@@ -537,187 +558,163 @@ function buildMatrixFromImage(img: HTMLImageElement, isMobileDevice: boolean): M
       const norm = mag + 1e-6;
       gx[idx] = sx / norm;
       gy[idx] = sy / norm;
-      rawTx[idx] = -sy / norm;
-      rawTy[idx] = sx / norm;
+      etfX[idx] = -sy / norm;
+      etfY[idx] = sx / norm;
     }
   }
 
-  // ЛОКАЛЬНО-АДАПТИВНАЯ НОРМАЛИЗАЦИЯ ГРАДИЕНТА (RETINEX ENVELOPE):
-  // Позволяет одновременно видеть и яркий контур белой куртки, и темный гриф гитары, и мелкие черты лица,
-  // но при этом полностью отсекает пустой черный фон!
-  const localEnv = gaussianBlurField(rawGradMag, w, h, 6);
-  const absNoiseCutoff = globalMaxEdge * 0.032;
+  // Локально-адаптивная нормализация граней (Retinex) с отсечением фонового шума
+  const localEnv = gaussianBlurField(rawGradMag, w, h, 7);
+  const absFloor = globalMaxEdge * 0.038;
 
   for (let i = 0; i < total; i++) {
     const gVal = rawGradMag[i];
-    if (gVal < absNoiseCutoff) {
+    if (gVal < absFloor) {
       edge[i] = 0.0;
     } else {
-      const denom = Math.max(globalMaxEdge * 0.16, localEnv[i] * 2.1 + globalMaxEdge * 0.08);
-      edge[i] = clip((gVal - absNoiseCutoff * 0.7) / denom);
+      const denom = Math.max(globalMaxEdge * 0.18, localEnv[i] * 2.2 + globalMaxEdge * 0.08);
+      edge[i] = clip((gVal - absFloor * 0.75) / denom);
+    }
+    if (edge[i] > 0.12 || (lum[i] > 0.18 && edge[i] > 0.04)) {
+      spawnIndices.push(i);
     }
   }
 
-  // Поле касательных ETF (1 компактный проход 3x3, чтобы не размывать мелкие буквы и зрачки!)
+  // ==========================================
+  // ТОЧНАЯ 1-ПИКСЕЛЬНАЯ СКЕЛЕТНАЯ ВЕКТОРИЗАЦИЯ КЭННИ С СОХРАНЕНИЕМ УГЛОВ И ШРИФТОВ!
+  // ==========================================
+  // Вместо интеграции размытого поля ETF (которая скручивала буквы в макароны),
+  // мы выделяем строгий 1-пиксельный гребень градиента (Canny Ridge Skeleton) и связываем соседние пиксели
+  // с субпиксельной параболической поправкой!
+  const isRidgeMap = new Uint8Array(total);
+  const subOffsetX = new Float32Array(total);
+  const subOffsetY = new Float32Array(total);
+  const ridgeSeeds: { idx: number; score: number; tier: 1 | 2 }[] = [];
+
   for (let y = 2; y < h - 2; y++) {
     for (let x = 2; x < w - 2; x++) {
-      const idx = y * w + x;
-      let sumX = 0;
-      let sumY = 0;
-      const refX = rawTx[idx];
-      const refY = rawTy[idx];
-
-      for (let ky = -1; ky <= 1; ky++) {
-        const rowOffset = (y + ky) * w;
-        for (let kx = -1; kx <= 1; kx++) {
-          const nIdx = rowOffset + (x + kx);
-          const wgt = edge[nIdx] * edge[nIdx] + 0.01;
-          const dot = refX * rawTx[nIdx] + refY * rawTy[nIdx];
-          const sign = dot >= 0 ? 1 : -1;
-          sumX += rawTx[nIdx] * wgt * sign;
-          sumY += rawTy[nIdx] * wgt * sign;
-        }
-      }
-      const len = Math.sqrt(sumX * sumX + sumY * sumY) + 1e-6;
-      etfX[idx] = sumX / len;
-      etfY[idx] = sumY / len;
-
-      if (edge[idx] > 0.12 || (rawLum[idx] > 0.18 && edge[idx] > 0.04)) {
-        spawnIndices.push(idx);
-      }
-    }
-  }
-
-  // ==========================================
-  // 3-МАСШТАБНЫЙ ТРАССИРОВЩИК TRACE 6.0 (СИЛУЭТ + МИКРО-АНАТОМИЯ ЛИЦ/ГИТАР/ТЕКСТА + ШТРИХОВКА)
-  // ==========================================
-  const visited = new Uint8Array(total);
-  const macroSeeds: { idx: number; score: number }[] = [];
-  const microSeeds: { idx: number; score: number }[] = [];
-  const shadeSeeds: { idx: number; score: number }[] = [];
-
-  for (let y = 3; y < h - 3; y++) {
-    for (let x = 3; x < w - 3; x++) {
       const i = y * w + x;
-      if (mask[i] < 0.05) continue;
-      const e = edge[i];
-      const l = liftedLum[i];
+      const e0 = edge[i];
+      if (e0 < 0.055 || mask[i] < 0.05) continue;
 
       const nx = Math.round(gx[i]);
       const ny = Math.round(gy[i]);
+      if (nx === 0 && ny === 0) continue;
+
       const ePrev = edge[(y - ny) * w + (x - nx)];
       const eNext = edge[(y + ny) * w + (x + nx)];
-      const isMax = e >= ePrev * 0.96 && e >= eNext * 0.96;
 
-      if (isMax && e > 0.22) {
-        macroSeeds.push({ idx: i, score: e * 2.5 });
-      } else if (isMax && e > 0.065) {
-        // Микро-семена для глаз, губ, пальцев, ладов гитары и мелких букв
-        microSeeds.push({ idx: i, score: e * 1.8 + l * 0.3 });
-      } else if (l > 0.14 && e > 0.025 && (x % 3 === 0) && (y % 3 === 0)) {
-        shadeSeeds.push({ idx: i, score: l * 0.7 + e });
+      // Строгий локальный максимум вдоль нормали градиента (толщина строго 1 пиксель!)
+      if (e0 >= ePrev && e0 > eNext) {
+        isRidgeMap[i] = 1;
+        // Субпиксельная параболическая интерполяция вершины пика (-0.45 .. +0.45 px)
+        const denom = 2.0 * (ePrev - 2.0 * e0 + eNext);
+        const offset = Math.abs(denom) > 1e-4 ? clip((ePrev - eNext) / denom, -0.45, 0.45) : 0.0;
+        subOffsetX[i] = gx[i] * offset;
+        subOffsetY[i] = gy[i] * offset;
+
+        const tier: 1 | 2 = e0 > 0.22 ? 1 : 2;
+        ridgeSeeds.push({ idx: i, score: e0, tier });
       }
     }
   }
 
-  macroSeeds.sort((a, b) => b.score - a.score);
-  microSeeds.sort((a, b) => b.score - a.score);
-  shadeSeeds.sort((a, b) => b.score - a.score);
+  ridgeSeeds.sort((a, b) => b.score - a.score);
 
-  const traceAdaptiveChain = (
-    startX: number,
-    startY: number,
-    dirSign: number,
-    maxSteps: number,
-    stepPx: number,
-    minEdge: number,
-    angleCosCutoff: number,
-    markNeighbors: boolean
-  ) => {
-    const rawChain: { x: number; y: number }[] = [];
-    let cx = startX + 0.5;
-    let cy = startY + 0.5;
+  // 8-связный обход соседей по касательной с сохранением острых углов граней и букв
+  const DIRS_8: [number, number][] = [
+    [1, 0], [1, 1], [0, 1], [-1, 1],
+    [-1, 0], [-1, -1], [0, -1], [1, -1],
+  ];
+  const visited = new Uint8Array(total);
 
-    let prevTx = sampleBilinearScalar(etfX, w, h, cx, cy) * dirSign;
-    let prevTy = sampleBilinearScalar(etfY, w, h, cx, cy) * dirSign;
-    const initNorm = Math.sqrt(prevTx * prevTx + prevTy * prevTy) + 1e-6;
-    prevTx /= initNorm;
-    prevTy /= initNorm;
+  const tracePixelSkeleton = (startIdx: number, dirSign: number, maxLen: number) => {
+    const chain: { x: number; y: number }[] = [];
+    let currIdx = startIdx;
+    let cx = currIdx % w;
+    let cy = Math.floor(currIdx / w);
 
-    for (let s = 0; s < maxSteps; s++) {
-      const ix = Math.floor(cx);
-      const iy = Math.floor(cy);
-      if (ix < 2 || ix >= w - 2 || iy < 2 || iy >= h - 2) break;
+    let prevDx = etfX[currIdx] * dirSign;
+    let prevDy = etfY[currIdx] * dirSign;
 
-      const cIdx = iy * w + ix;
-      if (mask[cIdx] < 0.04) break;
+    for (let step = 0; step < maxLen; step++) {
+      visited[currIdx] = 1;
+      chain.push({
+        x: cx + 0.5 + subOffsetX[currIdx],
+        y: cy + 0.5 + subOffsetY[currIdx],
+      });
 
-      const curEdge = sampleBilinearScalar(edge, w, h, cx, cy);
-      if (curEdge < minEdge) break;
+      let bestNextIdx = -1;
+      let bestScore = -1.0;
+      let bestDx = 0;
+      let bestDy = 0;
 
-      let tx = sampleBilinearScalar(etfX, w, h, cx, cy) * dirSign;
-      let ty = sampleBilinearScalar(etfY, w, h, cx, cy) * dirSign;
-      const tLen = Math.sqrt(tx * tx + ty * ty) + 1e-6;
-      tx /= tLen;
-      ty /= tLen;
+      for (let d = 0; d < 8; d++) {
+        const dx = DIRS_8[d][0];
+        const dy = DIRS_8[d][1];
+        const nx = cx + dx;
+        const ny = cy + dy;
+        if (nx < 2 || nx >= w - 2 || ny < 2 || ny >= h - 2) continue;
 
-      if (tx * prevTx + ty * prevTy < 0) {
-        tx = -tx;
-        ty = -ty;
-      }
-      if (s > 0 && tx * prevTx + ty * prevTy < angleCosCutoff) break;
+        const nIdx = ny * w + nx;
+        if (visited[nIdx] || !isRidgeMap[nIdx]) continue;
 
-      const blend = markNeighbors ? 0.45 : 0.22; // На микро-деталях меньше инерция, чтобы точно огибать буквы и зрачки!
-      const smoothTx = prevTx * blend + tx * (1.0 - blend);
-      const smoothTy = prevTy * blend + ty * (1.0 - blend);
-      const normT = Math.sqrt(smoothTx * smoothTx + smoothTy * smoothTy) + 1e-6;
-      const finalTx = smoothTx / normT;
-      const finalTy = smoothTy / normT;
+        const dLen = Math.hypot(dx, dy);
+        const ndx = dx / dLen;
+        const ndy = dy / dLen;
+        const align = ndx * prevDx + ndy * prevDy;
 
-      prevTx = finalTx;
-      prevTy = finalTy;
-
-      visited[cIdx] = 1;
-      if (markNeighbors) {
-        const nOffX = Math.round(-finalTy);
-        const nOffY = Math.round(finalTx);
-        visited[(iy + nOffY) * w + (ix + nOffX)] = 1;
-        visited[(iy - nOffY) * w + (ix - nOffX)] = 1;
+        // Разрешаем плавные изгибы букв и граней (до 75 градусов за шаг)
+        if (align > 0.22) {
+          const score = align * 0.65 + edge[nIdx] * 0.35;
+          if (score > bestScore) {
+            bestScore = score;
+            bestNextIdx = nIdx;
+            bestDx = ndx;
+            bestDy = ndy;
+          }
+        }
       }
 
-      rawChain.push({ x: cx, y: cy });
-
-      const nX = -finalTy;
-      const nY = finalTx;
-      const ePlus = sampleBilinearScalar(edge, w, h, cx + nX * 0.7, cy + nY * 0.7);
-      const eMinus = sampleBilinearScalar(edge, w, h, cx - nX * 0.7, cy - nY * 0.7);
-      const ridgePull = (ePlus - eMinus) * 0.3;
-
-      cx += finalTx * stepPx + nX * ridgePull;
-      cy += finalTy * stepPx + nY * ridgePull;
+      if (bestNextIdx === -1) break;
+      currIdx = bestNextIdx;
+      cx = currIdx % w;
+      cy = Math.floor(currIdx / w);
+      prevDx = prevDx * 0.35 + bestDx * 0.65;
+      prevDy = prevDy * 0.35 + bestDy * 0.65;
+      const norm = Math.hypot(prevDx, prevDy) + 1e-6;
+      prevDx /= norm;
+      prevDy /= norm;
     }
-    return rawChain;
+
+    return chain;
   };
 
-  const taubinSmoothAndNormals = (rawPts: { x: number; y: number }[], iterations: number) => {
+  // Сглаживание С-сохранением-углов (Bilateral Curve Filter):
+  // Убирает микро-ступеньки пиксельной сетки (0.5px), но НЕ скругляет острые вершины ромба и углы букв!
+  const bilateralCornerPreservingSmooth = (rawPts: { x: number; y: number }[]) => {
     let curr = rawPts.map((p) => ({ x: p.x, y: p.y }));
     const n = curr.length;
     if (n < 3) return [];
 
-    const applyLaplacianStep = (pts: { x: number; y: number }[], weight: number) => {
-      const next = pts.map((pt) => ({ x: pt.x, y: pt.y }));
+    for (let pass = 0; pass < 2; pass++) {
+      const next = curr.map((pt) => ({ x: pt.x, y: pt.y }));
       for (let i = 1; i < n - 1; i++) {
-        const lapX = 0.5 * (pts[i - 1].x + pts[i + 1].x) - pts[i].x;
-        const lapY = 0.5 * (pts[i - 1].y + pts[i + 1].y) - pts[i].y;
-        next[i].x = pts[i].x + weight * lapX;
-        next[i].y = pts[i].y + weight * lapY;
-      }
-      return next;
-    };
+        const vx1 = curr[i].x - curr[i - 1].x;
+        const vy1 = curr[i].y - curr[i - 1].y;
+        const vx2 = curr[i + 1].x - curr[i].x;
+        const vy2 = curr[i + 1].y - curr[i].y;
+        const l1 = Math.hypot(vx1, vy1) + 1e-5;
+        const l2 = Math.hypot(vx2, vy2) + 1e-5;
+        const cosAngle = (vx1 * vx2 + vy1 * vy2) / (l1 * l2);
 
-    for (let it = 0; it < iterations; it++) {
-      curr = applyLaplacianStep(curr, 0.45);
-      curr = applyLaplacianStep(curr, -0.47);
+        // Если это острый угол буквы или вершина ромба (cosAngle < 0.65) — НЕ трогаем вершину!
+        if (cosAngle > 0.65) {
+          next[i].x = 0.25 * curr[i - 1].x + 0.5 * curr[i].x + 0.25 * curr[i + 1].x;
+          next[i].y = 0.25 * curr[i - 1].y + 0.5 * curr[i].y + 0.25 * curr[i + 1].y;
+        }
+      }
+      curr = next;
     }
 
     const result: { u: number; v: number; nx: number; ny: number }[] = [];
@@ -726,7 +723,7 @@ function buildMatrixFromImage(img: HTMLImageElement, isMobileDevice: boolean): M
       const pNext = curr[Math.min(n - 1, i + 1)];
       const dx = pNext.x - pPrev.x;
       const dy = pNext.y - pPrev.y;
-      const len = Math.sqrt(dx * dx + dy * dy) + 1e-6;
+      const len = Math.hypot(dx, dy) + 1e-6;
       result.push({
         u: curr[i].x / w,
         v: curr[i].y / h,
@@ -737,98 +734,105 @@ function buildMatrixFromImage(img: HTMLImageElement, isMobileDevice: boolean): M
     return result;
   };
 
-  const buildStrokeTier = (
-    seeds: { idx: number; score: number }[],
-    tier: 1 | 2 | 3,
-    maxCount: number,
-    halfSteps: number,
-    stepPx: number,
-    minEdge: number,
-    minPts: number,
-    angleCutoff: number,
-    taubinIters: number,
-    markNeighbors: boolean
-  ) => {
-    let added = 0;
-    for (let i = 0; i < seeds.length && added < maxCount; i++) {
-      const seedIdx = seeds[i].idx;
-      if (visited[seedIdx]) continue;
+  const maxStrokes = isMobileDevice ? 2400 : 3800;
+  for (let i = 0; i < ridgeSeeds.length && strokes.length < maxStrokes; i++) {
+    const seed = ridgeSeeds[i];
+    if (visited[seed.idx]) continue;
 
-      const sx = seedIdx % w;
-      const sy = Math.floor(seedIdx / w);
+    const back = tracePixelSkeleton(seed.idx, -1, 90).reverse();
+    const fwd = tracePixelSkeleton(seed.idx, 1, 90);
+    const rawPts = [...back, ...(fwd.length > 1 ? fwd.slice(1) : [])];
 
-      const back = traceAdaptiveChain(sx, sy, -1, halfSteps, stepPx, minEdge, angleCutoff, markNeighbors).reverse();
-      const fwd = traceAdaptiveChain(sx, sy, 1, halfSteps, stepPx, minEdge, angleCutoff, markNeighbors);
-      const rawPts = [...back, ...(fwd.length > 1 ? fwd.slice(1) : [])];
+    if (rawPts.length < 3) continue;
 
-      if (rawPts.length < minPts) continue;
+    const pts = bilateralCornerPreservingSmooth(rawPts);
+    if (pts.length < 3) continue;
 
-      const pts = taubinSmoothAndNormals(rawPts, taubinIters);
-      if (pts.length < minPts) continue;
+    let eSum = 0;
+    let lSum = 0;
+    let rSum = 0;
+    let gSum = 0;
+    let bSum = 0;
 
-      let eSum = 0;
-      let lSum = 0;
-      let rSum = 0;
-      let gSum = 0;
-      let bSum = 0;
-
-      for (let k = 0; k < pts.length; k++) {
-        const pxIdx = Math.min(h - 1, Math.max(0, Math.floor(pts[k].v * h))) * w + Math.min(w - 1, Math.max(0, Math.floor(pts[k].u * w)));
-        eSum += edge[pxIdx];
-        lSum += liftedLum[pxIdx];
-        const p4 = pxIdx * 4;
-        rSum += sharpRgba[p4];
-        gSum += sharpRgba[p4 + 1];
-        bSum += sharpRgba[p4 + 2];
-      }
-
-      const n = pts.length;
-      const meanEdge = eSum / n;
-      const arcLen = n * stepPx;
-      const importance =
-        tier === 1
-          ? clip(0.35 + meanEdge * 1.1)
-          : tier === 2
-          ? clip(0.18 + meanEdge * 0.95)
-          : clip(0.08 + meanEdge * 0.7);
-
-      strokes.push({
-        pts,
-        tier,
-        r: Math.round(rSum / n),
-        g: Math.round(gSum / n),
-        b: Math.round(bSum / n),
-        meanEdge,
-        meanLum: lSum / n,
-        importance,
-        phase: (strokes.length * PHI) % (Math.PI * 2),
-        speed: 0.6 + ((strokes.length * 7) % 13) * 0.07,
-        arcLen,
-      });
-      added++;
+    for (let k = 0; k < pts.length; k++) {
+      const pxIdx = Math.min(h - 1, Math.max(0, Math.floor(pts[k].v * h))) * w + Math.min(w - 1, Math.max(0, Math.floor(pts[k].u * w)));
+      eSum += edge[pxIdx];
+      lSum += lum[pxIdx];
+      const p4 = pxIdx * 4;
+      rSum += sharpRgba[p4];
+      gSum += sharpRgba[p4 + 1];
+      bSum += sharpRgba[p4 + 2];
     }
-  };
 
-  const budgetMult = isMobileDevice ? 0.65 : 1.0;
-  // 1. Силуэт и главные линии (плавные, длинные)
-  buildStrokeTier(macroSeeds, 1, Math.floor(1100 * budgetMult), 58, 1.3, 0.08, 4, 0.25, 3, true);
-  // 2. Ювелирная микро-детализация (глаза, ноздри, губы, гриф гитары, струны, мелкий шрифт!)
-  buildStrokeTier(microSeeds, 2, Math.floor(1550 * budgetMult), 28, 0.85, 0.035, 3, -0.12, 1, false);
-  // 3. Внутренняя пластика объема и теней
-  buildStrokeTier(shadeSeeds, 3, Math.floor(750 * budgetMult), 16, 1.35, 0.02, 4, 0.2, 2, true);
+    const n = pts.length;
+    const meanEdge = eSum / n;
+    const arcLen = n;
+    const importance = clip(meanEdge * 1.15 + Math.min(0.35, arcLen / 80.0));
 
-  // Сортируем от центра к краям для гипнотического раскрытия рисунка
+    strokes.push({
+      pts,
+      tier: seed.tier,
+      r: Math.round(rSum / n),
+      g: Math.round(gSum / n),
+      b: Math.round(bSum / n),
+      meanEdge,
+      meanLum: lSum / n,
+      importance,
+      phase: (strokes.length * PHI) % (Math.PI * 2),
+      speed: 0.65 + ((strokes.length * 7) % 13) * 0.06,
+      arcLen,
+    });
+  }
+
+  // Добавляем деликатную гравировку полутонов (Tier 3) вдоль изофот для объема лиц и одежды
+  for (let y = 6; y < h - 6; y += 5) {
+    for (let x = 6; x < w - 6; x += 5) {
+      if (strokes.length >= maxStrokes + 600) break;
+      const idx = y * w + x;
+      if (visited[idx] || mask[idx] < 0.1 || lum[idx] < 0.18 || edge[idx] < 0.03) continue;
+
+      const hatchPts: { u: number; v: number; nx: number; ny: number }[] = [];
+      let cx = x + 0.5;
+      let cy = y + 0.5;
+      for (let s = 0; s < 10; s++) {
+        const ix = Math.min(w - 1, Math.max(0, Math.floor(cx)));
+        const iy = Math.min(h - 1, Math.max(0, Math.floor(cy)));
+        const cIdx = iy * w + ix;
+        const tx = etfX[cIdx];
+        const ty = etfY[cIdx];
+        hatchPts.push({ u: cx / w, v: cy / h, nx: -ty, ny: tx });
+        cx += tx * 1.4;
+        cy += ty * 1.4;
+      }
+      const p4 = idx * 4;
+      strokes.push({
+        pts: hatchPts,
+        tier: 3,
+        r: sharpRgba[p4],
+        g: sharpRgba[p4 + 1],
+        b: sharpRgba[p4 + 2],
+        meanEdge: edge[idx],
+        meanLum: lum[idx],
+        importance: clip(lum[idx] * 0.45),
+        phase: (strokes.length * PHI) % (Math.PI * 2),
+        speed: 0.5,
+        arcLen: 14,
+      });
+    }
+  }
+
+  // Сортируем от центра к краям
   strokes.sort((a, b) => {
     const da = Math.hypot(a.pts[0].u - 0.5, a.pts[0].v - 0.45);
     const db = Math.hypot(b.pts[0].u - 0.5, b.pts[0].v - 0.45);
-    return (da - db) * 0.55 + (b.importance - a.importance) * 0.45;
+    return (da - db) * 0.5 + (b.importance - a.importance) * 0.5;
   });
 
   const baseStep = 12;
   for (let y = baseStep; y < h - baseStep; y += baseStep) {
     for (let x = baseStep; x < w - baseStep; x += baseStep) {
       const idx = y * w + x;
-      if (mask[idx] < 0.06 || (liftedLum[idx] < 0.05 && edge[idx] < 0.06)) continue;
+      if (mask[idx] < 0.06 || (lum[idx] < 0.05 && edge[idx] < 0.06)) continue;
 
       if (edge[idx] > 0.22) {
         const sub = 5;
@@ -845,7 +849,7 @@ function buildMatrixFromImage(img: HTMLImageElement, isMobileDevice: boolean): M
             r: sharpRgba[sp],
             g: sharpRgba[sp + 1],
             b: sharpRgba[sp + 2],
-            lum: liftedLum[sIdx],
+            lum: lum[sIdx],
             edge: edge[sIdx],
             tx: etfX[sIdx],
             ty: etfY[sIdx],
@@ -860,7 +864,7 @@ function buildMatrixFromImage(img: HTMLImageElement, isMobileDevice: boolean): M
           r: sharpRgba[p],
           g: sharpRgba[p + 1],
           b: sharpRgba[p + 2],
-          lum: liftedLum[idx],
+          lum: lum[idx],
           edge: edge[idx],
           tx: etfX[idx],
           ty: etfY[idx],
@@ -873,8 +877,7 @@ function buildMatrixFromImage(img: HTMLImageElement, isMobileDevice: boolean): M
     w,
     h,
     rgba: sharpRgba,
-    lum: rawLum,
-    liftedLum,
+    lum,
     smoothLum,
     smoothGx,
     smoothGy,
@@ -890,36 +893,6 @@ function buildMatrixFromImage(img: HTMLImageElement, isMobileDevice: boolean): M
   };
 }
 
-function sampleBilinearRGB(
-  rgba: Uint8ClampedArray,
-  w: number,
-  h: number,
-  fx: number,
-  fy: number
-): [number, number, number] {
-  const x0 = Math.max(0, Math.min(w - 1, Math.floor(fx)));
-  const y0 = Math.max(0, Math.min(h - 1, Math.floor(fy)));
-  const x1 = Math.min(w - 1, x0 + 1);
-  const y1 = Math.min(h - 1, y0 + 1);
-  const dx = fx - x0;
-  const dy = fy - y0;
-
-  const p00 = (y0 * w + x0) * 4;
-  const p10 = (y0 * w + x1) * 4;
-  const p01 = (y1 * w + x0) * 4;
-  const p11 = (y1 * w + x1) * 4;
-
-  const w00 = (1 - dx) * (1 - dy);
-  const w10 = dx * (1 - dy);
-  const w01 = (1 - dx) * dy;
-  const w11 = dx * dy;
-
-  const r = rgba[p00] * w00 + rgba[p10] * w10 + rgba[p01] * w01 + rgba[p11] * w11;
-  const g = rgba[p00 + 1] * w00 + rgba[p10 + 1] * w10 + rgba[p01 + 1] * w01 + rgba[p11 + 1] * w11;
-  const b = rgba[p00 + 2] * w00 + rgba[p10 + 2] * w10 + rgba[p01 + 2] * w01 + rgba[p11 + 2] * w11;
-  return [r, g, b];
-}
-
 export default function BarrettEngine({ query, onSecureArtifact }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -932,17 +905,18 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
   const [activeTab, setActiveTab] = useState<"STUDIO" | "PHYSICS">("STUDIO");
 
   const [artConfig, setArtConfig] = useState<ArtStudioConfig>({
+    master: "SYD_1967",
     palette: "CURRENTS",
-    styleEngine: "NEON",
+    styleEngine: "RAZOR_VECTOR",
     flowMode: "COMETS",
     theme: "VOID",
     posterFrame: true,
     primaryHex: "#c026d3",
     secondaryHex: "#38bdf8",
-    strokeWeight: 1.0,
-    noiseGate: 0.14, // Низкий порог по умолчанию, чтобы все черты лица, гриф гитары и текст были видны сразу!
-    underlayOpacity: 0.18,
-    glowIntensity: 0.75,
+    strokeWeight: 0.85,    // Изящная бритвенная линия по умолчанию (не слипается на буквах!)
+    noiseGate: 0.08,       // Все мелкие детали лица, текста и граней алмаза открыты!
+    subjectClarity: 0.36,  // Глубокий рельеф объекта под векторными нитями
+    glowIntensity: 0.65,
   });
 
   const [isRecording, setIsRecording] = useState(false);
@@ -970,14 +944,97 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
     mouseActive: false,
     smoothYaw: 0,
     smoothPitch: -0.18,
-    wakeU: 0.5,
-    wakeV: 0.5,
-    wakeVelU: 0.0,
-    wakeVelV: 0.0,
+    fluidU: 0.5,
+    fluidV: 0.5,
+    fluidVelU: 0.0,
+    fluidVelV: 0.0,
   });
 
+  // Применение одного из 6 мастер-пресетов в 1 клик (радикальная смена всего визуального стиля!)
+  const applyMasterPreset = (preset: MasterPreset) => {
+    let next: ArtStudioConfig = { ...artConfig, master: preset };
+    if (preset === "SYD_1967") {
+      next = {
+        ...next,
+        palette: "CURRENTS",
+        styleEngine: "RAZOR_VECTOR",
+        flowMode: "COMETS",
+        theme: "VOID",
+        strokeWeight: 0.85,
+        noiseGate: 0.08,
+        subjectClarity: 0.36,
+        glowIntensity: 0.72,
+      };
+    } else if (preset === "BLUEPRINT") {
+      next = {
+        ...next,
+        palette: "BLUEPRINT",
+        styleEngine: "RAZOR_VECTOR",
+        flowMode: "LASER_LOOP",
+        theme: "CYANOTYPE",
+        strokeWeight: 0.75,
+        noiseGate: 0.06,
+        subjectClarity: 0.22,
+        glowIntensity: 0.45,
+      };
+    } else if (preset === "SIN_CITY") {
+      next = {
+        ...next,
+        palette: "NOIR",
+        styleEngine: "INK_HATCH",
+        flowMode: "PULSE",
+        theme: "VOID",
+        strokeWeight: 1.05,
+        noiseGate: 0.1,
+        subjectClarity: 0.42,
+        glowIntensity: 0.55,
+      };
+    } else if (preset === "GOLD_24K") {
+      next = {
+        ...next,
+        palette: "GOLD",
+        styleEngine: "RAZOR_VECTOR",
+        flowMode: "COMETS",
+        theme: "VOID",
+        strokeWeight: 0.9,
+        noiseGate: 0.08,
+        subjectClarity: 0.32,
+        glowIntensity: 0.8,
+      };
+    } else if (preset === "DA_VINCI") {
+      next = {
+        ...next,
+        palette: "SEPIA",
+        styleEngine: "INK_HATCH",
+        flowMode: "STILL",
+        theme: "PAPER",
+        strokeWeight: 0.8,
+        noiseGate: 0.05,
+        subjectClarity: 0.28,
+        glowIntensity: 0.0,
+      };
+    } else if (preset === "CYBERPUNK") {
+      next = {
+        ...next,
+        palette: "CYBER",
+        styleEngine: "RGB_SPLIT",
+        flowMode: "COMETS",
+        theme: "VOID",
+        strokeWeight: 0.95,
+        noiseGate: 0.1,
+        subjectClarity: 0.35,
+        glowIntensity: 0.85,
+      };
+    }
+
+    setArtConfig(next);
+    stateRef.current.art = next;
+    stateRef.current.needsUnderlayRebuild = true;
+    if (stateRef.current.topology === "SILK") stateRef.current.needsSilkReset = true;
+  };
+
   const loadMatrixFromUrl = useCallback((rawUrl: string, idx: number, total: number) => {
-    setFieldStatus("TRACING MULTI-SCALE ANATOMY [" + String(idx + 1) + "/" + String(total) + "]...");
+    setFieldStatus("SOLVING CORNER-LOCKED SKELETON [" + String(idx + 1) + "/" + String(total) + "]...");
     const img = new Image();
     img.crossOrigin = "anonymous";
     img.onload = () => {
@@ -989,7 +1046,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
       stateRef.current.needsSilkReset = true;
       stateRef.current.needsUnderlayRebuild = true;
       setFieldStatus(
-        "LOCKED // " + String(buf.strokes.length) + " MICRO-SPLINES (" + String(buf.w) + "x" + String(buf.h) + ")"
+        "LOCKED // " + String(buf.strokes.length) + " EXACT VECTORS (" + String(buf.w) + "x" + String(buf.h) + ")"
       );
     };
     img.onerror = () => {
@@ -1160,7 +1217,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
   };
 
   // ==========================================
-  // ЯДРО МАТЕМАТИЧЕСКОГО РЕНДЕРИНГА (60 FPS DESKTOP & MOBILE)
+  // ЯДРО РЕНДЕРИНГА BARRETT PRISM 7.0 (60 FPS, ACES HDR)
   // ==========================================
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -1173,11 +1230,9 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
     let viewW = 900;
     let viewH = 680;
 
-    // Кэшированный буфер подложки (не пересчитывается каждый кадр -> 0 фризов на смартфонах!)
     const underlayCanvas = document.createElement("canvas");
     const underlayCtx = underlayCanvas.getContext("2d");
 
-    // Буфер для живых шейдерных режимов (CURRENTS, ACID, PRISM)
     const shaderCanvas = document.createElement("canvas");
     const shaderCtx = shaderCanvas.getContext("2d");
 
@@ -1228,13 +1283,13 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
     ro.observe(container);
     updateSize();
 
-    const buildSmoothPath = (coords: { x: number; y: number }[]) => {
+    const buildCrispPath = (coords: { x: number; y: number }[]) => {
       const len = coords.length;
       if (len < 2) return;
       ctx.beginPath();
       ctx.moveTo(coords[0].x, coords[0].y);
-      if (len === 2) {
-        ctx.lineTo(coords[1].x, coords[1].y);
+      if (len <= 3) {
+        for (let i = 1; i < len; i++) ctx.lineTo(coords[i].x, coords[i].y);
         return;
       }
       for (let i = 1; i < len - 1; i++) {
@@ -1253,14 +1308,15 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
       const m = s.matrix;
 
       const isPaper = art.theme === "PAPER";
-      const bgHex = isPaper ? "#f5f2eb" : "#020104";
+      const isCyanotype = art.theme === "CYANOTYPE";
+      const bgHex = isPaper ? "#f2eadb" : isCyanotype ? "#06152d" : "#020104";
 
       if (!s.isPaused) {
         s.time += 0.016 * (0.35 + t.energy * 1.35);
         if (art.flowMode === "LASER_LOOP") {
           s.traceProgress = (s.traceProgress + 0.0055 * (0.6 + t.energy)) % 1.35;
         } else if (s.traceProgress < 1.0) {
-          s.traceProgress = Math.min(1.0, s.traceProgress + 0.012 * (0.65 + t.energy * 1.2));
+          s.traceProgress = Math.min(1.0, s.traceProgress + 0.013 * (0.65 + t.energy * 1.2));
         }
       }
       const time = s.time;
@@ -1275,7 +1331,11 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
 
       if (s.topology === "SILK" && m) {
         ctx.globalCompositeOperation = "source-over";
-        ctx.fillStyle = isPaper ? "rgba(245, 242, 235, 0.09)" : "rgba(2, 1, 4, 0.08)";
+        ctx.fillStyle = isPaper
+          ? "rgba(242, 234, 219, 0.09)"
+          : isCyanotype
+          ? "rgba(6, 21, 45, 0.09)"
+          : "rgba(2, 1, 4, 0.08)";
         ctx.fillRect(0, 0, viewW, viewH);
       } else {
         ctx.globalCompositeOperation = "source-over";
@@ -1284,7 +1344,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
       }
 
       if (!m) {
-        ctx.globalCompositeOperation = isPaper ? "source-over" : "lighter";
+        ctx.globalCompositeOperation = isPaper ? "source-over" : "screen";
         const cx = viewW * 0.5;
         const cy = viewH * 0.5;
         const rad = Math.min(viewW, viewH) * 0.34;
@@ -1292,7 +1352,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
           ctx.beginPath();
           const [rC, gC, bC] = resolveArtColor(art, 180, 120, 250, l / 42, 0.6, t.tone);
           ctx.strokeStyle = "rgba(" + String(rC) + "," + String(gC) + "," + String(bC) + ",0.45)";
-          ctx.lineWidth = 1.3 * art.strokeWeight;
+          ctx.lineWidth = 1.1 * art.strokeWeight;
           for (let st = 0; st <= 180; st++) {
             const ang = (st / 180) * Math.PI * 2;
             const rMod =
@@ -1323,9 +1383,17 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
       const mNormX = (s.mouseX - ox) / Math.max(1, drawW);
       const mNormY = (s.mouseY - oy) / Math.max(1, drawH);
 
-      // ==========================================
-      // КЭШИРОВАННАЯ СВЕТОТЕНЕВАЯ ПОДЛОЖКА (ПЕРЕСЧИТЫВАЕТСЯ ТОЛЬКО ПРИ СМЕНЕ ПАЛИТРЫ/КАДРА!)
-      // ==========================================
+      // Плавная гидродинамическая инерция курсора/пальца
+      const goalU = s.mouseActive && mNormX >= 0.02 && mNormX <= 0.98 ? mNormX : 0.5 + Math.cos(time * 0.36) * 0.22;
+      const goalV = s.mouseActive && mNormY >= 0.02 && mNormY <= 0.98 ? mNormY : 0.48 + Math.sin(time * 0.48) * 0.18;
+      const prevU = s.fluidU;
+      const prevV = s.fluidV;
+      s.fluidU += (goalU - s.fluidU) * 0.07;
+      s.fluidV += (goalV - s.fluidV) * 0.07;
+      s.fluidVelU = s.fluidVelU * 0.86 + (s.fluidU - prevU) * 12.0;
+      s.fluidVelV = s.fluidVelV * 0.86 + (s.fluidV - prevV) * 12.0;
+
+      // Кэшированная подложка скульптурного рельефа
       if (underlayCtx && s.needsUnderlayRebuild) {
         underlayCanvas.width = m.w;
         underlayCanvas.height = m.h;
@@ -1337,35 +1405,62 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
           const vMask = m.mask[i];
           if (vMask <= 0.005) continue;
           const p = i * 4;
-          const lVal = m.liftedLum[i];
+          const lVal = m.lum[i];
           const eVal = m.edge[i];
 
-          // preserveDarkness = true гарантирует, что черный фон останется ЧЕРНЫМ (никакой фиолетовой стены!)
-          const [r, g, b] = resolveArtColor(art, src[p], src[p + 1], src[p + 2], lVal, eVal, t.tone, true);
-          uDst[p] = Math.round(r * vMask);
-          uDst[p + 1] = Math.round(g * vMask);
-          uDst[p + 2] = Math.round(b * vMask);
-          uDst[p + 3] = Math.round(clip(lVal * 1.3 + eVal, 0, 1) * vMask * 255);
+          if (isPaper) {
+            // Легкая графитовая тонировка на старинной бумаге
+            const shade = Math.round(235 - (1.0 - lVal) * 45 - eVal * 55);
+            uDst[p] = shade;
+            uDst[p + 1] = shade - 6;
+            uDst[p + 2] = shade - 16;
+            uDst[p + 3] = Math.round(vMask * 255);
+          } else {
+            const [r, g, b] = resolveArtColor(art, src[p], src[p + 1], src[p + 2], lVal, eVal, t.tone, true);
+            uDst[p] = Math.round(r * vMask);
+            uDst[p + 1] = Math.round(g * vMask);
+            uDst[p + 2] = Math.round(b * vMask);
+            uDst[p + 3] = Math.round(clip(lVal * 1.15 + eVal * 0.85, 0, 1) * vMask * 255);
+          }
         }
         underlayCtx.putImageData(uImg, 0, 0);
         s.needsUnderlayRebuild = false;
       }
 
+      // Инженерная миллиметровая сетка для темы CYANOTYPE (Blueprint)
+      if (isCyanotype) {
+        ctx.globalCompositeOperation = "source-over";
+        ctx.strokeStyle = "rgba(56, 189, 248, 0.08)";
+        ctx.lineWidth = 0.5;
+        const gridStep = 28;
+        ctx.beginPath();
+        for (let gx = ox; gx <= ox + drawW; gx += gridStep) {
+          ctx.moveTo(gx, oy);
+          ctx.lineTo(gx, oy + drawH);
+        }
+        for (let gy = oy; gy <= oy + drawH; gy += gridStep) {
+          ctx.moveTo(ox, gy);
+          ctx.lineTo(ox + drawW, gy);
+        }
+        ctx.stroke();
+      }
+
       // ==========================================
-      // РЕЖИМ 1: TRACE 6.0 (МИКРО-АНАТОМИЯ + 4 КАРДИНАЛЬНО РАЗНЫХ ДВИЖКА СТИЛЯ)
+      // РЕЖИМ 1: TRACE 7.0 (ЮВЕЛИРНАЯ СКЕЛЕТНАЯ ГРАВЮРА БЕЗ БЕЛЫХ ПЯТЕН И МАКАРОН!)
       // ==========================================
       if (s.topology === "TRACE") {
         const clampedProg = Math.min(1.0, s.traceProgress);
         const easedGlobal = smoothstep(0.0, 1.0, clampedProg);
 
-        if (art.underlayOpacity > 0.01) {
+        if (art.subjectClarity > 0.01) {
           ctx.globalCompositeOperation = "source-over";
-          ctx.globalAlpha = art.underlayOpacity * easedGlobal;
+          ctx.globalAlpha = art.subjectClarity * easedGlobal;
           ctx.drawImage(underlayCanvas, ox, oy, drawW, drawH);
           ctx.globalAlpha = 1.0;
         }
 
-        ctx.globalCompositeOperation = isPaper ? "source-over" : "lighter";
+        // ВАЖНО: используем "screen" вместо "lighter", чтобы соседние штрихи на буквах НИКОГДА не выгорали в белую кашу!
+        ctx.globalCompositeOperation = isPaper ? "multiply" : "screen";
         ctx.lineCap = art.styleEngine === "HALFTONE" ? "butt" : "round";
         ctx.lineJoin = "round";
 
@@ -1374,19 +1469,18 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
         const windowSpan = Math.max(90, Math.floor(totalStrokes * 0.22));
         const headFloat = clampedProg * (totalStrokes + windowSpan);
 
-        const waveSpeed = time * (1.8 + t.energy * 2.2);
-        const foldMirror = t.symmetry > 0.65;
+        const waveSpeed = time * (1.8 + t.energy * 2.0);
+        const foldMirror = t.symmetry > 0.68;
 
-        // В режиме STILL отключаем волновое смещение для 100% хирургической точности
-        const coherentAmp =
+        // На буквах и коротких гранях амплитуда деформации сведена к минимуму, чтобы геометрия была 100% точной!
+        const baseWaveAmp =
           art.flowMode === "STILL"
             ? 0.0
-            : t.chaos * 1.6 * (1.06 - t.structure * 0.85);
+            : t.chaos * 1.15 * (1.04 - t.structure * 0.88);
 
-        // Дыхание толщины линий в режиме PULSE
         const breathPulse =
           art.flowMode === "PULSE"
-            ? 0.75 + 0.45 * Math.sin(time * 3.8)
+            ? 0.8 + 0.35 * Math.sin(time * 3.6)
             : 1.0;
 
         for (let i = 0; i < totalStrokes; i++) {
@@ -1406,8 +1500,8 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
           const fullIdx = Math.floor(exactPtFloat);
           const frac = exactPtFloat - fullIdx;
 
-          // На микро-штрихах (глаза, текст, лады гитары) амплитуда волны снижена в 4 раза, чтобы их не размывало!
-          const tierWaveScale = st.tier === 1 ? 1.0 : 0.25;
+          // Короткие штрихи (буквы, глаза) жестко зафиксированы (scale = 0.08), длинные плавно дышат
+          const lengthLock = clip((st.arcLen - 12.0) / 50.0, 0.05, 1.0);
 
           const coords: { x: number; y: number }[] = [];
           for (let k = 0; k <= fullIdx && k < nPts; k++) {
@@ -1415,9 +1509,9 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
             const sNorm = k / Math.max(1, nPts - 1);
             const env = Math.sin(sNorm * Math.PI);
 
-            const spatialPhase = (pt.u * 3.5 + pt.v * 3.5) * Math.PI + waveSpeed;
-            const dxWave = Math.sin(spatialPhase) * env * coherentAmp * tierWaveScale;
-            const dyWave = Math.cos(spatialPhase * 0.9) * env * coherentAmp * tierWaveScale;
+            const spatialPhase = (pt.u * 3.2 + pt.v * 3.2) * Math.PI + waveSpeed;
+            const dxWave = Math.sin(spatialPhase) * env * baseWaveAmp * lengthLock;
+            const dyWave = Math.cos(spatialPhase * 0.9) * env * baseWaveAmp * lengthLock;
 
             let mouseXPush = 0;
             let mouseYPush = 0;
@@ -1425,8 +1519,8 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
               const dmx = pt.u - mNormX;
               const dmy = pt.v - mNormY;
               const dSq = dmx * dmx + dmy * dmy;
-              if (dSq < 0.028) {
-                const mFactor = Math.exp(-dSq * 90.0) * 9.5 * env;
+              if (dSq < 0.025) {
+                const mFactor = Math.exp(-dSq * 95.0) * 7.5 * env;
                 mouseXPush = (dmx / (Math.sqrt(dSq) + 0.01)) * mFactor;
                 mouseYPush = (dmy / (Math.sqrt(dSq) + 0.01)) * mFactor;
               }
@@ -1454,61 +1548,56 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
           if (coords.length < 2) continue;
 
           const [rC, gC, bC] = resolveArtColor(art, st.r, st.g, st.b, st.meanLum, st.meanEdge, t.tone);
-          const tierAlpha = st.tier === 1 ? 0.94 : st.tier === 2 ? 0.84 : 0.45;
-          const baseAlpha = clip((0.25 + st.meanEdge * 0.65 + st.meanLum * 0.25) * tierAlpha * (0.4 + 0.6 * localProg), 0.12, 0.96);
-          const baseW = (st.tier === 1 ? (1.05 + st.meanEdge * 1.1) : st.tier === 2 ? 0.82 : 0.55) * art.strokeWeight * breathPulse;
+          const tierAlpha = st.tier === 1 ? 0.92 : st.tier === 2 ? 0.82 : 0.35;
+          const baseAlpha = clip((0.28 + st.meanEdge * 0.62 + st.meanLum * 0.2) * tierAlpha * (0.4 + 0.6 * localProg), 0.12, 0.94);
 
-          // ==========================================
-          // ВЕТВЛЕНИЕ ПО 4 КАРДИНАЛЬНО РАЗНЫМ STYLE ENGINES
-          // ==========================================
-          if (art.styleEngine === "CHROMATIC") {
-            // 1. CHROMATIC: Голографическое RGB-расщепление каждого контура на 3 спектральных слоя
-            const splitOffset = (1.6 + t.chaos * 4.5) * Math.sin(waveSpeed * 0.6 + st.phase);
+          // Тонкая калиброванная толщина: 0.45px .. 1.25px (никаких толстых червяков!)
+          const baseW = (st.tier === 1 ? (0.75 + st.meanEdge * 0.65) : st.tier === 2 ? 0.58 : 0.42) * art.strokeWeight * breathPulse;
+
+          if (art.styleEngine === "RGB_SPLIT") {
+            const splitOffset = (1.2 + t.chaos * 3.2) * Math.sin(waveSpeed * 0.6 + st.phase);
             const midPt = pts[Math.floor(pts.length * 0.5)];
             const offX = midPt.nx * splitOffset;
             const offY = midPt.ny * splitOffset;
 
-            buildSmoothPath(coords);
+            buildCrispPath(coords);
             ctx.save();
             ctx.translate(-offX, -offY);
-            ctx.strokeStyle = "rgba(255, 25, 110, " + String((baseAlpha * 0.7).toFixed(2)) + ")";
-            ctx.lineWidth = baseW * 0.95;
+            ctx.strokeStyle = "rgba(255, 30, 115, " + String((baseAlpha * 0.72).toFixed(2)) + ")";
+            ctx.lineWidth = baseW;
             ctx.stroke();
             ctx.restore();
 
             ctx.save();
             ctx.translate(offX, offY);
-            ctx.strokeStyle = "rgba(0, 245, 255, " + String((baseAlpha * 0.7).toFixed(2)) + ")";
-            ctx.lineWidth = baseW * 0.95;
+            ctx.strokeStyle = "rgba(0, 235, 255, " + String((baseAlpha * 0.72).toFixed(2)) + ")";
+            ctx.lineWidth = baseW;
             ctx.stroke();
             ctx.restore();
 
-            ctx.strokeStyle = "rgba(255, 255, 255, " + String((baseAlpha * 0.85).toFixed(2)) + ")";
+            ctx.strokeStyle = "rgba(245, 248, 255, " + String((baseAlpha * 0.88).toFixed(2)) + ")";
             ctx.lineWidth = baseW * 0.65;
             ctx.stroke();
           } else if (art.styleEngine === "HALFTONE") {
-            // 2. HALFTONE: Ритмическая оп-арт гравировка калиброванными штрихами
-            const dashLen = Math.max(2, (3.5 + st.meanLum * 8.0) * art.strokeWeight);
-            const gapLen = Math.max(2, (5.5 - st.meanEdge * 3.5) * art.strokeWeight);
+            const dashLen = Math.max(1.5, (2.5 + st.meanLum * 6.5) * art.strokeWeight);
+            const gapLen = Math.max(1.5, (4.5 - st.meanEdge * 2.8) * art.strokeWeight);
             ctx.setLineDash([dashLen, gapLen]);
-            ctx.lineDashOffset = -time * 18.0 * st.speed;
+            ctx.lineDashOffset = -time * 14.0 * st.speed;
 
-            buildSmoothPath(coords);
+            buildCrispPath(coords);
             ctx.strokeStyle = "rgba(" + String(rC) + "," + String(gC) + "," + String(bC) + "," + String(baseAlpha.toFixed(2)) + ")";
-            ctx.lineWidth = baseW * 1.45;
+            ctx.lineWidth = baseW * 1.35;
             ctx.stroke();
             ctx.setLineDash([]);
           } else if (art.styleEngine === "INK_HATCH") {
-            // 3. INK_HATCH: Экспрессионистское перо Эгона Шиле + академическая перекрестная штриховка
-            buildSmoothPath(coords);
+            buildCrispPath(coords);
             ctx.strokeStyle = "rgba(" + String(rC) + "," + String(gC) + "," + String(bC) + "," + String(baseAlpha.toFixed(2)) + ")";
-            ctx.lineWidth = baseW * 0.85;
+            ctx.lineWidth = baseW * 0.9;
             ctx.stroke();
 
-            // Рисуем косые перекрестные штрихи (cross-hatching) вдоль контура
             if (st.tier <= 2 && coords.length >= 6) {
               const hatchStep = st.tier === 1 ? 3 : 5;
-              const hatchLen = (3.2 + (1.0 - st.meanLum) * 5.5) * art.strokeWeight;
+              const hatchLen = (2.8 + (1.0 - st.meanLum) * 4.8) * art.strokeWeight;
               ctx.beginPath();
               for (let k = 1; k < coords.length - 1; k += hatchStep) {
                 const pt = pts[k];
@@ -1517,17 +1606,17 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
                 ctx.moveTo(coords[k].x - hx, coords[k].y - hy);
                 ctx.lineTo(coords[k].x + hx, coords[k].y + hy);
               }
-              ctx.strokeStyle = "rgba(" + String(rC) + "," + String(gC) + "," + String(bC) + "," + String((baseAlpha * 0.48).toFixed(2)) + ")";
-              ctx.lineWidth = 0.6 * art.strokeWeight;
+              ctx.strokeStyle = "rgba(" + String(rC) + "," + String(gC) + "," + String(bC) + "," + String((baseAlpha * 0.45).toFixed(2)) + ")";
+              ctx.lineWidth = 0.48 * art.strokeWeight;
               ctx.stroke();
             }
           } else {
-            // 4. NEON (Классический лазер со свечением и кометами)
-            buildSmoothPath(coords);
-            if (st.tier === 1 && art.glowIntensity > 0.05 && !isPaper) {
-              const glowAlpha = clip(baseAlpha * 0.3 * art.glowIntensity, 0.02, 0.42);
+            // RAZOR_VECTOR: деликатный ореол ТОЛЬКО на длинных внешних силовых контурах + бритвенно-тонкое ядро
+            buildCrispPath(coords);
+            if (st.tier === 1 && st.arcLen > 22 && art.glowIntensity > 0.05 && !isPaper) {
+              const glowAlpha = clip(baseAlpha * 0.18 * art.glowIntensity, 0.02, 0.24);
               ctx.strokeStyle = "rgba(" + String(rC) + "," + String(gC) + "," + String(bC) + "," + String(glowAlpha.toFixed(2)) + ")";
-              ctx.lineWidth = baseW * 3.2;
+              ctx.lineWidth = baseW * 2.4;
               ctx.stroke();
             }
             ctx.strokeStyle = "rgba(" + String(rC) + "," + String(gC) + "," + String(bC) + "," + String(baseAlpha.toFixed(2)) + ")";
@@ -1535,22 +1624,23 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
             ctx.stroke();
           }
 
-          // Живые кометы света вдоль всех нарисованных контуров (в режиме COMETS)
-          if (art.flowMode === "COMETS" && coords.length >= 7 && clampedProg >= 0.96) {
-            const cometSpan = Math.max(3, Math.floor(coords.length * 0.32));
-            const cyclePos = ((time * st.speed * (0.65 + t.energy * 0.9) + st.phase) % 1.4) - 0.2;
+          // Живые иридисцентные кометы вдоль контуров (в режиме COMETS)
+          if (art.flowMode === "COMETS" && coords.length >= 8 && clampedProg >= 0.96) {
+            const cometSpan = Math.max(3, Math.floor(coords.length * 0.28));
+            const cyclePos = ((time * st.speed * (0.65 + t.energy * 0.85) + st.phase) % 1.4) - 0.2;
             const headIdx = Math.floor(cyclePos * coords.length);
             const tailIdx = Math.max(0, headIdx - cometSpan);
             const clampedHead = Math.min(coords.length - 1, headIdx);
 
             if (clampedHead - tailIdx >= 2) {
               const cometSlice = coords.slice(tailIdx, clampedHead + 1);
-              buildSmoothPath(cometSlice);
-              const cometAlpha = clip(baseAlpha * (0.55 + 0.45 * art.glowIntensity), 0.2, 0.95);
+              buildCrispPath(cometSlice);
+              const [irR, irG, irB] = thinFilmIridescence(time * 0.4 + st.phase, 0.85, 0.9);
+              const cometAlpha = clip(baseAlpha * (0.5 + 0.5 * art.glowIntensity), 0.2, 0.92);
               ctx.strokeStyle = isPaper
-                ? "rgba(10, 10, 18, " + String(cometAlpha.toFixed(2)) + ")"
-                : "rgba(255, 255, 255, " + String(cometAlpha.toFixed(2)) + ")";
-              ctx.lineWidth = baseW * 1.4;
+                ? "rgba(25, 15, 10, " + String(cometAlpha.toFixed(2)) + ")"
+                : "rgba(" + String(irR) + "," + String(irG) + "," + String(irB) + "," + String(cometAlpha.toFixed(2)) + ")";
+              ctx.lineWidth = baseW * 1.35;
               ctx.stroke();
             }
           }
@@ -1558,7 +1648,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
       }
 
       // ==========================================
-      // РЕЖИМ 2: CURRENTS 5.0 (ИММЕРСИВНЫЙ ЛАМИНАРНЫЙ ПОТОК БЕЗ СФЕРЫ, ОБТЕКАНИЕ ОБЪЕКТА + ВЫРАВНИВАНИЕ ЛИНИЙ)
+      // РЕЖИМ 2: CURRENTS 6.0 (LIQUID SILK DOMAIN WARPING + SUBJECT CORE PROTECTION — НИКАКОЙ ЗЕБРЫ!)
       // ==========================================
       else if (s.topology === "CURRENTS" && shaderCtx) {
         if (shaderCanvas.width !== m.w || shaderCanvas.height !== m.h) {
@@ -1569,30 +1659,12 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
         const dst = outImg.data;
         const src = m.rgba;
 
-        // Плавная гидродинамическая точка погружения (следует за рукой/мышью без всякого шара!)
-        const goalU = s.mouseActive && mNormX >= 0.02 && mNormX <= 0.98 ? mNormX : 0.5 + Math.cos(time * 0.35) * 0.22;
-        const goalV = s.mouseActive && mNormY >= 0.02 && mNormY <= 0.98 ? mNormY : 0.48 + Math.sin(time * 0.48) * 0.18;
+        const wu = s.fluidU;
+        const wv = s.fluidV;
 
-        const prevU = s.wakeU;
-        const prevV = s.wakeV;
-        s.wakeU += (goalU - s.wakeU) * 0.07;
-        s.wakeV += (goalV - s.wakeV) * 0.07;
-        s.wakeVelU = s.wakeVelU * 0.85 + (s.wakeU - prevU) * 12.0;
-        s.wakeVelV = s.wakeVelV * 0.85 + (s.wakeV - prevV) * 12.0;
-
-        const wu = s.wakeU;
-        const wv = s.wakeV;
-
-        // Базовая частота тонких векторных струй Роберта Битти
-        const baseFreq = 38.0 + t.symmetry * 55.0;
-        // Сила обтекания самого объекта (фигура гитариста/ромб работает как 3D-препятствие в потоке!)
-        const objectObstacleStrength = 1.8 + t.structure * 3.2;
-        const wakeSwirlStrength = 0.22 + t.chaos * 0.55;
-
-        // Угол ламинарного течения
-        const flowAngle = 0.52 + (art.styleEngine === "INK_HATCH" ? 0.35 : 0.0);
-        const fCos = Math.cos(flowAngle);
-        const fSin = Math.sin(flowAngle);
+        // Мягкие, широкие бархатные волны жидкого шелка (14..28 волн вместо 90!)
+        const silkFreq = 12.0 + t.symmetry * 18.0;
+        const warpStrength = (0.018 + t.chaos * 0.065) * m.w;
 
         for (let y = 0; y < m.h; y++) {
           const v = y / m.h;
@@ -1602,96 +1674,77 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
             if (vMask <= 0.005) continue;
 
             const u = x / m.w;
+            const sharpLum = m.lum[baseIdx];
+            const sharpEdge = m.edge[baseIdx];
+            const smoothL = m.smoothLum[baseIdx];
+            const gxS = m.smoothGx[baseIdx];
+            const gyS = m.smoothGy[baseIdx];
 
-            // 1. Иммерсивное течение от курсора/пальца (гладкий вихревой след в жидкости без разрывов)
+            // 1. МАСКА ЯДРА ОБЪЕКТА (Subject Core Shield):
+            // На четких гранях алмаза, лицах и буквах мы защищаем исходную геометрию от полосатой нарезки!
+            const subjectShield = clip((sharpEdge * 1.6 + smoothL * 0.55) * t.structure, 0.0, 0.92);
+
+            // 2. Двухкаскадный Curl-Noise поток (Domain Warping):
+            // Цвета картинки буквально тают и стекают вдоль гладких линий тока вокруг объекта!
             const du = u - wu;
             const dv = v - wv;
-            const distSq = du * du + dv * dv + 0.008;
-            const wakeGauss = Math.exp(-distSq * 14.0);
+            const distSq = du * du + dv * dv + 0.01;
+            const wakeEnv = Math.exp(-distSq * 10.0);
 
-            // Продольная и поперечная координаты относительно потока
-            const sCoord = (u - 0.5) * fCos + (v - 0.5) * fSin;
-            const nCoord = -(u - 0.5) * fSin + (v - 0.5) * fCos;
+            const qx = Math.sin((u * 3.2 + v * 2.4) * Math.PI - time * 1.4) + gyS * 12.0;
+            const qy = Math.cos((v * 3.2 - u * 2.4) * Math.PI + time * 1.2) - gxS * 12.0;
 
-            // Гармоническая вихревая дорожка Кармана, рождаемая контурами объекта и рукой пользователя
-            const vortexRipple =
-              Math.sin(sCoord * 24.0 - time * (2.8 + t.energy * 2.5) + m.smoothLum[baseIdx] * 5.0) *
-              (wakeGauss * wakeSwirlStrength + m.edge[baseIdx] * t.chaos * 0.18);
+            const flowWave = Math.sin((u * 2.5 + v * 3.5 + 0.35 * qx) * Math.PI * c.nHarmonic - time * (1.6 + t.energy * 1.5));
+            const cursorSwirlX = (-dv * wakeEnv * 1.8 + s.fluidVelU * wakeEnv * 0.5);
+            const cursorSwirlY = (du * wakeEnv * 1.8 + s.fluidVelV * wakeEnv * 0.5);
 
-            const cursorPush = (du * s.wakeVelV - dv * s.wakeVelU) * wakeGauss * 0.45;
+            // Внутри защищенного ядра объекта сдвиг минимален (сохраняет четкость!), а на шлейфах — жидкое течение
+            const fluidMobility = 1.0 - subjectShield * 0.78;
+            const advX = clip(x + (qx * 0.55 + flowWave * 0.45 + cursorSwirlX) * warpStrength * fluidMobility, 0, m.w - 1);
+            const advY = clip(y + (qy * 0.55 - flowWave * 0.45 + cursorSwirlY) * warpStrength * fluidMobility, 0, m.h - 1);
 
-            // 2. Потенциал обтекания самого объекта: линии плавно огибают силуэт и сгущаются на гранях
-            const elev = m.smoothLum[baseIdx];
-            const gxObj = m.smoothGx[baseIdx];
-            const gyObj = m.smoothGy[baseIdx];
+            const [rAdv, gAdv, bAdv] = sampleBilinearRGB(src, m.w, m.h, advX, advY);
+            const [rOrig, gOrig, bOrig] = sampleBilinearRGB(src, m.w, m.h, x, y);
 
-            // Адвекция координат исходного фото вдоль линий тока (жидкий шелк без разрыва черт лица!)
-            const advShift = (vortexRipple + cursorPush) * m.w * 0.32;
-            const sx = clip(x + (fCos * advShift - gyObj * m.w * 0.8), 0, m.w - 1);
-            const sy = clip(y + (fSin * advShift + gxObj * m.h * 0.8), 0, m.h - 1);
+            // 3. Гладкая функция тока Ψ для жидких хромовых и неоновых лент (БЕЗ ступенчатого шума!)
+            const streamPsi =
+              (v * 0.78 - u * 0.42 + cursorSwirlY * 0.12) * silkFreq +
+              smoothL * (1.8 + t.structure * 2.2) +
+              flowWave * (0.35 + t.chaos * 0.65) -
+              time * (0.65 + t.energy * 1.1);
 
-            const [rPhoto, gPhoto, bPhoto] = sampleBilinearRGB(src, m.w, m.h, sx, sy);
-            const sharpLum = m.liftedLum[baseIdx];
-            const sharpEdge = m.edge[baseIdx];
+            const sinPsi = Math.sin(streamPsi * Math.PI * 2.0);
+            const cosPsi = Math.cos(streamPsi * Math.PI * 2.0);
 
-            // 3. Функция тока Ψ(x,y) и ее аналитический градиент |∇Ψ| (гарантирует одинаково четкие линии везде!)
-            const psi =
-              (nCoord + vortexRipple + cursorPush) * baseFreq +
-              elev * objectObstacleStrength -
-              time * (0.9 + t.energy * 1.4);
+            // Тонкопленочная радужная интерференция жидкого хрома
+            const iridPhase = t.tone + smoothL * 0.65 + (0.5 + 0.5 * sinPsi) * 0.45 + wakeEnv * 0.3;
+            const [irR, irG, irB] =
+              art.palette === "CURRENTS"
+                ? thinFilmIridescence(iridPhase, sharpLum, sharpEdge)
+                : resolveArtColor(art, rAdv, gAdv, bAdv, sharpLum, sharpEdge, iridPhase);
 
-            // Локальная производная частоты препятствует превращению полос в широкие пятна ("зебру")
-            const dPsi = 1.0 + Math.abs(gxObj * fCos + gyObj * fSin) * objectObstacleStrength * 18.0;
-            const normWave = Math.cos(psi * Math.PI * 2.0);
-            const normSin = Math.sin(psi * Math.PI * 2.0);
+            // Бархатные обсидиановые ложбинки (действуют только вне жестких контуров объекта!)
+            const ribbonGroove = 0.25 + 0.75 * smoothstep(-0.65, 0.45, cosPsi);
+            const effectiveGroove = ribbonGroove * (1.0 - subjectShield * 0.82) + subjectShield * 0.82;
 
-            // Настройка профиля струи по выбранному Style Engine
-            let ribbonMask = smoothstep(-0.45 * dPsi, 0.15 * dPsi, normWave / Math.min(2.2, dPsi * 0.65));
-            if (art.styleEngine === "HALFTONE") {
-              const dotWave = Math.cos(sCoord * baseFreq * 1.4 * Math.PI * 2.0);
-              ribbonMask *= smoothstep(-0.2, 0.2, dotWave);
-            }
+            // Блик жидкой ртути на гребнях волн и гранях кристалла/лица
+            const mercurySpec = Math.pow(Math.max(0.0, sinPsi), 6.0) * art.glowIntensity * (1.0 - subjectShield * 0.4);
+            const edgeChrome = sharpEdge * sharpEdge * art.glowIntensity * 0.85;
 
-            // Хромированный блик на гребне каждой струи
-            const chromeCrest = Math.pow(Math.max(0.0, normSin), 5.0) * art.glowIntensity;
+            // Смешиваем четкое ядро объекта и расплавленный шлейф
+            const baseR = rOrig * subjectShield + (rAdv * art.subjectClarity + irR * (1.0 - art.subjectClarity * 0.65)) * (1.0 - subjectShield);
+            const baseG = gOrig * subjectShield + (gAdv * art.subjectClarity + irG * (1.0 - art.subjectClarity * 0.65)) * (1.0 - subjectShield);
+            const baseB = bOrig * subjectShield + (bAdv * art.subjectClarity + irB * (1.0 - art.subjectClarity * 0.65)) * (1.0 - subjectShield);
 
-            // Спектральная фаза вдоль потока (плавный перелив пурпур -> фиолет -> циан -> серебро)
-            const streamColorPhase = (t.tone + sCoord * 0.45 + elev * 0.35 + wakeGauss * 0.25 + 1.0) % 1.0;
-            const [palR, palG, palB] = resolveArtColor(
-              art,
-              rPhoto,
-              gPhoto,
-              bPhoto,
-              clip(sharpLum * 0.65 + 0.35 * (0.5 + 0.5 * normSin)),
-              sharpEdge,
-              streamColorPhase
-            );
-
-            // Сохраняем 100% узнаваемость лица, гитары и текста внутри потока
-            const subjectPresence = clip(art.underlayOpacity + sharpEdge * 0.65 + sharpLum * 0.45, 0.08, 0.94);
-
-            const coreR = rPhoto * subjectPresence * 0.75 + palR * (1.0 - subjectPresence * 0.45);
-            const coreG = gPhoto * subjectPresence * 0.75 + palG * (1.0 - subjectPresence * 0.45);
-            const coreB = bPhoto * subjectPresence * 0.75 + palB * (1.0 - subjectPresence * 0.45);
-
-            // Между струями — глубокие черные обсидиановые ложбинки (как на виниле Currents)
-            const grooveDepth = 0.08 + sharpEdge * 0.58 + sharpLum * 0.32;
-            const finalBand = grooveDepth + (1.0 - grooveDepth) * ribbonMask;
-
-            let rOut = coreR * finalBand + chromeCrest * 235.0;
-            let gOut = coreG * finalBand + chromeCrest * 240.0;
-            let bOut = coreB * finalBand + chromeCrest * 255.0;
-
-            if (art.styleEngine === "CHROMATIC") {
-              const shift = Math.sin(psi * Math.PI * 2.0 + 1.1) * 45.0;
-              rOut += shift;
-              bOut -= shift;
-            }
+            // Применяем ACES Filmic Tone Mapping (ноль пересветов!)
+            const finalR = acesTonemap((baseR / 255.0) * effectiveGroove + mercurySpec * 0.85 + edgeChrome * 0.7) * 255.0;
+            const finalG = acesTonemap((baseG / 255.0) * effectiveGroove + mercurySpec * 0.9 + edgeChrome * 0.8) * 255.0;
+            const finalB = acesTonemap((baseB / 255.0) * effectiveGroove + mercurySpec * 1.05 + edgeChrome * 1.0) * 255.0;
 
             const outP = baseIdx * 4;
-            dst[outP] = Math.min(255, Math.max(0, Math.round(rOut * vMask)));
-            dst[outP + 1] = Math.min(255, Math.max(0, Math.round(gOut * vMask)));
-            dst[outP + 2] = Math.min(255, Math.max(0, Math.round(bOut * vMask)));
+            dst[outP] = Math.round(finalR * vMask);
+            dst[outP + 1] = Math.round(finalG * vMask);
+            dst[outP + 2] = Math.round(finalB * vMask);
             dst[outP + 3] = 255;
           }
         }
@@ -1702,10 +1755,156 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
       }
 
       // ==========================================
-      // РЕЖИМ 3: SILK 5.0 (НЕЖНАЯ БИОЛЮМИНЕСЦЕНТНАЯ ВУАЛЬ В ТЕМНОМ ВАКУУМЕ — БЕЗ ЯДОВИТОГО ФОНА!)
+      // РЕЖИМ 3: PIPER (1967 SYD BARRETT UFO CLUB LIQUID LIGHT OIL & DYE PROJECTOR)
+      // ==========================================
+      else if (s.topology === "PIPER" && shaderCtx) {
+        if (shaderCanvas.width !== m.w || shaderCanvas.height !== m.h) {
+          shaderCanvas.width = m.w;
+          shaderCanvas.height = m.h;
+        }
+        const outImg = shaderCtx.createImageData(m.w, m.h);
+        const dst = outImg.data;
+        const src = m.rgba;
+
+        const wu = s.fluidU;
+        const wv = s.fluidV;
+
+        for (let y = 0; y < m.h; y++) {
+          const v = y / m.h;
+          for (let x = 0; x < m.w; x++) {
+            const baseIdx = y * m.w + x;
+            const vMask = m.mask[baseIdx];
+            if (vMask <= 0.005) continue;
+
+            const u = x / m.w;
+            const l = m.lum[baseIdx];
+            const e = m.edge[baseIdx];
+            const smL = m.smoothLum[baseIdx];
+
+            // Симуляция 3 несмешивающихся слоев нагретого минерального масла и анилинового красителя
+            const du = u - wu;
+            const dv = v - wv;
+            const cursorHeat = Math.exp(-(du * du + dv * dv) * 9.0);
+
+            const oil1 = Math.sin(u * 5.5 + smL * 4.2 + time * 1.1) * Math.cos(v * 5.5 - smL * 3.8 - time * 0.9);
+            const oil2 = Math.sin((u * 8.5 - v * 6.5) + oil1 * (1.8 + t.chaos * 2.2) + time * 1.5 + cursorHeat * 2.5);
+            const oilDrop = smoothstep(-0.3, 0.3, oil2);
+
+            const warpX = clip(x + (oil1 * 8.0 + m.etfX[baseIdx] * 6.0) * t.chaos, 0, m.w - 1);
+            const warpY = clip(y + (oil2 * 8.0 + m.etfY[baseIdx] * 6.0) * t.chaos, 0, m.h - 1);
+            const [rP, gP, bP] = sampleBilinearRGB(src, m.w, m.h, warpX, warpY);
+
+            const [dyeR1, dyeG1, dyeB1] = thinFilmIridescence(t.tone + oil1 * 0.35 + l * 0.5, l, e);
+            const [dyeR2, dyeG2, dyeB2] = thinFilmIridescence(t.tone + 0.42 + oil2 * 0.35 + e * 0.6, l, e);
+
+            const mixDyeR = dyeR1 * oilDrop + dyeR2 * (1.0 - oilDrop);
+            const mixDyeG = dyeG1 * oilDrop + dyeG2 * (1.0 - oilDrop);
+            const mixDyeB = dyeB1 * oilDrop + dyeB2 * (1.0 - oilDrop);
+
+            // Четкий трафаретный рельеф фотографии проступает сквозь цветное масло проектора
+            const stencilLock = clip(art.subjectClarity + e * 0.75, 0.15, 0.92);
+            const rawR = (rP * stencilLock + mixDyeR * (1.0 - stencilLock * 0.55)) * (0.35 + l * 0.75 + e * 0.6);
+            const rawG = (gP * stencilLock + mixDyeG * (1.0 - stencilLock * 0.55)) * (0.35 + l * 0.75 + e * 0.6);
+            const rawB = (bP * stencilLock + mixDyeB * (1.0 - stencilLock * 0.55)) * (0.35 + l * 0.75 + e * 0.6);
+
+            const outP = baseIdx * 4;
+            dst[outP] = Math.round(acesTonemap(rawR / 255.0) * 255 * vMask);
+            dst[outP + 1] = Math.round(acesTonemap(rawG / 255.0) * 255 * vMask);
+            dst[outP + 2] = Math.round(acesTonemap(rawB / 255.0) * 255 * vMask);
+            dst[outP + 3] = 255;
+          }
+        }
+
+        shaderCtx.putImageData(outImg, 0, 0);
+        ctx.imageSmoothingEnabled = true;
+        ctx.drawImage(shaderCanvas, ox, oy, drawW, drawH);
+      }
+
+      // ==========================================
+      // РЕЖИМ 4: PRISM 3.0 (DARK-FIELD CAUSTICS & ACES SPECTRAL DISPERSION — НОЛЬ БЕЛЫХ ЗАСВЕТОВ!)
+      // ==========================================
+      else if (s.topology === "PRISM" && shaderCtx) {
+        if (shaderCanvas.width !== m.w || shaderCanvas.height !== m.h) {
+          shaderCanvas.width = m.w;
+          shaderCanvas.height = m.h;
+        }
+        const outImg = shaderCtx.createImageData(m.w, m.h);
+        const dst = outImg.data;
+        const src = m.rgba;
+
+        // Угол преломления управляется курсором мыши или плавным вращением
+        const prismAngle = s.mouseActive
+          ? Math.atan2(mNormY - 0.5, mNormX - 0.5)
+          : theta + Math.sin(time * 0.55) * 0.35;
+        const dirX = Math.cos(prismAngle);
+        const dirY = Math.sin(prismAngle);
+        const maxDispersion = 14.0 + t.symmetry * 38.0 + t.chaos * 22.0;
+
+        for (let y = 0; y < m.h; y++) {
+          for (let x = 0; x < m.w; x++) {
+            const idx = y * m.w + x;
+            const vMask = m.mask[idx];
+            if (vMask <= 0.005) continue;
+
+            const p = idx * 4;
+            const l = m.lum[idx];
+            const e = m.edge[idx];
+
+            // 1. ТЕМНОПОЛЬНАЯ ОПТИКА (Dark-Field Compression):
+            // Сжимаем яркость плоских засвеченных участков в благородный темный кристалл,
+            // оставляя яркими только грани (e), чтобы внутри алмаза были видны ВСЕ детали!
+            const darkFieldFactor = (0.18 + art.subjectClarity * 0.45) * (0.45 + e * 0.85) / (1.0 + l * 0.85);
+            let rLin = (src[p] / 255.0) * darkFieldFactor;
+            let gLin = (src[p + 1] / 255.0) * darkFieldFactor;
+            let bLin = (src[p + 2] / 255.0) * darkFieldFactor;
+
+            // 2. СПЕКТРАЛЬНАЯ ДИСПЕРСИЯ КОШИ (7 длин волн с сохранением энергии, без белого пересвета!)
+            const glowScale = (0.12 + art.glowIntensity * 0.22);
+            for (let band = 0; band < 7; band++) {
+              const bandNorm = (band + 1) / 7.0;
+              const dist = bandNorm * maxDispersion;
+              // Двунаправленный луч (вдоль +dir и -dir)
+              const sx = Math.round(x - dirX * dist);
+              const sy = Math.round(y - dirY * dist);
+
+              if (sx >= 0 && sx < m.w && sy >= 0 && sy < m.h) {
+                const sIdx = sy * m.w + sx;
+                // Лучи рождаются СТРОГО от острых граней (sEdge), а не от белых пятен!
+                const sEdge = m.edge[sIdx];
+                if (sEdge > 0.16) {
+                  const falloff = (1.0 - bandNorm * 0.45) * sEdge * glowScale;
+                  const [cr, cg, cb] = CAUCHY_SPECTRUM[band];
+                  rLin += (cr / 255.0) * falloff;
+                  gLin += (cg / 255.0) * falloff;
+                  bLin += (cb / 255.0) * falloff;
+                }
+              }
+            }
+
+            // Тонкая алмазная искра на самих гранях кристалла
+            const facetRim = e * e * 0.55;
+            rLin += facetRim * 0.9;
+            gLin += facetRim * 0.95;
+            bLin += facetRim * 1.1;
+
+            // 3. ACES Filmic Tone Mapping гарантирует отсутствие выгорания в белый цвет!
+            dst[p] = Math.round(acesTonemap(rLin) * 255 * vMask);
+            dst[p + 1] = Math.round(acesTonemap(gLin) * 255 * vMask);
+            dst[p + 2] = Math.round(acesTonemap(bLin) * 255 * vMask);
+            dst[p + 3] = 255;
+          }
+        }
+
+        shaderCtx.putImageData(outImg, 0, 0);
+        ctx.imageSmoothingEnabled = true;
+        ctx.drawImage(shaderCanvas, ox, oy, drawW, drawH);
+      }
+
+      // ==========================================
+      // РЕЖИМ 5: SILK 5.0 (ДЕЛИКАТНАЯ ШЕЛКОВАЯ ВУАЛЬ РК4)
       // ==========================================
       else if (s.topology === "SILK") {
-        ctx.globalCompositeOperation = isPaper ? "source-over" : "lighter";
+        ctx.globalCompositeOperation = isPaper ? "multiply" : "screen";
         const stepSize = 0.0028 + t.energy * 0.0035;
         const springPull = 0.065 * t.structure;
         const activeSilk = Math.floor((s.isMobile ? 2600 : SILK_COUNT) * (1.05 - art.noiseGate * 0.65));
@@ -1719,10 +1918,9 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
           const gy0 = Math.min(m.h - 1, Math.max(0, Math.floor(currY * m.h)));
           const cell0 = gy0 * m.w + gx0;
           const e = m.edge[cell0];
-          const l = m.liftedLum[cell0];
+          const l = m.lum[cell0];
           const vMask = m.mask[cell0];
 
-          // Если частица попала в пустой черный фон — не рисуем её, чтобы фон оставался идеально черным!
           if (e < 0.04 && l < 0.08) {
             pt.age += 4;
           } else {
@@ -1744,13 +1942,12 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
             }
 
             const fadeLife = Math.sin((pt.age / pt.maxAge) * Math.PI);
-            // Деликатная шелковая прозрачность (0.02 .. 0.16), чтобы глазам было максимально приятно!
-            const alpha = clip((0.03 + e * 0.14 + l * 0.08) * fadeLife * vMask, 0.015, 0.18);
+            const alpha = clip((0.035 + e * 0.16 + l * 0.09) * fadeLife * vMask, 0.015, 0.22);
 
             const p = cell0 * 4;
             const [rC, gC, bC] = resolveArtColor(art, m.rgba[p], m.rgba[p + 1], m.rgba[p + 2], l, e, t.tone, true);
             ctx.strokeStyle = "rgba(" + String(rC) + "," + String(gC) + "," + String(bC) + "," + String(alpha.toFixed(3)) + ")";
-            ctx.lineWidth = (0.45 + e * 0.75) * art.strokeWeight;
+            ctx.lineWidth = (0.45 + e * 0.7) * art.strokeWeight;
             ctx.stroke();
           }
 
@@ -1774,10 +1971,10 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
       }
 
       // ==========================================
-      // РЕЖИМ 4: LIDAR 2.0
+      // РЕЖИМ 6: LIDAR 2.0
       // ==========================================
       else if (s.topology === "LIDAR") {
-        ctx.globalCompositeOperation = isPaper ? "source-over" : "lighter";
+        ctx.globalCompositeOperation = isPaper ? "source-over" : "screen";
 
         const centerX = viewW * 0.5;
         const centerY = viewH * 0.42;
@@ -1819,7 +2016,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
               continue;
             }
 
-            const l = m.liftedLum[idx];
+            const l = m.lum[idx];
             const e = m.edge[idx];
             if (l < art.noiseGate * 0.25 && e < art.noiseGate * 0.3) {
               hasPrev = false;
@@ -1846,12 +2043,12 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
 
             const p = idx * 4;
             const [rC, gC, bC] = resolveArtColor(art, m.rgba[p], m.rgba[p + 1], m.rgba[p + 2], l, e, t.tone);
-            const alpha = clip((0.26 + l * 0.6 + e * 0.48 + scanGlow) * vMask, 0.08, 0.96);
+            const alpha = clip((0.26 + l * 0.6 + e * 0.48 + scanGlow) * vMask, 0.08, 0.94);
 
             ctx.strokeStyle = "rgba(" + String(rC) + "," + String(gC) + "," + String(bC) + "," + String((alpha * 0.6).toFixed(2)) + ")";
             ctx.fillStyle = "rgba(" + String(rC) + "," + String(gC) + "," + String(bC) + "," + String(alpha.toFixed(2)) + ")";
 
-            ctx.lineWidth = 0.95 * art.strokeWeight;
+            ctx.lineWidth = 0.85 * art.strokeWeight;
             ctx.beginPath();
             ctx.moveTo(sxBack, syBack);
             ctx.lineTo(sx, sy);
@@ -1861,7 +2058,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
             }
             ctx.stroke();
 
-            const ptSize = (1.2 + l * 1.3 + e * 1.2) * (fov * 0.85) * art.strokeWeight;
+            const ptSize = (1.1 + l * 1.2 + e * 1.1) * (fov * 0.85) * art.strokeWeight;
             ctx.fillRect(sx - ptSize * 0.5, sy - ptSize * 0.5, ptSize, ptSize);
 
             prevSx = sx;
@@ -1872,73 +2069,11 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
       }
 
       // ==========================================
-      // РЕЖИМ 5: ACID
-      // ==========================================
-      else if (s.topology === "ACID" && shaderCtx) {
-        if (shaderCanvas.width !== m.w || shaderCanvas.height !== m.h) {
-          shaderCanvas.width = m.w;
-          shaderCanvas.height = m.h;
-        }
-        const outImg = shaderCtx.createImageData(m.w, m.h);
-        const dst = outImg.data;
-        const src = m.rgba;
-
-        const waveAmp = t.chaos * 12.0;
-        const freq1 = 0.02 * c.nHarmonic;
-        const freq2 = 0.02 * c.mHarmonic;
-        const rgbSplit = t.chaos * 7.5 + t.energy * 2.0;
-        const edgeGlowBoost = t.structure * 190.0 * art.glowIntensity;
-        const foldMirror = t.symmetry > 0.65;
-
-        for (let y = 0; y < m.h; y++) {
-          const rowWaveX = Math.sin(y * freq1 + time * 2.2) * waveAmp;
-          for (let x = 0; x < m.w; x++) {
-            const baseIdx = y * m.w + x;
-            const vMask = m.mask[baseIdx];
-            if (vMask <= 0.005) continue;
-
-            const srcXBase = foldMirror && x > m.w / 2 ? m.w - 1 - x : x;
-            const sx = clip(srcXBase + rowWaveX, 0, m.w - 1);
-            const sy = clip(y + Math.cos(srcXBase * freq2 + time * 1.9) * waveAmp * 0.65, 0, m.h - 1);
-
-            const [rR] = sampleBilinearRGB(src, m.w, m.h, clip(sx + rgbSplit, 0, m.w - 1), sy);
-            const [, gG] = sampleBilinearRGB(src, m.w, m.h, sx, sy);
-            const [, , bB] = sampleBilinearRGB(src, m.w, m.h, clip(sx - rgbSplit, 0, m.w - 1), sy);
-
-            const idx = Math.floor(sy) * m.w + Math.floor(sx);
-            const lVal = m.liftedLum[idx];
-            const eVal = m.edge[idx];
-
-            let [r, g, b] =
-              art.palette === "NATIVE" && t.tone < 0.03
-                ? [rR, gG, bB]
-                : resolveArtColor(art, rR, gG, bB, lVal, eVal, t.tone, true);
-
-            if (eVal > 0.12) {
-              const glow = eVal * edgeGlowBoost;
-              r = Math.min(255, r + glow * 0.8);
-              g = Math.min(255, g + glow * 0.6);
-              b = Math.min(255, b + glow);
-            }
-
-            const outP = baseIdx * 4;
-            dst[outP] = Math.round(r * vMask);
-            dst[outP + 1] = Math.round(g * vMask);
-            dst[outP + 2] = Math.round(b * vMask);
-            dst[outP + 3] = 255;
-          }
-        }
-        shaderCtx.putImageData(outImg, 0, 0);
-        ctx.imageSmoothingEnabled = true;
-        ctx.drawImage(shaderCanvas, ox, oy, drawW, drawH);
-      }
-
-      // ==========================================
-      // РЕЖИМ 6: ENGRAVE
+      // РЕЖИМ 7: ENGRAVE
       // ==========================================
       else if (s.topology === "ENGRAVE") {
-        if (art.underlayOpacity > 0.01) {
-          ctx.globalAlpha = art.underlayOpacity;
+        if (art.subjectClarity > 0.01) {
+          ctx.globalAlpha = art.subjectClarity * 0.75;
           ctx.drawImage(underlayCanvas, ox, oy, drawW, drawH);
           ctx.globalAlpha = 1.0;
         }
@@ -1962,7 +2097,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
             const uNorm = cIdx / (numCols - 1);
             const sx = Math.min(m.w - 1, Math.floor(uNorm * m.w));
             const cell = sy * m.w + sx;
-            const l = m.liftedLum[cell];
+            const l = m.lum[cell];
             const e = m.edge[cell];
             const vMask = m.mask[cell];
             rowLum += l;
@@ -1974,7 +2109,11 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
           }
           ctx.lineTo(ox + drawW, baseScreenY + 3);
           ctx.closePath();
-          ctx.fillStyle = isPaper ? "rgba(245, 242, 235, 0.84)" : "rgba(2, 1, 4, 0.78)";
+          ctx.fillStyle = isPaper
+            ? "rgba(242, 234, 219, 0.84)"
+            : isCyanotype
+            ? "rgba(6, 21, 45, 0.82)"
+            : "rgba(2, 1, 4, 0.78)";
           ctx.fill();
 
           const midCell = (sy * m.w + Math.floor(m.w * 0.5)) * 4;
@@ -1988,81 +2127,17 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
             t.tone
           );
           ctx.strokeStyle = "rgba(" + String(rC) + "," + String(gC) + "," + String(bC) + ",0.9)";
-          ctx.lineWidth = 1.15 * art.strokeWeight;
+          ctx.lineWidth = 1.05 * art.strokeWeight;
           ctx.stroke();
         }
-      }
-
-      // ==========================================
-      // РЕЖИМ 7: PRISM
-      // ==========================================
-      else if (s.topology === "PRISM" && shaderCtx) {
-        if (shaderCanvas.width !== m.w || shaderCanvas.height !== m.h) {
-          shaderCanvas.width = m.w;
-          shaderCanvas.height = m.h;
-        }
-        const outImg = shaderCtx.createImageData(m.w, m.h);
-        const dst = outImg.data;
-        const src = m.rgba;
-
-        const rayAngle = theta + Math.sin(time * 0.7) * 0.22;
-        const dirX = Math.cos(rayAngle);
-        const dirY = Math.sin(rayAngle);
-        const maxDispersion = 12.0 + t.symmetry * 42.0 + t.chaos * 24.0;
-        const crispLock = t.structure;
-
-        for (let y = 0; y < m.h; y++) {
-          for (let x = 0; x < m.w; x++) {
-            const idx = y * m.w + x;
-            const vMask = m.mask[idx];
-            if (vMask <= 0.005) continue;
-
-            const p = idx * 4;
-            const e = m.edge[idx];
-
-            let rAcc = src[p] * crispLock * (0.78 + e * 0.5);
-            let gAcc = src[p + 1] * crispLock * (0.78 + e * 0.5);
-            let bAcc = src[p + 2] * crispLock * (0.78 + e * 0.5);
-
-            for (let band = 0; band < 7; band++) {
-              const bandNorm = (band + 1) / 7.0;
-              const dist = bandNorm * maxDispersion * (0.8 + 0.2 * Math.sin(time * 2.5 + band * 0.6));
-              const sx = Math.round(x - dirX * dist);
-              const sy = Math.round(y - dirY * dist);
-
-              if (sx >= 0 && sx < m.w && sy >= 0 && sy < m.h) {
-                const sIdx = sy * m.w + sx;
-                const sEdge = m.edge[sIdx];
-                const sLum = m.liftedLum[sIdx];
-                const energySource = sEdge * 1.45 + (sLum > 0.55 ? (sLum - 0.55) * 1.2 : 0.0);
-                if (energySource > 0.18) {
-                  const intensity = energySource * (1.0 - bandNorm * 0.35) * 0.45 * art.glowIntensity;
-                  const [cr, cg, cb] = CAUCHY_SPECTRUM[band];
-                  rAcc += cr * intensity;
-                  gAcc += cg * intensity;
-                  bAcc += cb * intensity;
-                }
-              }
-            }
-
-            dst[p] = Math.min(255, Math.max(0, Math.round(rAcc * vMask)));
-            dst[p + 1] = Math.min(255, Math.max(0, Math.round(gAcc * vMask)));
-            dst[p + 2] = Math.min(255, Math.max(0, Math.round(bAcc * vMask)));
-            dst[p + 3] = 255;
-          }
-        }
-
-        shaderCtx.putImageData(outImg, 0, 0);
-        ctx.imageSmoothingEnabled = true;
-        ctx.drawImage(shaderCanvas, ox, oy, drawW, drawH);
       }
 
       // ==========================================
       // РЕЖИМ 8: CRYSTAL
       // ==========================================
       else if (s.topology === "CRYSTAL") {
-        if (art.underlayOpacity > 0.01) {
-          ctx.globalAlpha = art.underlayOpacity;
+        if (art.subjectClarity > 0.01) {
+          ctx.globalAlpha = art.subjectClarity;
           ctx.drawImage(underlayCanvas, ox, oy, drawW, drawH);
           ctx.globalAlpha = 1.0;
         }
@@ -2100,7 +2175,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
 
           if (cl.edge > 0.22) {
             ctx.strokeStyle = "rgba(" + String(Math.min(255, r + 65)) + "," + String(Math.min(255, g + 65)) + "," + String(Math.min(255, b + 75)) + "," + String((cl.edge * t.structure).toFixed(2)) + ")";
-            ctx.lineWidth = 0.9;
+            ctx.lineWidth = 0.85;
             ctx.stroke();
           }
         }
@@ -2110,13 +2185,13 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
       // РЕЖИМ 9: GLYPH
       // ==========================================
       else if (s.topology === "GLYPH") {
-        if (art.underlayOpacity > 0.01) {
-          ctx.globalAlpha = art.underlayOpacity;
+        if (art.subjectClarity > 0.01) {
+          ctx.globalAlpha = art.subjectClarity;
           ctx.drawImage(underlayCanvas, ox, oy, drawW, drawH);
           ctx.globalAlpha = 1.0;
         }
 
-        ctx.globalCompositeOperation = isPaper ? "source-over" : "lighter";
+        ctx.globalCompositeOperation = isPaper ? "source-over" : "screen";
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
 
@@ -2133,7 +2208,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
             const idx = sy * m.w + sx;
 
             const vMask = m.mask[idx];
-            const l = m.liftedLum[idx];
+            const l = m.lum[idx];
             const e = m.edge[idx];
             if ((l < art.noiseGate * 0.25 && e < art.noiseGate * 0.3) || vMask < 0.08) continue;
 
@@ -2157,12 +2232,20 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
       }
 
       // ==========================================
-      // ГАЛЕРЕЙНАЯ РАМКА И ТИПОГРАФИКА ПОСТЕРА
+      // ГАЛЕРЕЙНАЯ РАМКА И ПАСПОРТ АРТЕФАКТА
       // ==========================================
       if (art.posterFrame) {
         ctx.globalCompositeOperation = "source-over";
-        const frameStroke = isPaper ? "rgba(20, 20, 25, 0.28)" : "rgba(255, 255, 255, 0.16)";
-        const textFill = isPaper ? "rgba(20, 20, 25, 0.65)" : "rgba(255, 255, 255, 0.55)";
+        const frameStroke = isPaper
+          ? "rgba(45, 30, 18, 0.35)"
+          : isCyanotype
+          ? "rgba(56, 189, 248, 0.35)"
+          : "rgba(255, 255, 255, 0.16)";
+        const textFill = isPaper
+          ? "rgba(45, 30, 18, 0.75)"
+          : isCyanotype
+          ? "rgba(125, 211, 252, 0.8)"
+          : "rgba(255, 255, 255, 0.55)";
 
         ctx.strokeStyle = frameStroke;
         ctx.lineWidth = 1;
@@ -2172,7 +2255,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
         ctx.fillStyle = textFill;
         ctx.textAlign = "left";
         ctx.fillText(
-          "BARRETT // " + (query || "SHINE ON").toUpperCase().slice(0, 26) + " [" + s.topology + " · " + art.styleEngine + "]",
+          "BARRETT // " + (query || "SHINE ON").toUpperCase().slice(0, 24) + " [" + s.topology + " · " + art.master + "]",
           ox - 4,
           oy + drawH + 10
         );
@@ -2258,7 +2341,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
       {/* МАТЕМАТИЧЕСКИЙ ХОЛСТ BARRETT */}
       <div
         ref={containerRef}
-        className="lg:col-span-8 relative h-[600px] md:h-[750px] rounded-2xl overflow-hidden border border-white/10 bg-[#020104] shadow-[0_20px_60px_rgba(0,0,0,0.85)]"
+        className="lg:col-span-8 relative h-[600px] md:h-[760px] rounded-2xl overflow-hidden border border-white/10 bg-[#020104] shadow-[0_20px_60px_rgba(0,0,0,0.85)]"
       >
         <canvas
           ref={canvasRef}
@@ -2341,7 +2424,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
 
           <div className="flex flex-wrap justify-between items-center gap-2">
             <div className="flex flex-wrap gap-1 bg-black/80 backdrop-blur-md p-1.5 rounded-full border border-white/10">
-              {(["TRACE", "CURRENTS", "SILK", "LIDAR", "ACID", "ENGRAVE", "PRISM", "CRYSTAL", "GLYPH"] as ManifoldTopology[]).map((mode) => (
+              {(["TRACE", "CURRENTS", "PIPER", "PRISM", "SILK", "LIDAR", "ENGRAVE", "CRYSTAL", "GLYPH"] as ManifoldTopology[]).map((mode) => (
                 <button
                   key={mode}
                   type="button"
@@ -2394,7 +2477,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
       {/* ПРАВАЯ ПАНЕЛЬ: BARRETT ART STUDIO PRO */}
       <div className="lg:col-span-4 glass-panel p-6 flex flex-col justify-between gap-4">
         <div>
-          <div className="flex items-center justify-between border-b border-white/10 pb-3 mb-4">
+          <div className="flex items-center justify-between border-b border-white/10 pb-3 mb-3.5">
             <div className="flex gap-2">
               <button
                 type="button"
@@ -2421,96 +2504,67 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
                 5D Tensor
               </button>
             </div>
-            <span className="font-mono text-[8px] text-[#a855f7] uppercase tracking-widest">ZERO-AI</span>
+            <span className="font-mono text-[8px] text-[#a855f7] uppercase tracking-widest">ACES HDR</span>
           </div>
 
           {activeTab === "STUDIO" ? (
             <div className="flex flex-col gap-3.5 font-mono text-[9px] uppercase tracking-widest">
-              {/* Палитры */}
+              {/* 6 КАРДИНАЛЬНО РАЗНЫХ РЕЖИССЕРСКИХ МАСТЕР-ПРЕСЕТОВ */}
               <div>
                 <div className="flex justify-between items-center text-neutral-400 mb-1.5">
-                  <span>Color Grade:</span>
-                  <div className="flex gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => updateArt("theme", artConfig.theme === "VOID" ? "PAPER" : "VOID")}
-                      className="px-2 py-0.5 rounded border border-white/15 bg-white/5 text-white text-[8px] cursor-pointer hover:bg-white hover:text-black transition-all"
-                    >
-                      BG: {artConfig.theme}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => updateArt("posterFrame", !artConfig.posterFrame)}
-                      className={
-                        "px-2 py-0.5 rounded border text-[8px] cursor-pointer transition-all " +
-                        (artConfig.posterFrame
-                          ? "border-[#a855f7] text-[#a855f7] bg-[#a855f7]/10"
-                          : "border-white/15 text-neutral-400")
-                      }
-                    >
-                      Frame
-                    </button>
-                  </div>
+                  <span>Master Art Direction (1-Click):</span>
+                  <button
+                    type="button"
+                    onClick={() => updateArt("posterFrame", !artConfig.posterFrame)}
+                    className={
+                      "px-2 py-0.5 rounded border text-[8px] cursor-pointer transition-all " +
+                      (artConfig.posterFrame
+                        ? "border-[#a855f7] text-[#a855f7] bg-[#a855f7]/10"
+                        : "border-white/15 text-neutral-400")
+                    }
+                  >
+                    Poster Frame
+                  </button>
                 </div>
-
-                <div className="grid grid-cols-4 gap-1.5">
-                  {PALETTE_SWATCHES.map((sw) => (
+                <div className="grid grid-cols-3 gap-1.5">
+                  {(
+                    [
+                      { id: "SYD_1967", label: "Syd 1967", dot: "#c026d3" },
+                      { id: "BLUEPRINT", label: "Blueprint", dot: "#38bdf8" },
+                      { id: "SIN_CITY", label: "Sin City", dot: "#ef4444" },
+                      { id: "GOLD_24K", label: "24K Gold", dot: "#f59e0b" },
+                      { id: "DA_VINCI", label: "Da Vinci", dot: "#d6c7b2" },
+                      { id: "CYBERPUNK", label: "Cyberpunk", dot: "#00f5ff" },
+                    ] as { id: MasterPreset; label: string; dot: string }[]
+                  ).map((mp) => (
                     <button
-                      key={sw.id}
+                      key={mp.id}
                       type="button"
-                      onClick={() => updateArt("palette", sw.id)}
+                      onClick={() => applyMasterPreset(mp.id)}
                       className={
-                        "py-1.5 px-2 rounded-lg border text-[8px] tracking-wider flex items-center gap-1.5 transition-all cursor-pointer " +
-                        (artConfig.palette === sw.id
-                          ? "bg-white text-black border-white font-bold shadow-[0_0_12px_rgba(255,255,255,0.25)]"
+                        "py-2 px-2 rounded-lg border text-[8px] tracking-wider flex items-center gap-1.5 transition-all cursor-pointer " +
+                        (artConfig.master === mp.id
+                          ? "bg-white text-black border-white font-bold shadow-[0_0_15px_rgba(255,255,255,0.3)]"
                           : "bg-black/45 text-neutral-300 border-white/10 hover:border-white/30")
                       }
                     >
-                      <span
-                        className="w-2.5 h-2.5 rounded-full shrink-0"
-                        style={{
-                          background: "linear-gradient(135deg, " + sw.colors[0] + ", " + sw.colors[1] + ")",
-                        }}
-                      />
-                      <span className="truncate">{sw.label}</span>
+                      <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: mp.dot }} />
+                      <span className="truncate">{mp.label}</span>
                     </button>
                   ))}
                 </div>
               </div>
 
-              {artConfig.palette === "CUSTOM" && (
-                <div className="flex items-center justify-between gap-3 p-2 rounded-xl bg-black/50 border border-white/10">
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="color"
-                      value={artConfig.primaryHex}
-                      onChange={(e) => updateArt("primaryHex", e.target.value)}
-                      className="w-5 h-5 rounded border-0 bg-transparent cursor-pointer"
-                    />
-                    <span className="text-neutral-300 text-[8px]">Primary</span>
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="color"
-                      value={artConfig.secondaryHex}
-                      onChange={(e) => updateArt("secondaryHex", e.target.value)}
-                      className="w-5 h-5 rounded border-0 bg-transparent cursor-pointer"
-                    />
-                    <span className="text-neutral-300 text-[8px]">Secondary</span>
-                  </label>
-                </div>
-              )}
-
-              {/* 4 кардинально разных геометрических движка рендеринга */}
+              {/* 4 геометрических движка рендеринга */}
               <div>
-                <div className="text-neutral-400 mb-1.5">Render Style Engine:</div>
+                <div className="text-neutral-400 mb-1.5">Vector Geometry Engine:</div>
                 <div className="grid grid-cols-4 gap-1.5">
                   {(
                     [
-                      { id: "NEON", label: "Neon Laser" },
-                      { id: "INK_HATCH", label: "Schiele Ink" },
+                      { id: "RAZOR_VECTOR", label: "Razor 0.5px" },
+                      { id: "INK_HATCH", label: "Cross-Hatch" },
                       { id: "HALFTONE", label: "Halftone" },
-                      { id: "CHROMATIC", label: "RGB Split" },
+                      { id: "RGB_SPLIT", label: "RGB Split" },
                     ] as { id: StyleEnginePreset; label: string }[]
                   ).map((st) => (
                     <button
@@ -2520,7 +2574,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
                       className={
                         "py-1.5 px-1.5 rounded-lg border text-[8px] tracking-wider transition-all cursor-pointer " +
                         (artConfig.styleEngine === st.id
-                          ? "bg-white text-black border-white font-bold"
+                          ? "bg-[#a855f7] text-black border-[#a855f7] font-bold"
                           : "bg-black/40 text-neutral-300 border-white/10 hover:border-white/30")
                       }
                     >
@@ -2536,10 +2590,10 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
                 <div className="grid grid-cols-4 gap-1.5">
                   {(
                     [
-                      { id: "COMETS", label: "Comets" },
-                      { id: "LASER_LOOP", label: "Laser Loop" },
-                      { id: "PULSE", label: "Pulse" },
-                      { id: "STILL", label: "Still Crisp" },
+                      { id: "COMETS", label: "Liquid Light" },
+                      { id: "LASER_LOOP", label: "Laser Plot" },
+                      { id: "PULSE", label: "Harmonic" },
+                      { id: "STILL", label: "Locked Print" },
                     ] as { id: FlowAnimationMode; label: string }[]
                   ).map((fm) => (
                     <button
@@ -2552,7 +2606,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
                       className={
                         "py-1.5 px-1.5 rounded-lg border text-[8px] tracking-wider transition-all cursor-pointer " +
                         (artConfig.flowMode === fm.id
-                          ? "bg-[#a855f7] text-black border-[#a855f7] font-bold"
+                          ? "bg-white text-black border-white font-bold"
                           : "bg-black/40 text-neutral-300 border-white/10 hover:border-white/30")
                       }
                     >
@@ -2562,18 +2616,18 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
                 </div>
               </div>
 
-              {/* Ползунки студийной доводки */}
-              <div className="flex flex-col gap-3 pt-1">
+              {/* Ползунки тонкой студийной доводки */}
+              <div className="flex flex-col gap-2.5 pt-1">
                 <div className="flex flex-col gap-1">
                   <div className="flex justify-between text-neutral-400">
-                    <span>Micro-Detail Gate (Faces & Text)</span>
+                    <span>Micro-Detail Sensitivity (Text & Eyes)</span>
                     <span className="text-[#10b981]">{Math.round((1.0 - artConfig.noiseGate) * 100)}%</span>
                   </div>
                   <input
                     type="range"
-                    min="0.02"
-                    max="0.65"
-                    step="0.02"
+                    min="0.01"
+                    max="0.55"
+                    step="0.01"
                     value={artConfig.noiseGate}
                     onChange={(e) => updateArt("noiseGate", parseFloat(e.target.value))}
                     className="w-full accent-white cursor-pointer h-1 bg-white/10 rounded-lg"
@@ -2582,13 +2636,13 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
 
                 <div className="flex flex-col gap-1">
                   <div className="flex justify-between text-neutral-400">
-                    <span>Stroke Weight</span>
+                    <span>Filament Calibre (Line Weight)</span>
                     <span className="text-white">{artConfig.strokeWeight.toFixed(2)}x</span>
                   </div>
                   <input
                     type="range"
                     min="0.35"
-                    max="2.2"
+                    max="1.8"
                     step="0.05"
                     value={artConfig.strokeWeight}
                     onChange={(e) => updateArt("strokeWeight", parseFloat(e.target.value))}
@@ -2598,23 +2652,23 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
 
                 <div className="flex flex-col gap-1">
                   <div className="flex justify-between text-neutral-400">
-                    <span>Base Photo Blend</span>
-                    <span className="text-white">{Math.round(artConfig.underlayOpacity * 100)}%</span>
+                    <span>Subject Relief Lock (Clarity)</span>
+                    <span className="text-white">{Math.round(artConfig.subjectClarity * 100)}%</span>
                   </div>
                   <input
                     type="range"
                     min="0.0"
-                    max="0.75"
+                    max="0.8"
                     step="0.02"
-                    value={artConfig.underlayOpacity}
-                    onChange={(e) => updateArt("underlayOpacity", parseFloat(e.target.value))}
+                    value={artConfig.subjectClarity}
+                    onChange={(e) => updateArt("subjectClarity", parseFloat(e.target.value))}
                     className="w-full accent-white cursor-pointer h-1 bg-white/10 rounded-lg"
                   />
                 </div>
 
                 <div className="flex flex-col gap-1">
                   <div className="flex justify-between text-neutral-400">
-                    <span>Chrome & Bloom Intensity</span>
+                    <span>Iridescence & Specular</span>
                     <span className="text-white">{Math.round(artConfig.glowIntensity * 100)}%</span>
                   </div>
                   <input
@@ -2633,11 +2687,11 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
             <div className="flex flex-col gap-4 font-mono text-[10px] uppercase tracking-widest">
               {(
                 [
-                  { key: "energy", label: "Energy (Stream & Comet Speed)" },
-                  { key: "chaos", label: "Chaos (Vortex Wake & Turbulence)" },
-                  { key: "tone", label: "Tone (Spectrum Phase Shift)" },
-                  { key: "structure", label: "Structure (Obstacle Relief)" },
-                  { key: "symmetry", label: "Symmetry (Ribbon Frequency)" },
+                  { key: "energy", label: "Energy (Fluid & Comet Velocity)" },
+                  { key: "chaos", label: "Chaos (Domain Warp & Curl)" },
+                  { key: "tone", label: "Tone (Thin-Film Wavelength)" },
+                  { key: "structure", label: "Structure (Subject Core Shield)" },
+                  { key: "symmetry", label: "Symmetry (Wave Frequency)" },
                 ] as { key: keyof Tensor5D; label: string }[]
               ).map((item) => (
                 <div key={item.key} className="flex flex-col gap-1.5">
@@ -2659,8 +2713,8 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
 
               <div className="mt-2 p-3 rounded-xl bg-black/50 border border-white/5 font-mono text-[8px] text-neutral-400 leading-relaxed space-y-1">
                 <div className="text-white uppercase">Active Mathematical Kernel:</div>
-                <div>∇I_retinex = |∇(I^0.62)| / max(G_σ * |∇I|, ε)</div>
-                <div>Ψ_currents = (n + Wake_cursor)·ω + (G_σ^10 * I)·St</div>
+                <div>C_aces = x(2.51x + 0.03) / (x(2.43x + 0.59) + 0.14)</div>
+                <div>I_currents = I(u + Curl(Ψ)·(1 - Shield_st))</div>
               </div>
             </div>
           )}

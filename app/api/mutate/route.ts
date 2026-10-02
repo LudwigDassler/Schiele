@@ -1,6 +1,48 @@
 import { NextResponse } from "next/server";
 import { supabase } from "../../../lib/supabase";
 
+// ==========================================
+// 0. ОПТИЧЕСКИЙ ПРОКСИ ДЛЯ BARRETT ENGINE (ОБХОД CORS НА CANVAS)
+// ==========================================
+export async function GET(req: Request) {
+  try {
+    const url = new URL(req.url);
+    const targetUrl = url.searchParams.get("proxy");
+    if (!targetUrl || !targetUrl.startsWith("http")) {
+      return new NextResponse("Missing proxy url", { status: 400 });
+    }
+
+    const imgRes = await fetch(targetUrl, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+      },
+      signal: AbortSignal.timeout(8000),
+    });
+
+    if (!imgRes.ok) {
+      return new NextResponse("Upstream image error", { status: 502 });
+    }
+
+    const contentType = imgRes.headers.get("content-type") || "image/jpeg";
+    const buffer = await imgRes.arrayBuffer();
+
+    return new NextResponse(buffer, {
+      status: 200,
+      headers: {
+        "Content-Type": contentType,
+        "Access-Control-Allow-Origin": "*",
+        "Cache-Control": "public, max-age=3600",
+      },
+    });
+  } catch {
+    return new NextResponse("Proxy error", { status: 500 });
+  }
+}
+
+// ==========================================
+// 1. SEMANTIC ENGINE & ЛЕКСИЧЕСКАЯ ЦЕНТРИФУГА (ИЗ ORACLE 12.0)
+// ==========================================
 const LINGUISTIC_NOISE = new Set([
   "hd", "4k", "8k", "hq", "high", "quality", "resolution", "1080p", "fullhd",
   "wallpaper", "wallpapers", "background", "backgrounds", "desktop", "mobile",

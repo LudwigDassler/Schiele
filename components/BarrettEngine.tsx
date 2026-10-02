@@ -2,10 +2,10 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
 
 interface Tensor5D {
-  energy: number;    // E: скорость фазового сдвига и яркость сплайнов
-  chaos: number;     // C: нелинейная турбулентность (распад формы в аттрактор)
-  tone: number;      // H: угол хроматического вращения матрицы SO(3)
-  structure: number; // St: сила гравитации контуров Собеля (четкость объекта)
+  energy: number;    // E: скорость течения вдоль контуров и частота волн
+  chaos: number;     // C: отрыв от якорей Гука (распад объекта в вихрь)
+  tone: number;      // H: сдвиг спектральной фазы и полихромной палитры
+  structure: number; // St: жесткость пружин Гука (точность прорисовки объекта)
   symmetry: number;  // Sy: порядок калейдоскопической группы вращений C_k
 }
 
@@ -20,19 +20,29 @@ interface DifferentialConstants {
   lyapunov: number;
 }
 
-interface VectorFieldGrid {
-  size: number;
-  gx: Float32Array;   // Градиент Собеля по X
-  gy: Float32Array;   // Градиент Собеля по Y
-  edge: Float32Array; // Сила контура |∇I|
-  lum: Float32Array;  // Яркость точки
-  r: Uint8Array;      // Нативный спектр R
-  g: Uint8Array;      // Нативный спектр G
-  b: Uint8Array;      // Нативный спектр B
-  spawnPoints: number[]; // Индексы точек высокой энергии для рождения частиц
+interface AnchorPoint {
+  x0: number;
+  y0: number;
+  tx: number;
+  ty: number;
+  edge: number;
+  lum: number;
+  hue: number;
+  sat: number;
 }
 
-type ManifoldTopology = "OBJECT" | "CLIFFORD" | "CHLADNI" | "VORTEX";
+interface VectorFieldGrid {
+  size: number;
+  gx: Float32Array;
+  gy: Float32Array;
+  edge: Float32Array;
+  lum: Float32Array;
+  hue: Float32Array;
+  sat: Float32Array;
+  anchors: AnchorPoint[];
+}
+
+type ManifoldTopology = "OBJECT" | "WAVE" | "CLIFFORD" | "CHLADNI";
 
 interface Props {
   query: string;
@@ -40,7 +50,8 @@ interface Props {
 }
 
 const PHI = 1.618033988749;
-const GRID_SIZE = 220;
+const GRID_SIZE = 300;
+const PARTICLE_COUNT = 8500;
 const VOWELS = new Set(["a", "e", "i", "o", "u", "y", "а", "е", "ё", "и", "о", "у", "ы", "э", "ю", "я"]);
 
 function clip(v: number, min = 0.0, max = 1.0): number {
@@ -61,6 +72,24 @@ function computeShannonEntropy(str: string): number {
     h -= p * Math.log2(p);
   }
   return h;
+}
+
+function rgbToHs(r: number, g: number, b: number): [number, number] {
+  const rn = r / 255;
+  const gn = g / 255;
+  const bn = b / 255;
+  const max = Math.max(rn, gn, bn);
+  const min = Math.min(rn, gn, bn);
+  const d = max - min;
+  if (d < 0.001) return [0, 0];
+
+  const l = (max + min) * 0.5;
+  const s = l > 0.5 ? d / (2.0 - max - min) : d / (max + min);
+  let h = 0;
+  if (max === rn) h = (gn - bn) / d + (gn < bn ? 6 : 0);
+  else if (max === gn) h = (bn - rn) / d + 2;
+  else h = (rn - gn) / d + 4;
+  return [(h / 6) * 360, clip(s)];
 }
 
 function compileLexicalManifold(rawText: string): { tensor: Tensor5D; coeffs: DifferentialConstants } {
@@ -90,12 +119,12 @@ function compileLexicalManifold(rawText: string): { tensor: Tensor5D; coeffs: Di
   const totalLetters = Math.max(1, vowelCount + consonantCount);
   const consonantRatio = consonantCount / totalLetters;
 
-  const energy = clip(((abs1 % 1000) / 1000) * 0.55 + consonantRatio * 0.35, 0.35, 0.92);
-  const chaos = clip((entropy / 4.5) * 0.35 + (((abs2 >> 4) % 100) / 100) * 0.2, 0.12, 0.55);
+  const energy = clip(((abs1 % 1000) / 1000) * 0.45 + 0.35, 0.35, 0.85);
+  // Низкий стартовый хаос, чтобы объект сразу читался идеально четко
+  const chaos = clip((entropy / 4.5) * 0.18 + 0.06, 0.06, 0.28);
   const tone = clip(((abs1 >> 8) % 360) / 360, 0.0, 1.0);
-  const structure = clip(0.68 + consonantRatio * 0.25, 0.65, 0.95);
-  // Для режима отрисовки объекта стартовая симметрия C_1 (0.15), чтобы не дробить образ в снежинку
-  const symmetry = 0.15;
+  const structure = clip(0.82 + consonantRatio * 0.14, 0.80, 0.96);
+  const symmetry = 0.10;
 
   const alpha = Number((Math.sin(abs1 * 0.001 * PHI) * 2.2 + (energy - 0.5)).toFixed(4));
   const beta = Number((Math.cos(abs2 * 0.001 * PHI) * 2.2 - (chaos - 0.5)).toFixed(4));
@@ -130,7 +159,7 @@ function compileLexicalManifold(rawText: string): { tensor: Tensor5D; coeffs: Di
 }
 
 // ==========================================
-// МАТЕМАТИЧЕСКИЙ ЭКСТРАКТОР ПОЛЯ СОБЕЛЯ И СПЕКТРА ОБЪЕКТА
+// ПОСТРОЕНИЕ МАТРИЦЫ СОБЕЛЯ + УПРУГИХ ЯКОРЕЙ ГУКА
 // ==========================================
 function buildSobelFieldFromImage(img: HTMLImageElement): VectorFieldGrid {
   const s = GRID_SIZE;
@@ -143,49 +172,68 @@ function buildSobelFieldFromImage(img: HTMLImageElement): VectorFieldGrid {
   const gy = new Float32Array(s * s);
   const edge = new Float32Array(s * s);
   const lum = new Float32Array(s * s);
-  const rArr = new Uint8Array(s * s);
-  const gArr = new Uint8Array(s * s);
-  const bArr = new Uint8Array(s * s);
-  const spawnPoints: number[] = [];
+  const hue = new Float32Array(s * s);
+  const sat = new Float32Array(s * s);
+  const anchors: AnchorPoint[] = [];
 
   if (!octx) {
-    return { size: s, gx, gy, edge, lum, r: rArr, g: gArr, b: bArr, spawnPoints };
+    return { size: s, gx, gy, edge, lum, hue, sat, anchors };
   }
 
-  // Вписываем объект с сохранением пропорций по центру матрицы
   octx.fillStyle = "#000000";
   octx.fillRect(0, 0, s, s);
   const aspect = img.width / Math.max(1, img.height);
-  let drawW = s;
-  let drawH = s;
-  if (aspect > 1) drawH = s / aspect;
-  else drawW = s * aspect;
+  let drawW = s * 0.92;
+  let drawH = s * 0.92;
+  if (aspect > 1) drawH = drawW / aspect;
+  else drawW = drawH * aspect;
   const dx = (s - drawW) * 0.5;
   const dy = (s - drawH) * 0.5;
   octx.drawImage(img, dx, dy, drawW, drawH);
 
   const imgData = octx.getImageData(0, 0, s, s).data;
 
-  for (let i = 0; i < s * s; i++) {
-    const p = i * 4;
-    const r = imgData[p];
-    const g = imgData[p + 1];
-    const b = imgData[p + 2];
+  // Автоконтраст яркости + мягкое окно Ханна на краях (убирает серый квадрат)
+  let minL = 1.0;
+  let maxL = 0.0;
+  const rawLum = new Float32Array(s * s);
 
-    // Усиливаем хроматическую насыщенность спектра объекта
-    const avg = (r + g + b) / 3;
-    rArr[i] = Math.min(255, Math.max(0, Math.round(avg + (r - avg) * 1.65)));
-    gArr[i] = Math.min(255, Math.max(0, Math.round(avg + (g - avg) * 1.65)));
-    bArr[i] = Math.min(255, Math.max(0, Math.round(avg + (b - avg) * 1.65)));
+  for (let y = 0; y < s; y++) {
+    for (let x = 0; x < s; x++) {
+      const i = y * s + x;
+      const p = i * 4;
+      const r = imgData[p];
+      const g = imgData[p + 1];
+      const b = imgData[p + 2];
 
-    lum[i] = (0.299 * r + 0.587 * g + 0.114 * b) / 255.0;
+      const l = (0.299 * r + 0.587 * g + 0.114 * b) / 255.0;
+      rawLum[i] = l;
+      if (l < minL) minL = l;
+      if (l > maxL) maxL = l;
+
+      const [hVal, sVal] = rgbToHs(r, g, b);
+      hue[i] = hVal;
+      sat[i] = sVal;
+    }
+  }
+
+  const rangeL = Math.max(0.15, maxL - minL);
+  for (let y = 0; y < s; y++) {
+    const ny = (y / s) * 2.0 - 1.0;
+    for (let x = 0; x < s; x++) {
+      const nx = (x / s) * 2.0 - 1.0;
+      const i = y * s + x;
+      // Радиальное окно затухания на самых границах кадра
+      const rDist = Math.sqrt(nx * nx + ny * ny);
+      const windowMask = rDist > 0.92 ? clip(1.0 - (rDist - 0.92) / 0.12) : 1.0;
+      lum[i] = clip(((rawLum[i] - minL) / rangeL) * windowMask);
+    }
   }
 
   let maxEdge = 1e-5;
   for (let y = 1; y < s - 1; y++) {
     for (let x = 1; x < s - 1; x++) {
       const idx = y * s + x;
-      // Ядро оператора Собеля 3x3
       const sx =
         -lum[(y - 1) * s + (x - 1)] + lum[(y - 1) * s + (x + 1)] +
         -2 * lum[y * s + (x - 1)] + 2 * lum[y * s + (x + 1)] +
@@ -205,15 +253,58 @@ function buildSobelFieldFromImage(img: HTMLImageElement): VectorFieldGrid {
     }
   }
 
-  for (let i = 0; i < s * s; i++) {
-    edge[i] = clip(edge[i] / maxEdge);
-    // Отбираем точки контуров и светотени для рождения частиц (Importance Sampling)
-    if (edge[i] > 0.16 || (lum[i] > 0.22 && lum[i] < 0.88 && (i % 3 === 0))) {
-      spawnPoints.push(i);
+  // Формируем список кандидатов для якорей с весом важности (контуры + светлые детали)
+  const candidates: { idx: number; weight: number }[] = [];
+  for (let y = 2; y < s - 2; y++) {
+    for (let x = 2; x < s - 2; x++) {
+      const i = y * s + x;
+      edge[i] = clip(edge[i] / maxEdge);
+      const e = edge[i];
+      const l = lum[i];
+
+      // Отсекаем пустой темный фон, чтобы не было квадратной подложки
+      const importance = e * 2.4 + (l > 0.18 ? l * 0.65 : 0);
+      if (importance > 0.22) {
+        candidates.push({ idx: i, weight: importance });
+      }
     }
   }
 
-  return { size: s, gx, gy, edge, lum, r: rArr, g: gArr, b: bArr, spawnPoints };
+  if (candidates.length > 0) {
+    // Сортируем и равномерно выбираем PARTICLE_COUNT лучших структурных точек объекта
+    for (let k = 0; k < PARTICLE_COUNT; k++) {
+      // Комбинация детерминированного шага по золотому сечению и порога важности
+      const cIdx = Math.floor(((k * PHI) % 1) * candidates.length);
+      const cell = candidates[cIdx].idx;
+      const cx = cell % s;
+      const cy = Math.floor(cell / s);
+
+      const x0 = (cx / s) * 2.0 - 1.0 + (Math.random() - 0.5) * (1.5 / s);
+      const y0 = (cy / s) * 2.0 - 1.0 + (Math.random() - 0.5) * (1.5 / s);
+
+      // Касательная к контуру Собеля (-gy, gx)
+      let tx = -gy[cell];
+      let ty = gx[cell];
+      if (tx * tx + ty * ty < 0.01) {
+        const ang = (k * PHI) * Math.PI * 2;
+        tx = Math.cos(ang);
+        ty = Math.sin(ang);
+      }
+
+      anchors.push({
+        x0,
+        y0,
+        tx,
+        ty,
+        edge: edge[cell],
+        lum: lum[cell],
+        hue: hue[cell],
+        sat: sat[cell],
+      });
+    }
+  }
+
+  return { size: s, gx, gy, edge, lum, hue, sat, anchors };
 }
 
 export default function BarrettEngine({ query, onSecureArtifact }: Props) {
@@ -239,16 +330,15 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
     isPaused: false,
   });
 
-  // Загрузка конкретного образа в векторное поле Собеля
   const loadVectorFieldFromUrl = useCallback((rawUrl: string, labelIdx: number, total: number) => {
-    setFieldStatus("SOLVING SOBEL FIELD [" + String(labelIdx + 1) + "/" + String(total) + "]...");
+    setFieldStatus("SOLVING SOBEL MATRIX [" + String(labelIdx + 1) + "/" + String(total) + "]...");
     const img = new Image();
     img.crossOrigin = "anonymous";
     img.onload = () => {
       const grid = buildSobelFieldFromImage(img);
       stateRef.current.field = grid;
       stateRef.current.needsClear = true;
-      setFieldStatus("OBJECT LOCKED // " + String(grid.spawnPoints.length) + " VECTOR NODES");
+      setFieldStatus("OBJECT LOCKED // " + String(grid.anchors.length) + " HOOKE-SOBEL NODES");
     };
     img.onerror = () => {
       setFieldStatus("PURE PARAMETRIC MODE");
@@ -256,7 +346,6 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
     img.src = "/api/mutate?proxy=" + encodeURIComponent(rawUrl);
   }, []);
 
-  // При смене запроса: считаем 5D-тензор и захватываем геометрии объектов из /api/search
   useEffect(() => {
     const cleanQ = (query || "SHINE ON CRAZY DIAMOND").trim();
     const next = compileLexicalManifold(cleanQ);
@@ -276,9 +365,9 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
         if (cancelled || !data) return;
         const arr = Array.isArray(data) ? data : (data.data || data.photos || []);
         const urls = arr
-          .map((item: any) => item.thumb || item.src || item.image_url)
+          .map((item: any) => item.src || item.image_url || item.thumb)
           .filter((u: any) => typeof u === "string" && u.startsWith("http"))
-          .slice(0, 12);
+          .slice(0, 15);
 
         if (urls.length > 0) {
           setCandidateUrls(urls);
@@ -312,7 +401,6 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
     });
   };
 
-  // Кнопка Phase Shift: переключает следующий ракурс/объект или сдвигает фазу
   const triggerPhaseShift = useCallback(() => {
     stateRef.current.time += PHI;
     if (candidateUrls.length > 1) {
@@ -325,7 +413,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
   }, [candidateUrls, candidateIdx, loadVectorFieldFromUrl]);
 
   // ==========================================
-  // ЯДРО ЧИСЛЕННОГО ИНТЕГРИРОВАНИЯ BARRETT (60 FPS, СПЛАЙНЫ + ЦВЕТ SO(3))
+  // ЯДРО РЕНДЕРИНГА BARRETT (60 FPS)
   // ==========================================
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -337,31 +425,24 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
     let width = 900;
     let height = 900;
 
-    const PARTICLE_COUNT = 4200;
     const px = new Float32Array(PARTICLE_COUNT);
     const py = new Float32Array(PARTICLE_COUNT);
-    const age = new Uint16Array(PARTICLE_COUNT);
-
-    const spawnParticle = (i: number, field: VectorFieldGrid | null, time: number) => {
-      if (field && field.spawnPoints.length > 0 && Math.random() < 0.88) {
-        const randIdx = field.spawnPoints[Math.floor(Math.random() * field.spawnPoints.length)];
-        const gxCoord = randIdx % field.size;
-        const gyCoord = Math.floor(randIdx / field.size);
-        px[i] = (gxCoord / field.size) * 2.0 - 1.0 + (Math.random() - 0.5) * 0.015;
-        py[i] = (gyCoord / field.size) * 2.0 - 1.0 + (Math.random() - 0.5) * 0.015;
-      } else {
-        const r = Math.sqrt(((i + 0.5) / PARTICLE_COUNT)) * 0.92;
-        const theta = 2 * Math.PI * i * PHI + time;
-        px[i] = r * Math.cos(theta);
-        py[i] = r * Math.sin(theta);
-      }
-      age[i] = Math.floor(Math.random() * 90);
-    };
 
     const initParticles = () => {
       const f = stateRef.current.field;
-      for (let i = 0; i < PARTICLE_COUNT; i++) {
-        spawnParticle(i, f, stateRef.current.time);
+      if (f && f.anchors.length > 0) {
+        for (let i = 0; i < PARTICLE_COUNT; i++) {
+          const a = f.anchors[i % f.anchors.length];
+          px[i] = a.x0;
+          py[i] = a.y0;
+        }
+      } else {
+        for (let i = 0; i < PARTICLE_COUNT; i++) {
+          const r = Math.sqrt((i + 0.5) / PARTICLE_COUNT) * 0.9;
+          const theta = 2 * Math.PI * i * PHI;
+          px[i] = r * Math.cos(theta);
+          py[i] = r * Math.sin(theta);
+        }
       }
     };
 
@@ -399,36 +480,86 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
         const c = s.coeffs;
         const field = s.field;
 
-        // Затухание шлейфа: чем выше Structure, тем дольше держатся мазки кисти
+        const dt = 0.014 * (0.35 + t.energy * 1.3);
+        s.time += dt;
+        const time = s.time;
+
+        const cx = width * 0.5;
+        const cy = height * 0.5;
+        const scale = Math.min(width, height) * 0.45;
+        const toneDeg = t.tone * 360;
+
+        // ==========================================
+        // ТОПОЛОГИЯ 1: WAVE (ОСЦИЛЛОГРАФ ФУРЬЕ)
+        // ==========================================
+        if (s.topology === "WAVE" && field) {
+          ctx.globalCompositeOperation = "source-over";
+          ctx.fillStyle = "rgba(2, 1, 4, 0.28)";
+          ctx.fillRect(0, 0, width, height);
+          ctx.globalCompositeOperation = "lighter";
+
+          const lines = 96;
+          const cols = 150;
+
+          for (let row = 0; row < lines; row++) {
+            const ny = (row / (lines - 1)) * 2.0 - 1.0;
+            const gyIdx = Math.min(field.size - 1, Math.max(0, Math.floor(((ny + 1.0) * 0.5) * field.size)));
+
+            ctx.beginPath();
+            for (let col = 0; col < cols; col++) {
+              const nx = (col / (cols - 1)) * 2.0 - 1.0;
+              const gxIdx = Math.min(field.size - 1, Math.max(0, Math.floor(((nx + 1.0) * 0.5) * field.size)));
+              const cell = gyIdx * field.size + gxIdx;
+
+              const l = field.lum[cell];
+              const e = field.edge[cell];
+
+              const freq = 18.0 + e * 45.0 * t.structure;
+              const osc = Math.sin(nx * freq + time * 4.5 + row * 0.35);
+              const chaosRipple = Math.cos(ny * 14.0 - time * 3.2) * t.chaos * 0.035;
+
+              const dispY =
+                -(l * 0.042 * t.structure) +
+                osc * (e * 0.028 + l * 0.012) * (0.4 + t.energy) +
+                chaosRipple;
+
+              const drawX = cx + nx * scale;
+              const drawY = cy + (ny + dispY) * scale;
+
+              if (col === 0) ctx.moveTo(drawX, drawY);
+              else ctx.lineTo(drawX, drawY);
+            }
+
+            const rowHue = Math.floor((toneDeg + (row / lines) * 150 + time * 12) % 360);
+            ctx.strokeStyle = "hsla(" + String(rowHue) + ", 85%, 65%, 0.55)";
+            ctx.lineWidth = 1.25;
+            ctx.stroke();
+          }
+
+          animId = requestAnimationFrame(render);
+          return;
+        }
+
+        // ==========================================
+        // ТОПОЛОГИЯ 2: HOOKE-SOBEL OBJECT / CLIFFORD / CHLADNI
+        // ==========================================
         ctx.globalCompositeOperation = "source-over";
-        const fadeAlpha = 0.012 + (1.0 - t.structure) * 0.035;
-        ctx.fillStyle = "rgba(2, 1, 4, " + String(fadeAlpha.toFixed(4)) + ")";
+        const fadeAlpha = s.topology === "OBJECT" ? (0.09 + (1.0 - t.structure) * 0.08) : 0.035;
+        ctx.fillStyle = "rgba(2, 1, 4, " + String(fadeAlpha.toFixed(3)) + ")";
         ctx.fillRect(0, 0, width, height);
 
         ctx.globalCompositeOperation = "lighter";
 
-        const dt = 0.0025 * (0.4 + t.energy * 1.3);
-        s.time += dt;
-        const time = s.time;
-
-        // Порядок симметрии C_k: при низком ползунке (<0.25) = 1 (реальный портрет объекта без размножения)
         const symOrders = [1, 1, 2, 4, 6, 8, 12];
         const symIdx = Math.min(symOrders.length - 1, Math.floor(t.symmetry * symOrders.length));
         const symmetryFold = symOrders[symIdx];
 
-        const cx = width * 0.5;
-        const cy = height * 0.5;
-        const scale = Math.min(width, height) * 0.44;
+        const aMod = c.alpha + Math.sin(time * 0.7) * 0.25;
+        const bMod = c.beta + Math.cos(time * 0.6 * PHI) * 0.25;
+        const gMod = c.gamma + Math.sin(time * 0.4) * 0.2;
+        const dMod = c.delta + Math.cos(time * 0.5) * 0.2;
 
-        const aMod = c.alpha + Math.sin(time * 1.2) * (0.2 + t.chaos * 0.4);
-        const bMod = c.beta + Math.cos(time * 1.1 * PHI) * (0.2 + t.chaos * 0.4);
-        const gMod = c.gamma + Math.sin(time * 0.7) * 0.2;
-        const dMod = c.delta + Math.cos(time * 0.9) * 0.2;
-
-        // Угол вращения цветовой матрицы SO(3) (как в Кислоте Шиле)
-        const thetaColor = t.tone * Math.PI * 2.0;
-        const cosT = Math.cos(thetaColor);
-        const sinT = Math.sin(thetaColor);
+        const hasAnchors = field !== null && field.anchors.length > 0;
 
         for (let i = 0; i < PARTICLE_COUNT; i++) {
           let x = px[i];
@@ -436,37 +567,39 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
           const prevX = x;
           const prevY = y;
 
-          let vx = 0;
-          let vy = 0;
+          let edgeVal = 0.5;
+          let lumVal = 0.6;
+          let baseHue = toneDeg;
+          let baseSat = 0;
 
-          // Считываем локальные свойства объекта в точке (x, y)
-          let localEdge = 0;
-          let localLum = 0.5;
-          let objR = 168, objG = 85, objB = 247;
-          let gradX = 0, gradY = 0;
+          if (hasAnchors && field && s.topology === "OBJECT") {
+            const a = field.anchors[i % field.anchors.length];
+            edgeVal = a.edge;
+            lumVal = a.lum;
+            baseHue = a.hue;
+            baseSat = a.sat;
 
-          if (field) {
-            const gxIdx = Math.min(field.size - 1, Math.max(0, Math.floor(((x + 1.0) * 0.5) * field.size)));
-            const gyIdx = Math.min(field.size - 1, Math.max(0, Math.floor(((y + 1.0) * 0.5) * field.size)));
-            const cell = gyIdx * field.size + gxIdx;
-            localEdge = field.edge[cell];
-            localLum = field.lum[cell];
-            gradX = field.gx[cell];
-            gradY = field.gy[cell];
-            objR = field.r[cell];
-            objG = field.g[cell];
-            objB = field.b[cell];
-          }
+            // Гармоническое колебание вдоль касательной Собеля вокруг истинной координаты (x0, y0)
+            const phase = i * PHI + time * (2.2 + t.energy * 3.5);
+            const tangentSlide = Math.sin(phase) * (0.006 + edgeVal * 0.014) * (0.4 + t.energy);
 
-          // 1. Базовая математическая турбулентность (Клиффорд / Хладни / Вихрь)
-          let mathVx = 0;
-          let mathVy = 0;
+            // Нелинейный аттрактор Клиффорда (активируется при увеличении ползунка CHAOS)
+            const attX = Math.sin(aMod * y) + gMod * Math.cos(aMod * x);
+            const attY = Math.sin(bMod * x) + dMod * Math.cos(bMod * y);
 
-          if (s.topology === "CHLADNI") {
+            // Целевая точка: точный якорь + скольжение по контуру + вихревой отрыв Хаоса
+            const targetX = a.x0 + a.tx * tangentSlide + (attX * 0.45 - a.x0) * (t.chaos * t.chaos * 1.35);
+            const targetY = a.y0 + a.ty * tangentSlide + (attY * 0.45 - a.y0) * (t.chaos * t.chaos * 1.35);
+
+            // Сила упругости Гука возвращает частицу к контуру объекта
+            const springK = 0.12 + t.structure * 0.32;
+            x += (targetX - x) * springK;
+            y += (targetY - y) * springK;
+          } else if (s.topology === "CHLADNI") {
             const n = c.nHarmonic + Math.floor(t.structure * 3);
             const m = c.mHarmonic + Math.floor(t.chaos * 3);
-            const w1 = Math.cos(time * 1.8);
-            const w2 = Math.sin(time * 1.8 / PHI);
+            const w1 = Math.cos(time * 0.9);
+            const w2 = Math.sin(time * 0.9 / PHI);
             const eps = 0.015;
             const pot = (xx: number, yy: number) =>
               Math.abs(
@@ -474,114 +607,89 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
                 w2 * Math.sin(Math.PI * m * xx) * Math.sin(Math.PI * n * yy)
               );
             const p0 = pot(x, y);
-            mathVx = -((pot(x + eps, y) - p0) / eps) * 0.012 - y * 0.003;
-            mathVy = -((pot(x, y + eps) - p0) / eps) * 0.012 + x * 0.003;
-          } else if (s.topology === "VORTEX") {
-            const r = Math.sqrt(x * x + y * y) + 1e-5;
-            const angle = Math.atan2(y, x);
-            const wave = Math.sin(angle * c.nHarmonic + time * 3.0) * Math.cos(r * Math.PI * c.mHarmonic - time * 2.0);
-            const radial = (0.55 + 0.3 * wave - r) * 0.05;
-            const tangent = 0.012 * (0.5 + t.energy);
-            mathVx = Math.cos(angle) * radial - Math.sin(angle) * tangent;
-            mathVy = Math.sin(angle) * radial + Math.cos(angle) * tangent;
+            x += -((pot(x + eps, y) - p0) / eps) * 0.012 - y * 0.003;
+            y += -((pot(x, y + eps) - p0) / eps) * 0.012 + x * 0.003;
+            if (x * x + y * y > 1.3) {
+              x = (Math.random() - 0.5) * 1.6;
+              y = (Math.random() - 0.5) * 1.6;
+            }
           } else {
-            // CLIFFORD / OBJECT TURBULENCE
+            // CLIFFORD
             const nextX = Math.sin(aMod * y) + gMod * Math.cos(aMod * x);
             const nextY = Math.sin(bMod * x) + dMod * Math.cos(bMod * y);
-            mathVx = (nextX * 0.48 - x) * 0.06;
-            mathVy = (nextY * 0.48 - y) * 0.06;
-          }
-
-          // 2. Оптическая гравитация Собеля (Отрисовка контуров и объема объекта)
-          if (field && (s.topology === "OBJECT" || t.structure > 0.4)) {
-            // Касательный вектор вдоль контура (-gradY, gradX) + притяжение к хребту контура
-            const tangentX = -gradY;
-            const tangentY = gradX;
-            const pullStrength = (1.0 - localEdge) * 0.014 * t.structure;
-            const flowStrength = (0.005 + localEdge * 0.014) * (0.5 + t.energy);
-
-            const dir = (i % 2 === 0) ? 1 : -1;
-            const objVx = tangentX * flowStrength * dir + gradX * pullStrength;
-            const objVy = tangentY * flowStrength * dir + gradY * pullStrength;
-
-            const blendObj = s.topology === "OBJECT" ? clip(t.structure * 1.15 - t.chaos * 0.55, 0.15, 0.96) : t.structure * 0.55;
-            vx = objVx * blendObj + mathVx * (1.0 - blendObj + t.chaos * 0.6);
-            vy = objVy * blendObj + mathVy * (1.0 - blendObj + t.chaos * 0.6);
-          } else {
-            vx = mathVx * (0.6 + t.energy);
-            vy = mathVy * (0.6 + t.energy);
-          }
-
-          x += vx;
-          y += vy;
-          age[i]++;
-
-          const maxAge = field ? Math.floor(45 + t.structure * 75) : 140;
-          if (x * x + y * y > 1.38 || age[i] > maxAge || isNaN(x) || isNaN(y)) {
-            spawnParticle(i, field, time);
-            continue;
+            x += (nextX * 0.45 - x) * (0.06 + t.energy * 0.08);
+            y += (nextY * 0.45 - y) * (0.06 + t.energy * 0.08);
           }
 
           px[i] = x;
           py[i] = y;
 
-          // 3. ПОЛИХРОМНАЯ АЛХИМИЯ ЦВЕТА (Нативный спектр объекта + Матрица поворота SO(3) + Гармоники)
-          const speed = Math.sqrt(vx * vx + vy * vy);
-          let finalR = objR;
-          let finalG = objG;
-          let finalB = objB;
+          // ==========================================
+          // ПОЛИХРОМНЫЙ СПЕКТРАЛЬНЫЙ СИНТЕЗ (БЕЗ СЕРОЙ ГРЯЗИ)
+          // ==========================================
+          let finalHue = 0;
+          let finalSat = 85;
+          let finalLight = 62;
 
-          if (!field || (objR < 18 && objG < 18 && objB < 18)) {
-            // Если точка в глубокой тени или режим без объекта — генерируем квантовую палитру золотого сечения
-            const phase = (i * 0.015 * PHI) + time * 2.0 + speed * 35.0;
-            finalR = Math.round(135 + 120 * Math.sin(phase));
-            finalG = Math.round(135 + 120 * Math.sin(phase + 2.094));
-            finalB = Math.round(135 + 120 * Math.sin(phase + 4.188));
-          } else if (t.tone > 0.04) {
-            // Хроматическое вращение спектра через SO(3) матрицу
-            const nr = objR / 255.0;
-            const ng = objG / 255.0;
-            const nb = objB / 255.0;
-            const rr = nr * cosT - ng * sinT + nb * sinT * 0.5;
-            const gg = nr * sinT + ng * cosT - nb * sinT * 0.5;
-            const bb = -nr * sinT * 0.5 + ng * sinT + nb * cosT;
-            finalR = Math.min(255, Math.max(30, Math.round(rr * 255)));
-            finalG = Math.min(255, Math.max(30, Math.round(gg * 255)));
-            finalB = Math.min(255, Math.max(30, Math.round(bb * 255)));
+          if (hasAnchors && baseSat > 0.14) {
+            // Если исходник цветной — берем его родной оттенок и вращаем ползунком TONE
+            finalHue = Math.floor((baseHue + toneDeg) % 360);
+            finalSat = Math.min(96, Math.floor(60 + baseSat * 38));
+            finalLight = Math.min(86, Math.floor(38 + lumVal * 44 + edgeVal * 15));
+          } else {
+            // Если исходник Ч/Б (или параметрический режим) — раскладываем яркость и контур в спектр
+            finalHue = Math.floor((toneDeg + lumVal * 145 + edgeVal * 75 + (i % 35)) % 360);
+            finalSat = Math.floor(78 + edgeVal * 20);
+            finalLight = Math.min(90, Math.floor(42 + lumVal * 38 + edgeVal * 18));
           }
 
-          const edgeBoost = field ? (0.35 + localEdge * 0.85 + localLum * 0.35) : 0.75;
-          const alpha = clip((0.08 + t.energy * 0.24) * edgeBoost, 0.04, 0.62);
-          const strokeWidth = field && localEdge > 0.45 ? 1.65 : 1.15;
+          const alpha = clip((0.14 + t.energy * 0.22) * (0.45 + edgeVal * 0.65 + lumVal * 0.3), 0.06, 0.55);
 
           ctx.strokeStyle =
-            "rgba(" +
-            String(finalR) +
-            "," +
-            String(finalG) +
-            "," +
-            String(finalB) +
-            "," +
+            "hsla(" +
+            String(finalHue) +
+            ", " +
+            String(finalSat) +
+            "%, " +
+            String(finalLight) +
+            "%, " +
             String(alpha.toFixed(3)) +
             ")";
-          ctx.lineWidth = strokeWidth;
+          ctx.lineWidth = edgeVal > 0.45 ? 1.55 : 1.15;
 
-          const rPrev = Math.sqrt(prevX * prevX + prevY * prevY) * scale;
-          const thetaPrev = Math.atan2(prevY, prevX);
-          const rCurr = Math.sqrt(x * x + y * y) * scale;
-          const thetaCurr = Math.atan2(y, x);
+          // Отрисовка микро-сплайна (с учетом группы вращений C_k)
+          const dxMove = x - prevX;
+          const dyMove = y - prevY;
+          const stepLen = Math.sqrt(dxMove * dxMove + dyMove * dyMove);
 
-          for (let k = 0; k < symmetryFold; k++) {
-            const rot = (k * 2 * Math.PI) / symmetryFold;
-            const x0 = cx + Math.cos(thetaPrev + rot) * rPrev;
-            const y0 = cy + Math.sin(thetaPrev + rot) * rPrev;
-            const x1 = cx + Math.cos(thetaCurr + rot) * rCurr;
-            const y1 = cy + Math.sin(thetaCurr + rot) * rCurr;
+          // Если частица почти на месте — рисуем короткий касательный штрих вдоль контура
+          let endX = x;
+          let endY = y;
+          if (stepLen < 0.004 && hasAnchors && field) {
+            const a = field.anchors[i % field.anchors.length];
+            const strokeLen = 0.007 + edgeVal * 0.012;
+            endX = x + a.tx * strokeLen;
+            endY = y + a.ty * strokeLen;
+          }
 
+          if (symmetryFold === 1) {
             ctx.beginPath();
-            ctx.moveTo(x0, y0);
-            ctx.lineTo(x1, y1);
+            ctx.moveTo(cx + prevX * scale, cy + prevY * scale);
+            ctx.lineTo(cx + endX * scale, cy + endY * scale);
             ctx.stroke();
+          } else {
+            const r0 = Math.sqrt(prevX * prevX + prevY * prevY) * scale;
+            const th0 = Math.atan2(prevY, prevX);
+            const r1 = Math.sqrt(endX * endX + endY * endY) * scale;
+            const th1 = Math.atan2(endY, endX);
+
+            for (let k = 0; k < symmetryFold; k++) {
+              const rot = (k * 2 * Math.PI) / symmetryFold;
+              ctx.beginPath();
+              ctx.moveTo(cx + Math.cos(th0 + rot) * r0, cy + Math.sin(th0 + rot) * r0);
+              ctx.lineTo(cx + Math.cos(th1 + rot) * r1, cy + Math.sin(th1 + rot) * r1);
+              ctx.stroke();
+            }
           }
         }
       }
@@ -676,7 +784,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
         {/* НИЖНИЙ ПЕРЕКЛЮЧАТЕЛЬ ТОПОЛОГИИ */}
         <div className="absolute bottom-4 left-4 right-4 flex flex-wrap justify-between items-center gap-2">
           <div className="flex gap-1.5 bg-black/80 backdrop-blur-md p-1.5 rounded-full border border-white/10">
-            {(["OBJECT", "CLIFFORD", "CHLADNI", "VORTEX"] as ManifoldTopology[]).map((mode) => (
+            {(["OBJECT", "WAVE", "CLIFFORD", "CHLADNI"] as ManifoldTopology[]).map((mode) => (
               <button
                 key={mode}
                 type="button"
@@ -727,10 +835,10 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
           <div className="flex flex-col gap-5 font-mono text-[10px] uppercase tracking-widest">
             {(
               [
-                { key: "energy", label: "Energy (Spline Velocity)" },
-                { key: "chaos", label: "Chaos (Madcap Turbulence)" },
-                { key: "tone", label: "Tone (SO3 Color Rotation)" },
-                { key: "structure", label: "Structure (Sobel Object Lock)" },
+                { key: "energy", label: "Energy (Tangent Velocity)" },
+                { key: "chaos", label: "Chaos (Attractor Disruption)" },
+                { key: "tone", label: "Tone (Spectral Phase)" },
+                { key: "structure", label: "Structure (Hooke Spring Lock)" },
                 { key: "symmetry", label: "Symmetry (Kaleidoscope C_k)" },
               ] as { key: keyof Tensor5D; label: string }[]
             ).map((item) => (
@@ -754,9 +862,9 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
 
           <div className="mt-6 p-4 rounded-xl bg-black/50 border border-white/5 font-mono text-[9px] text-neutral-400 leading-relaxed space-y-1">
             <div className="text-white uppercase mb-1">Barrett Differential System:</div>
-            <div>∇I(x,y) = (∂I/∂x, ∂I/∂y) [Sobel Gravity]</div>
-            <div>dx/dt = -∂I/∂y·St + [sin(α·y) + γ·cos(α·x)]·C</div>
-            <div>RGB&apos; = SO(3, θ_tone) · RGB(x,y)</div>
+            <div>F_hooke = -k_st · (r - r_0) + τ_sobel · sin(ωt)</div>
+            <div>r_chaos = [sin(α·y) + γ·cos(α·x)] · C²</div>
+            <div>HSL = Φ(∇I, Lum, θ_tone)</div>
           </div>
         </div>
 

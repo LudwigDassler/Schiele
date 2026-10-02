@@ -2,10 +2,10 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
 
 interface Tensor5D {
-  energy: number;    // E: скорость фазового сдвига и яркость
-  chaos: number;     // C: нелинейная турбулентность ("Madcap" девиация)
-  tone: number;      // H: базовый спектральный угол (Hue)
-  structure: number; // St: баланс между стоящими волнами Хладни и аттрактором
+  energy: number;    // E: скорость фазового сдвига и яркость сплайнов
+  chaos: number;     // C: нелинейная турбулентность (распад формы в аттрактор)
+  tone: number;      // H: угол хроматического вращения матрицы SO(3)
+  structure: number; // St: сила гравитации контуров Собеля (четкость объекта)
   symmetry: number;  // Sy: порядок калейдоскопической группы вращений C_k
 }
 
@@ -20,7 +20,19 @@ interface DifferentialConstants {
   lyapunov: number;
 }
 
-type ManifoldTopology = "AUTO" | "CLIFFORD" | "CHLADNI" | "VORTEX";
+interface VectorFieldGrid {
+  size: number;
+  gx: Float32Array;   // Градиент Собеля по X
+  gy: Float32Array;   // Градиент Собеля по Y
+  edge: Float32Array; // Сила контура |∇I|
+  lum: Float32Array;  // Яркость точки
+  r: Uint8Array;      // Нативный спектр R
+  g: Uint8Array;      // Нативный спектр G
+  b: Uint8Array;      // Нативный спектр B
+  spawnPoints: number[]; // Индексы точек высокой энергии для рождения частиц
+}
+
+type ManifoldTopology = "OBJECT" | "CLIFFORD" | "CHLADNI" | "VORTEX";
 
 interface Props {
   query: string;
@@ -28,13 +40,13 @@ interface Props {
 }
 
 const PHI = 1.618033988749;
+const GRID_SIZE = 220;
 const VOWELS = new Set(["a", "e", "i", "o", "u", "y", "а", "е", "ё", "и", "о", "у", "ы", "э", "ю", "я"]);
 
 function clip(v: number, min = 0.0, max = 1.0): number {
   return Math.max(min, Math.min(max, v));
 }
 
-// Информационная энтропия Шеннона H(X)
 function computeShannonEntropy(str: string): number {
   if (!str) return 0;
   const freq: Record<string, number> = {};
@@ -51,7 +63,6 @@ function computeShannonEntropy(str: string): number {
   return h;
 }
 
-// Детерминированный лексический спектрограф BARRETT: Текст -> 5D Тензор + Коэффициенты ДУ
 function compileLexicalManifold(rawText: string): { tensor: Tensor5D; coeffs: DifferentialConstants } {
   const clean = (rawText || "SHINE ON CRAZY DIAMOND").trim().toLowerCase();
   const entropy = computeShannonEntropy(clean);
@@ -77,19 +88,19 @@ function compileLexicalManifold(rawText: string): { tensor: Tensor5D; coeffs: Di
   const abs1 = Math.abs(hash1);
   const abs2 = Math.abs(hash2);
   const totalLetters = Math.max(1, vowelCount + consonantCount);
-
   const consonantRatio = consonantCount / totalLetters;
 
-  const energy = clip(((abs1 % 1000) / 1000) * 0.65 + consonantRatio * 0.35, 0.15, 0.98);
-  const chaos = clip((entropy / 4.5) * 0.7 + (((abs2 >> 4) % 100) / 100) * 0.3, 0.1, 0.98);
+  const energy = clip(((abs1 % 1000) / 1000) * 0.55 + consonantRatio * 0.35, 0.35, 0.92);
+  const chaos = clip((entropy / 4.5) * 0.35 + (((abs2 >> 4) % 100) / 100) * 0.2, 0.12, 0.55);
   const tone = clip(((abs1 >> 8) % 360) / 360, 0.0, 1.0);
-  const structure = clip(consonantRatio * 0.8 + (((abs2 >> 10) % 100) / 100) * 0.2, 0.1, 0.98);
-  const symmetry = clip((1.0 - Math.abs(0.5 - vowelCount / totalLetters)) * 0.6 + (((abs1 >> 16) % 100) / 100) * 0.4, 0.05, 0.98);
+  const structure = clip(0.68 + consonantRatio * 0.25, 0.65, 0.95);
+  // Для режима отрисовки объекта стартовая симметрия C_1 (0.15), чтобы не дробить образ в снежинку
+  const symmetry = 0.15;
 
-  const alpha = Number((Math.sin(abs1 * 0.001 * PHI) * 2.4 + (energy - 0.5)).toFixed(4));
-  const beta = Number((Math.cos(abs2 * 0.001 * PHI) * 2.4 - (chaos - 0.5)).toFixed(4));
-  const gamma = Number((Math.sin((abs1 ^ abs2) * 0.002) * 1.9 + (structure - 0.5)).toFixed(4));
-  const delta = Number((Math.cos((abs1 + abs2) * 0.002) * 1.9 + (symmetry - 0.5)).toFixed(4));
+  const alpha = Number((Math.sin(abs1 * 0.001 * PHI) * 2.2 + (energy - 0.5)).toFixed(4));
+  const beta = Number((Math.cos(abs2 * 0.001 * PHI) * 2.2 - (chaos - 0.5)).toFixed(4));
+  const gamma = Number((Math.sin((abs1 ^ abs2) * 0.002) * 1.8 + (structure - 0.5)).toFixed(4));
+  const delta = Number((Math.cos((abs1 + abs2) * 0.002) * 1.8 + (symmetry - 0.5)).toFixed(4));
 
   const nHarmonic = 1 + (abs1 % 7);
   let mHarmonic = 2 + (abs2 % 7);
@@ -118,33 +129,173 @@ function compileLexicalManifold(rawText: string): { tensor: Tensor5D; coeffs: Di
   };
 }
 
+// ==========================================
+// МАТЕМАТИЧЕСКИЙ ЭКСТРАКТОР ПОЛЯ СОБЕЛЯ И СПЕКТРА ОБЪЕКТА
+// ==========================================
+function buildSobelFieldFromImage(img: HTMLImageElement): VectorFieldGrid {
+  const s = GRID_SIZE;
+  const offCanvas = document.createElement("canvas");
+  offCanvas.width = s;
+  offCanvas.height = s;
+  const octx = offCanvas.getContext("2d");
+
+  const gx = new Float32Array(s * s);
+  const gy = new Float32Array(s * s);
+  const edge = new Float32Array(s * s);
+  const lum = new Float32Array(s * s);
+  const rArr = new Uint8Array(s * s);
+  const gArr = new Uint8Array(s * s);
+  const bArr = new Uint8Array(s * s);
+  const spawnPoints: number[] = [];
+
+  if (!octx) {
+    return { size: s, gx, gy, edge, lum, r: rArr, g: gArr, b: bArr, spawnPoints };
+  }
+
+  // Вписываем объект с сохранением пропорций по центру матрицы
+  octx.fillStyle = "#000000";
+  octx.fillRect(0, 0, s, s);
+  const aspect = img.width / Math.max(1, img.height);
+  let drawW = s;
+  let drawH = s;
+  if (aspect > 1) drawH = s / aspect;
+  else drawW = s * aspect;
+  const dx = (s - drawW) * 0.5;
+  const dy = (s - drawH) * 0.5;
+  octx.drawImage(img, dx, dy, drawW, drawH);
+
+  const imgData = octx.getImageData(0, 0, s, s).data;
+
+  for (let i = 0; i < s * s; i++) {
+    const p = i * 4;
+    const r = imgData[p];
+    const g = imgData[p + 1];
+    const b = imgData[p + 2];
+
+    // Усиливаем хроматическую насыщенность спектра объекта
+    const avg = (r + g + b) / 3;
+    rArr[i] = Math.min(255, Math.max(0, Math.round(avg + (r - avg) * 1.65)));
+    gArr[i] = Math.min(255, Math.max(0, Math.round(avg + (g - avg) * 1.65)));
+    bArr[i] = Math.min(255, Math.max(0, Math.round(avg + (b - avg) * 1.65)));
+
+    lum[i] = (0.299 * r + 0.587 * g + 0.114 * b) / 255.0;
+  }
+
+  let maxEdge = 1e-5;
+  for (let y = 1; y < s - 1; y++) {
+    for (let x = 1; x < s - 1; x++) {
+      const idx = y * s + x;
+      // Ядро оператора Собеля 3x3
+      const sx =
+        -lum[(y - 1) * s + (x - 1)] + lum[(y - 1) * s + (x + 1)] +
+        -2 * lum[y * s + (x - 1)] + 2 * lum[y * s + (x + 1)] +
+        -lum[(y + 1) * s + (x - 1)] + lum[(y + 1) * s + (x + 1)];
+
+      const sy =
+        -lum[(y - 1) * s + (x - 1)] - 2 * lum[(y - 1) * s + x] - lum[(y - 1) * s + (x + 1)] +
+        lum[(y + 1) * s + (x - 1)] + 2 * lum[(y + 1) * s + x] + lum[(y + 1) * s + (x + 1)];
+
+      const mag = Math.sqrt(sx * sx + sy * sy);
+      edge[idx] = mag;
+      if (mag > maxEdge) maxEdge = mag;
+
+      const norm = mag + 1e-6;
+      gx[idx] = sx / norm;
+      gy[idx] = sy / norm;
+    }
+  }
+
+  for (let i = 0; i < s * s; i++) {
+    edge[i] = clip(edge[i] / maxEdge);
+    // Отбираем точки контуров и светотени для рождения частиц (Importance Sampling)
+    if (edge[i] > 0.16 || (lum[i] > 0.22 && lum[i] < 0.88 && (i % 3 === 0))) {
+      spawnPoints.push(i);
+    }
+  }
+
+  return { size: s, gx, gy, edge, lum, r: rArr, g: gArr, b: bArr, spawnPoints };
+}
+
 export default function BarrettEngine({ query, onSecureArtifact }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   const initialData = compileLexicalManifold(query || "SHINE ON CRAZY DIAMOND");
   const [tensor, setTensor] = useState<Tensor5D>(initialData.tensor);
   const [coeffs, setCoeffs] = useState<DifferentialConstants>(initialData.coeffs);
-  const [topology, setTopology] = useState<ManifoldTopology>("AUTO");
+  const [topology, setTopology] = useState<ManifoldTopology>("OBJECT");
   const [isRecording, setIsRecording] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
+  const [fieldStatus, setFieldStatus] = useState<string>("SYNTHESIZING VECTOR FIELD...");
+  const [candidateUrls, setCandidateUrls] = useState<string[]>([]);
+  const [candidateIdx, setCandidateIdx] = useState<number>(0);
 
   const stateRef = useRef({
     tensor: initialData.tensor,
     coeffs: initialData.coeffs,
-    topology: "AUTO" as ManifoldTopology,
+    topology: "OBJECT" as ManifoldTopology,
+    field: null as VectorFieldGrid | null,
     time: 0,
     needsClear: true,
     isPaused: false,
   });
 
+  // Загрузка конкретного образа в векторное поле Собеля
+  const loadVectorFieldFromUrl = useCallback((rawUrl: string, labelIdx: number, total: number) => {
+    setFieldStatus("SOLVING SOBEL FIELD [" + String(labelIdx + 1) + "/" + String(total) + "]...");
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => {
+      const grid = buildSobelFieldFromImage(img);
+      stateRef.current.field = grid;
+      stateRef.current.needsClear = true;
+      setFieldStatus("OBJECT LOCKED // " + String(grid.spawnPoints.length) + " VECTOR NODES");
+    };
+    img.onerror = () => {
+      setFieldStatus("PURE PARAMETRIC MODE");
+    };
+    img.src = "/api/mutate?proxy=" + encodeURIComponent(rawUrl);
+  }, []);
+
+  // При смене запроса: считаем 5D-тензор и захватываем геометрии объектов из /api/search
   useEffect(() => {
-    const next = compileLexicalManifold(query || "SHINE ON CRAZY DIAMOND");
+    const cleanQ = (query || "SHINE ON CRAZY DIAMOND").trim();
+    const next = compileLexicalManifold(cleanQ);
     setTensor(next.tensor);
     setCoeffs(next.coeffs);
     stateRef.current.tensor = next.tensor;
     stateRef.current.coeffs = next.coeffs;
+    stateRef.current.field = null;
     stateRef.current.needsClear = true;
-  }, [query]);
+
+    let cancelled = false;
+    setFieldStatus("SCANNING OBJECT TOPOLOGY...");
+
+    fetch("/api/search?page=1&query=" + encodeURIComponent(cleanQ))
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (cancelled || !data) return;
+        const arr = Array.isArray(data) ? data : (data.data || data.photos || []);
+        const urls = arr
+          .map((item: any) => item.thumb || item.src || item.image_url)
+          .filter((u: any) => typeof u === "string" && u.startsWith("http"))
+          .slice(0, 12);
+
+        if (urls.length > 0) {
+          setCandidateUrls(urls);
+          setCandidateIdx(0);
+          loadVectorFieldFromUrl(urls[0], 0, urls.length);
+        } else {
+          setFieldStatus("PURE PARAMETRIC MODE");
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setFieldStatus("PURE PARAMETRIC MODE");
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [query, loadVectorFieldFromUrl]);
 
   useEffect(() => {
     stateRef.current.tensor = tensor;
@@ -161,13 +312,20 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
     });
   };
 
-  const triggerReseed = useCallback(() => {
+  // Кнопка Phase Shift: переключает следующий ракурс/объект или сдвигает фазу
+  const triggerPhaseShift = useCallback(() => {
     stateRef.current.time += PHI;
-    stateRef.current.needsClear = true;
-  }, []);
+    if (candidateUrls.length > 1) {
+      const nextIdx = (candidateIdx + 1) % candidateUrls.length;
+      setCandidateIdx(nextIdx);
+      loadVectorFieldFromUrl(candidateUrls[nextIdx], nextIdx, candidateUrls.length);
+    } else {
+      stateRef.current.needsClear = true;
+    }
+  }, [candidateUrls, candidateIdx, loadVectorFieldFromUrl]);
 
   // ==========================================
-  // ЯДРО ЧИСЛЕННОГО ИНТЕГРИРОВАНИЯ BARRETT (60 FPS)
+  // ЯДРО ЧИСЛЕННОГО ИНТЕГРИРОВАНИЯ BARRETT (60 FPS, СПЛАЙНЫ + ЦВЕТ SO(3))
   // ==========================================
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -179,16 +337,31 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
     let width = 900;
     let height = 900;
 
-    const PARTICLE_COUNT = 3200;
+    const PARTICLE_COUNT = 4200;
     const px = new Float32Array(PARTICLE_COUNT);
     const py = new Float32Array(PARTICLE_COUNT);
+    const age = new Uint16Array(PARTICLE_COUNT);
 
-    const initParticles = () => {
-      for (let i = 0; i < PARTICLE_COUNT; i++) {
-        const r = Math.sqrt((i + 0.5) / PARTICLE_COUNT);
-        const theta = 2 * Math.PI * i * PHI;
+    const spawnParticle = (i: number, field: VectorFieldGrid | null, time: number) => {
+      if (field && field.spawnPoints.length > 0 && Math.random() < 0.88) {
+        const randIdx = field.spawnPoints[Math.floor(Math.random() * field.spawnPoints.length)];
+        const gxCoord = randIdx % field.size;
+        const gyCoord = Math.floor(randIdx / field.size);
+        px[i] = (gxCoord / field.size) * 2.0 - 1.0 + (Math.random() - 0.5) * 0.015;
+        py[i] = (gyCoord / field.size) * 2.0 - 1.0 + (Math.random() - 0.5) * 0.015;
+      } else {
+        const r = Math.sqrt(((i + 0.5) / PARTICLE_COUNT)) * 0.92;
+        const theta = 2 * Math.PI * i * PHI + time;
         px[i] = r * Math.cos(theta);
         py[i] = r * Math.sin(theta);
+      }
+      age[i] = Math.floor(Math.random() * 90);
+    };
+
+    const initParticles = () => {
+      const f = stateRef.current.field;
+      for (let i = 0; i < PARTICLE_COUNT; i++) {
+        spawnParticle(i, f, stateRef.current.time);
       }
     };
 
@@ -224,122 +397,191 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
       if (!s.isPaused) {
         const t = s.tensor;
         const c = s.coeffs;
+        const field = s.field;
 
+        // Затухание шлейфа: чем выше Structure, тем дольше держатся мазки кисти
         ctx.globalCompositeOperation = "source-over";
-        const fadeAlpha = 0.018 + (1.0 - t.structure) * 0.035;
+        const fadeAlpha = 0.012 + (1.0 - t.structure) * 0.035;
         ctx.fillStyle = "rgba(2, 1, 4, " + String(fadeAlpha.toFixed(4)) + ")";
         ctx.fillRect(0, 0, width, height);
 
         ctx.globalCompositeOperation = "lighter";
 
-        const dt = 0.0025 * (0.3 + t.energy * 1.4);
+        const dt = 0.0025 * (0.4 + t.energy * 1.3);
         s.time += dt;
         const time = s.time;
 
-        let activeMode = s.topology;
-        if (activeMode === "AUTO") {
-          if (t.structure > 0.62) activeMode = "CHLADNI";
-          else if (t.chaos > 0.58) activeMode = "CLIFFORD";
-          else activeMode = "VORTEX";
-        }
-
-        const symOrders = [1, 2, 3, 4, 6, 8, 12];
+        // Порядок симметрии C_k: при низком ползунке (<0.25) = 1 (реальный портрет объекта без размножения)
+        const symOrders = [1, 1, 2, 4, 6, 8, 12];
         const symIdx = Math.min(symOrders.length - 1, Math.floor(t.symmetry * symOrders.length));
         const symmetryFold = symOrders[symIdx];
 
         const cx = width * 0.5;
         const cy = height * 0.5;
-        const scale = Math.min(width, height) * 0.42;
+        const scale = Math.min(width, height) * 0.44;
 
-        const aMod = c.alpha + Math.sin(time * 1.3) * (0.25 + t.chaos * 0.4);
-        const bMod = c.beta + Math.cos(time * 1.1 * PHI) * (0.25 + t.chaos * 0.4);
+        const aMod = c.alpha + Math.sin(time * 1.2) * (0.2 + t.chaos * 0.4);
+        const bMod = c.beta + Math.cos(time * 1.1 * PHI) * (0.2 + t.chaos * 0.4);
         const gMod = c.gamma + Math.sin(time * 0.7) * 0.2;
         const dMod = c.delta + Math.cos(time * 0.9) * 0.2;
 
-        const baseHue = Math.floor(t.tone * 360);
+        // Угол вращения цветовой матрицы SO(3) (как в Кислоте Шиле)
+        const thetaColor = t.tone * Math.PI * 2.0;
+        const cosT = Math.cos(thetaColor);
+        const sinT = Math.sin(thetaColor);
 
         for (let i = 0; i < PARTICLE_COUNT; i++) {
           let x = px[i];
           let y = py[i];
+          const prevX = x;
+          const prevY = y;
 
           let vx = 0;
           let vy = 0;
 
-          if (activeMode === "CLIFFORD") {
-            const nextX = Math.sin(aMod * y) + gMod * Math.cos(aMod * x);
-            const nextY = Math.sin(bMod * x) + dMod * Math.cos(bMod * y);
-            vx = (nextX * 0.42 - x) * (0.08 + t.energy * 0.12);
-            vy = (nextY * 0.42 - y) * (0.08 + t.energy * 0.12);
-          } else if (activeMode === "CHLADNI") {
+          // Считываем локальные свойства объекта в точке (x, y)
+          let localEdge = 0;
+          let localLum = 0.5;
+          let objR = 168, objG = 85, objB = 247;
+          let gradX = 0, gradY = 0;
+
+          if (field) {
+            const gxIdx = Math.min(field.size - 1, Math.max(0, Math.floor(((x + 1.0) * 0.5) * field.size)));
+            const gyIdx = Math.min(field.size - 1, Math.max(0, Math.floor(((y + 1.0) * 0.5) * field.size)));
+            const cell = gyIdx * field.size + gxIdx;
+            localEdge = field.edge[cell];
+            localLum = field.lum[cell];
+            gradX = field.gx[cell];
+            gradY = field.gy[cell];
+            objR = field.r[cell];
+            objG = field.g[cell];
+            objB = field.b[cell];
+          }
+
+          // 1. Базовая математическая турбулентность (Клиффорд / Хладни / Вихрь)
+          let mathVx = 0;
+          let mathVy = 0;
+
+          if (s.topology === "CHLADNI") {
             const n = c.nHarmonic + Math.floor(t.structure * 3);
             const m = c.mHarmonic + Math.floor(t.chaos * 3);
-            const w1 = Math.cos(time * 2.0);
-            const w2 = Math.sin(time * 2.0 / PHI);
-
+            const w1 = Math.cos(time * 1.8);
+            const w2 = Math.sin(time * 1.8 / PHI);
             const eps = 0.015;
-            const potential = (xx: number, yy: number) =>
+            const pot = (xx: number, yy: number) =>
               Math.abs(
                 w1 * Math.sin(Math.PI * n * xx) * Math.sin(Math.PI * m * yy) +
                 w2 * Math.sin(Math.PI * m * xx) * Math.sin(Math.PI * n * yy)
               );
-
-            const p0 = potential(x, y);
-            const gradX = (potential(x + eps, y) - p0) / eps;
-            const gradY = (potential(x, y + eps) - p0) / eps;
-
-            const step = 0.012 * (0.5 + t.energy);
-            vx = -gradX * step - y * 0.003 * t.chaos + (Math.sin(i + time * 11) * 0.004 * p0);
-            vy = -gradY * step + x * 0.003 * t.chaos + (Math.cos(i - time * 11) * 0.004 * p0);
-          } else {
+            const p0 = pot(x, y);
+            mathVx = -((pot(x + eps, y) - p0) / eps) * 0.012 - y * 0.003;
+            mathVy = -((pot(x, y + eps) - p0) / eps) * 0.012 + x * 0.003;
+          } else if (s.topology === "VORTEX") {
             const r = Math.sqrt(x * x + y * y) + 1e-5;
             const angle = Math.atan2(y, x);
-            const harmonicWave =
-              Math.sin(angle * c.nHarmonic + time * 3.0) *
-              Math.cos(r * Math.PI * c.mHarmonic - time * 2.0 * PHI);
+            const wave = Math.sin(angle * c.nHarmonic + time * 3.0) * Math.cos(r * Math.PI * c.mHarmonic - time * 2.0);
+            const radial = (0.55 + 0.3 * wave - r) * 0.05;
+            const tangent = 0.012 * (0.5 + t.energy);
+            mathVx = Math.cos(angle) * radial - Math.sin(angle) * tangent;
+            mathVy = Math.sin(angle) * radial + Math.cos(angle) * tangent;
+          } else {
+            // CLIFFORD / OBJECT TURBULENCE
+            const nextX = Math.sin(aMod * y) + gMod * Math.cos(aMod * x);
+            const nextY = Math.sin(bMod * x) + dMod * Math.cos(bMod * y);
+            mathVx = (nextX * 0.48 - x) * 0.06;
+            mathVy = (nextY * 0.48 - y) * 0.06;
+          }
 
-            const targetR = 0.55 + 0.32 * harmonicWave * (0.4 + t.chaos * 0.6);
-            const radialForce = (targetR - r) * (0.04 + t.structure * 0.08);
-            const tangentForce = (0.006 + t.energy * 0.014) * (1.0 + 0.5 * Math.sin(r * 8.0 - time * 4.0));
+          // 2. Оптическая гравитация Собеля (Отрисовка контуров и объема объекта)
+          if (field && (s.topology === "OBJECT" || t.structure > 0.4)) {
+            // Касательный вектор вдоль контура (-gradY, gradX) + притяжение к хребту контура
+            const tangentX = -gradY;
+            const tangentY = gradX;
+            const pullStrength = (1.0 - localEdge) * 0.014 * t.structure;
+            const flowStrength = (0.005 + localEdge * 0.014) * (0.5 + t.energy);
 
-            vx = Math.cos(angle) * radialForce - Math.sin(angle) * tangentForce;
-            vy = Math.sin(angle) * radialForce + Math.cos(angle) * tangentForce;
+            const dir = (i % 2 === 0) ? 1 : -1;
+            const objVx = tangentX * flowStrength * dir + gradX * pullStrength;
+            const objVy = tangentY * flowStrength * dir + gradY * pullStrength;
+
+            const blendObj = s.topology === "OBJECT" ? clip(t.structure * 1.15 - t.chaos * 0.55, 0.15, 0.96) : t.structure * 0.55;
+            vx = objVx * blendObj + mathVx * (1.0 - blendObj + t.chaos * 0.6);
+            vy = objVy * blendObj + mathVy * (1.0 - blendObj + t.chaos * 0.6);
+          } else {
+            vx = mathVx * (0.6 + t.energy);
+            vy = mathVy * (0.6 + t.energy);
           }
 
           x += vx;
           y += vy;
+          age[i]++;
 
-          if (x * x + y * y > 1.35 || isNaN(x) || isNaN(y)) {
-            const reTheta = ((i * PHI + time) % 1) * Math.PI * 2;
-            const reR = 0.05 + ((i % 97) / 97) * 0.85;
-            x = Math.cos(reTheta) * reR;
-            y = Math.sin(reTheta) * reR;
+          const maxAge = field ? Math.floor(45 + t.structure * 75) : 140;
+          if (x * x + y * y > 1.38 || age[i] > maxAge || isNaN(x) || isNaN(y)) {
+            spawnParticle(i, field, time);
+            continue;
           }
 
           px[i] = x;
           py[i] = y;
 
+          // 3. ПОЛИХРОМНАЯ АЛХИМИЯ ЦВЕТА (Нативный спектр объекта + Матрица поворота SO(3) + Гармоники)
           const speed = Math.sqrt(vx * vx + vy * vy);
-          const hueShift = Math.floor((baseHue + speed * 1800 + (i % 60)) % 360);
-          const lightness = Math.min(88, Math.floor(52 + t.energy * 30 + speed * 400));
-          const alpha = Math.min(0.45, 0.07 + t.energy * 0.18);
+          let finalR = objR;
+          let finalG = objG;
+          let finalB = objB;
 
-          ctx.fillStyle =
-            "hsla(" +
-            String(hueShift) +
-            ", 78%, " +
-            String(lightness) +
-            "%, " +
+          if (!field || (objR < 18 && objG < 18 && objB < 18)) {
+            // Если точка в глубокой тени или режим без объекта — генерируем квантовую палитру золотого сечения
+            const phase = (i * 0.015 * PHI) + time * 2.0 + speed * 35.0;
+            finalR = Math.round(135 + 120 * Math.sin(phase));
+            finalG = Math.round(135 + 120 * Math.sin(phase + 2.094));
+            finalB = Math.round(135 + 120 * Math.sin(phase + 4.188));
+          } else if (t.tone > 0.04) {
+            // Хроматическое вращение спектра через SO(3) матрицу
+            const nr = objR / 255.0;
+            const ng = objG / 255.0;
+            const nb = objB / 255.0;
+            const rr = nr * cosT - ng * sinT + nb * sinT * 0.5;
+            const gg = nr * sinT + ng * cosT - nb * sinT * 0.5;
+            const bb = -nr * sinT * 0.5 + ng * sinT + nb * cosT;
+            finalR = Math.min(255, Math.max(30, Math.round(rr * 255)));
+            finalG = Math.min(255, Math.max(30, Math.round(gg * 255)));
+            finalB = Math.min(255, Math.max(30, Math.round(bb * 255)));
+          }
+
+          const edgeBoost = field ? (0.35 + localEdge * 0.85 + localLum * 0.35) : 0.75;
+          const alpha = clip((0.08 + t.energy * 0.24) * edgeBoost, 0.04, 0.62);
+          const strokeWidth = field && localEdge > 0.45 ? 1.65 : 1.15;
+
+          ctx.strokeStyle =
+            "rgba(" +
+            String(finalR) +
+            "," +
+            String(finalG) +
+            "," +
+            String(finalB) +
+            "," +
             String(alpha.toFixed(3)) +
             ")";
+          ctx.lineWidth = strokeWidth;
 
-          const radiusPx = Math.sqrt(x * x + y * y) * scale;
-          const baseTheta = Math.atan2(y, x);
+          const rPrev = Math.sqrt(prevX * prevX + prevY * prevY) * scale;
+          const thetaPrev = Math.atan2(prevY, prevX);
+          const rCurr = Math.sqrt(x * x + y * y) * scale;
+          const thetaCurr = Math.atan2(y, x);
 
           for (let k = 0; k < symmetryFold; k++) {
-            const rotAngle = baseTheta + (k * 2 * Math.PI) / symmetryFold;
-            const drawX = cx + Math.cos(rotAngle) * radiusPx;
-            const drawY = cy + Math.sin(rotAngle) * radiusPx;
-            ctx.fillRect(drawX, drawY, 1.35, 1.35);
+            const rot = (k * 2 * Math.PI) / symmetryFold;
+            const x0 = cx + Math.cos(thetaPrev + rot) * rPrev;
+            const y0 = cy + Math.sin(thetaPrev + rot) * rPrev;
+            const x1 = cx + Math.cos(thetaCurr + rot) * rCurr;
+            const y1 = cy + Math.sin(thetaCurr + rot) * rCurr;
+
+            ctx.beginPath();
+            ctx.moveTo(x0, y0);
+            ctx.lineTo(x1, y1);
+            ctx.stroke();
           }
         }
       }
@@ -419,6 +661,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
         <div className="absolute top-4 left-4 right-4 flex flex-wrap justify-between items-start pointer-events-none gap-2">
           <div className="bg-black/70 backdrop-blur-md border border-white/10 px-3 py-2 rounded font-mono text-[9px] uppercase tracking-widest text-neutral-300">
             <div className="text-white font-bold">BARRETT PRISM // {(query || "SHINE ON CRAZY DIAMOND").toUpperCase()}</div>
+            <div className="text-[#a855f7] mt-0.5">{fieldStatus}</div>
             <div className="text-neutral-500 mt-0.5">
               α={coeffs.alpha} | β={coeffs.beta} | γ={coeffs.gamma} | δ={coeffs.delta}
             </div>
@@ -433,7 +676,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
         {/* НИЖНИЙ ПЕРЕКЛЮЧАТЕЛЬ ТОПОЛОГИИ */}
         <div className="absolute bottom-4 left-4 right-4 flex flex-wrap justify-between items-center gap-2">
           <div className="flex gap-1.5 bg-black/80 backdrop-blur-md p-1.5 rounded-full border border-white/10">
-            {(["AUTO", "CLIFFORD", "CHLADNI", "VORTEX"] as ManifoldTopology[]).map((mode) => (
+            {(["OBJECT", "CLIFFORD", "CHLADNI", "VORTEX"] as ManifoldTopology[]).map((mode) => (
               <button
                 key={mode}
                 type="button"
@@ -463,10 +706,11 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
             </button>
             <button
               type="button"
-              onClick={triggerReseed}
+              onClick={triggerPhaseShift}
               className="btn-elegant !bg-black/70 backdrop-blur-md"
+              title="Switch to next object matrix & shift phase"
             >
-              Phase Shift
+              Phase Shift ({candidateUrls.length > 0 ? String(candidateIdx + 1) + "/" + String(candidateUrls.length) : "1/1"})
             </button>
           </div>
         </div>
@@ -483,10 +727,10 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
           <div className="flex flex-col gap-5 font-mono text-[10px] uppercase tracking-widest">
             {(
               [
-                { key: "energy", label: "Energy (Phase Velocity)" },
+                { key: "energy", label: "Energy (Spline Velocity)" },
                 { key: "chaos", label: "Chaos (Madcap Turbulence)" },
-                { key: "tone", label: "Tone (Liquid Spectrum)" },
-                { key: "structure", label: "Structure (Chladni Nodes)" },
+                { key: "tone", label: "Tone (SO3 Color Rotation)" },
+                { key: "structure", label: "Structure (Sobel Object Lock)" },
                 { key: "symmetry", label: "Symmetry (Kaleidoscope C_k)" },
               ] as { key: keyof Tensor5D; label: string }[]
             ).map((item) => (
@@ -497,7 +741,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
                 </div>
                 <input
                   type="range"
-                  min="0.05"
+                  min="0.01"
                   max="0.98"
                   step="0.01"
                   value={tensor[item.key]}
@@ -510,9 +754,9 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
 
           <div className="mt-6 p-4 rounded-xl bg-black/50 border border-white/5 font-mono text-[9px] text-neutral-400 leading-relaxed space-y-1">
             <div className="text-white uppercase mb-1">Barrett Differential System:</div>
-            <div>dx/dt = sin(α·y) + γ·cos(α·x)</div>
-            <div>dy/dt = sin(β·x) + δ·cos(β·y)</div>
-            <div>W(x,y) = a·sin(πnx)sin(πmy) + b·sin(πmx)sin(πny)</div>
+            <div>∇I(x,y) = (∂I/∂x, ∂I/∂y) [Sobel Gravity]</div>
+            <div>dx/dt = -∂I/∂y·St + [sin(α·y) + γ·cos(α·x)]·C</div>
+            <div>RGB&apos; = SO(3, θ_tone) · RGB(x,y)</div>
           </div>
         </div>
 
@@ -538,7 +782,8 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
             <button
               type="button"
               onClick={handleSecureToArchive}
-              className="btn-elegant w-full !py-3 justify-center bg-white !text-black font-bold"
+              style={{ backgroundColor: "#ffffff", color: "#000000" }}
+              className="btn-elegant w-full !py-3 justify-center font-bold"
             >
               Secure to Saved Resonance
             </button>

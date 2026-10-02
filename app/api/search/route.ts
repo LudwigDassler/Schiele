@@ -10,39 +10,78 @@ const HYDRA_PROXY_URL = (
 const PAGE_SIZE = 35;
 const CACHE_TTL_HOURS = 24;
 const MAX_CACHE_ENTRIES = 1000;
-const CACHE_VERSION = "v5";
+const CACHE_VERSION = "v6";
 
-const TOXIC_PATTERNS = /(stock|vector|clipart|template|royalty.?free|watermark|alamy|getty|shutter|depositphotos|123rf|dreamstime|freepik|pngtree|illustration|logo|icon|map|chart|graph|diagram|infographic|drawing|sketch|slideshare|researchgate|statista|powerpoint|presentation|spreadsheet|statistics|economic.?sector|rapid.?growth|exports|plarium|neuroderm|mobileye|wikipedia\.org\/wiki\/file)/i;
+// 1. Паттерн стокового, офисного, мультяшного и магазинного мусора
+const TOXIC_PATTERNS = /(stock|vector|clipart|template|royalty.?free|watermark|alamy|getty|shutter|depositphotos|123rf|dreamstime|freepik|pngtree|illustration|logo|icon|map|chart|graph|diagram|infographic|drawing|sketch|slideshare|researchgate|statista|powerpoint|presentation|spreadsheet|statistics|economic.?sector|rapid.?growth|exports|plarium|neuroderm|mobileye|wikipedia\.org\/wiki\/file|pixar|disney|inside.?out|jump.?for.?joy|cartoon| Nickelodeon|dreamworks|minion|spongebob|sticker|emoji|meme|ebay\.|amazon\.|aliexpress|walmart\.|etsy\.)/i;
 
+// 2. Паттерн коммерческого SEO-спама
 const SEO_SPAM = /(download|buy|premium|price|subscribe|cheap|discount|high.?res|hd.?free|wallpaper.?4k)/i;
 
 function heuristicGuillotine(results: any[], originalQuery: string) {
-  return results.filter((item) => {
-    const srcUrl = (item.src || item.thumb || "").toLowerCase();
-    const linkUrl = (item.link || "").toLowerCase();
-    const combinedUrl = srcUrl + " " + linkUrl;
-    const title = (item.title || "").toLowerCase();
+  const queryTokens = originalQuery
+    .toLowerCase()
+    .replace(/[^a-zа-яё0-9\s]/gi, " ")
+    .split(/\s+/)
+    .filter((w) => w.length >= 2);
 
-    if (!srcUrl.startsWith("http")) return false;
-    if (TOXIC_PATTERNS.test(combinedUrl) || TOXIC_PATTERNS.test(title)) return false;
-    if (SEO_SPAM.test(title) || SEO_SPAM.test(combinedUrl)) return false;
+  // Сначала отсекаем явный мусор и считаем когерентность токенов
+  const scored = results
+    .map((item) => {
+      const srcUrl = (item.src || item.thumb || "").toLowerCase();
+      const linkUrl = (item.link || "").toLowerCase();
+      const combinedUrl = srcUrl + " " + linkUrl;
+      const title = (item.title || "").toLowerCase();
+      const fullMeta = title + " " + decodeURIComponent(combinedUrl.replace(/\+/g, " "));
 
-    const wordsCount = title.split(/[\s,|_-]+/).length;
-    if (wordsCount > 18) return false;
+      if (!srcUrl.startsWith("http")) return null;
+      if (TOXIC_PATTERNS.test(combinedUrl) || TOXIC_PATTERNS.test(title)) return null;
+      if (SEO_SPAM.test(title) || SEO_SPAM.test(combinedUrl)) return null;
 
-    const isPopTrap = originalQuery.toLowerCase().includes("поп");
-    if (
-      isPopTrap &&
-      (title.includes("popul") ||
-        title.includes("africa") ||
-        title.includes("world map") ||
-        title.includes("geography"))
-    ) {
-      return false;
+      const wordsCount = title.split(/[\s,|_-]+/).length;
+      if (wordsCount > 18) return null;
+
+      const isPopTrap = originalQuery.toLowerCase().includes("поп");
+      if (
+        isPopTrap &&
+        (title.includes("popul") ||
+          title.includes("africa") ||
+          title.includes("world map") ||
+          title.includes("geography"))
+      ) {
+        return null;
+      }
+
+      // Считаем сколько слов из запроса реально присутствует в метаданных картинки
+      let matchedTokens = 0;
+      for (const token of queryTokens) {
+        if (fullMeta.includes(token)) {
+          matchedTokens++;
+        }
+      }
+
+      return { item, matchedTokens };
+    })
+    .filter((x): x is { item: any; matchedTokens: number } => x !== null);
+
+  if (scored.length === 0) return [];
+
+  // Если запрос из 2+ слов (например, "Joy Division" или "Pink Floyd"):
+  // проверяем, есть ли результаты с полным совпадением всех слов
+  if (queryTokens.length >= 2) {
+    const minRequired = queryTokens.length;
+    const strictMatches = scored.filter((x) => x.matchedTokens >= minRequired);
+
+    // Если нашлось хотя бы 4 точных попадания — безжалостно рубим частичные совпадения (вроде мультика "Joy" или певицы "Pink")
+    if (strictMatches.length >= 4) {
+      return strictMatches.map((x) => x.item);
     }
 
-    return true;
-  });
+    // Иначе сортируем так, чтобы полные совпадения шли строго первыми
+    scored.sort((a, b) => b.matchedTokens - a.matchedTokens);
+  }
+
+  return scored.map((x) => x.item);
 }
 
 const safelyParseJson = (str: string) => {
@@ -186,9 +225,15 @@ async function searchBing(query: string, page: number) {
 
   try {
     const first = (page - 1) * PAGE_SIZE + 1;
+    // Для составных запросов из 2-3 слов подаем точное фразовое вхождение первым приоритетом
+    const words = query.trim().split(/\s+/);
+    const bingQuery = words.length >= 2 && words.length <= 3 && !query.includes('"')
+      ? '"' + query.trim() + '"'
+      : query;
+
     const targetUrl =
       "https://www.bing.com/images/search?q=" +
-      encodeURIComponent(query) +
+      encodeURIComponent(bingQuery) +
       "&qft=+filterui:photo-photo&setmkt=" +
       mkt +
       "&setlang=" +

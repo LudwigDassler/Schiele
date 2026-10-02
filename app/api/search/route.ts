@@ -6,11 +6,11 @@ import { bayesianGuillotine } from "../../../lib/overseer";
 
 const HYDRA_PROXY_URL = (
   process.env.HYDRA_PROXY_URL || "https://kashmir-hydra.firsovivan2003.workers.dev"
-).replace(/\/$/, "");
+).replace(/\/(?![\s\S])/, "");
 const PAGE_SIZE = 35;
 const CACHE_TTL_HOURS = 24;
 const MAX_CACHE_ENTRIES = 1000;
-const CACHE_VERSION = "v4";
+const CACHE_VERSION = "v5";
 
 const TOXIC_PATTERNS = /(stock|vector|clipart|template|royalty.?free|watermark|alamy|getty|shutter|depositphotos|123rf|dreamstime|freepik|pngtree|illustration|logo|icon|map|chart|graph|diagram|infographic|drawing|sketch|slideshare|researchgate|statista|powerpoint|presentation|spreadsheet|statistics|economic.?sector|rapid.?growth|exports|plarium|neuroderm|mobileye|wikipedia\.org\/wiki\/file)/i;
 
@@ -20,7 +20,7 @@ function heuristicGuillotine(results: any[], originalQuery: string) {
   return results.filter((item) => {
     const srcUrl = (item.src || item.thumb || "").toLowerCase();
     const linkUrl = (item.link || "").toLowerCase();
-    const combinedUrl = `${srcUrl} ${linkUrl}`;
+    const combinedUrl = srcUrl + " " + linkUrl;
     const title = (item.title || "").toLowerCase();
 
     if (!srcUrl.startsWith("http")) return false;
@@ -54,7 +54,7 @@ const safelyParseJson = (str: string) => {
 };
 
 function cacheKey(query: string, page: number) {
-  return `${CACHE_VERSION}::${query.trim().toLowerCase()}::p${page}`;
+  return CACHE_VERSION + "::" + query.trim().toLowerCase() + "::p" + String(page);
 }
 
 async function readCache(key: string, allowStale = false): Promise<any[] | null> {
@@ -108,7 +108,7 @@ async function searchDuckDuckGo(query: string, page: number) {
   const isCyrillic = /[а-яА-ЯёЁ]/.test(query);
   const locale = isCyrillic ? "ru-ru" : "us-en";
   const headers = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "Accept-Language": isCyrillic ? "ru-RU,ru;q=0.9,en-US;q=0.8" : "en-US,en;q=0.9",
   };
 
@@ -116,9 +116,8 @@ async function searchDuckDuckGo(query: string, page: number) {
   const timeoutId = setTimeout(() => controller.abort(), 15000);
 
   try {
-    // Точная сигнатура из рабочего исходника
-    const tokenTargetUrl = `https://duckduckgo.com/?q=${encodeURIComponent(query)}`;
-    const tokenProxyUrl = `${HYDRA_PROXY_URL}/?url=${encodeURIComponent(tokenTargetUrl)}`;
+    const tokenTargetUrl = "https://duckduckgo.com/?q=" + encodeURIComponent(query);
+    const tokenProxyUrl = HYDRA_PROXY_URL + "/?url=" + encodeURIComponent(tokenTargetUrl);
 
     const tokenRes = await fetch(tokenProxyUrl, {
       headers,
@@ -134,8 +133,16 @@ async function searchDuckDuckGo(query: string, page: number) {
     const vqd = vqdMatch[1];
 
     const offset = (page - 1) * PAGE_SIZE;
-    const imgTargetUrl = `https://duckduckgo.com/i.js?l=${locale}&o=json&q=${encodeURIComponent(query)}&vqd=${vqd}&f=type:photo&s=${offset}`;
-    const imgProxyUrl = `${HYDRA_PROXY_URL}/?url=${encodeURIComponent(imgTargetUrl)}`;
+    const imgTargetUrl =
+      "https://duckduckgo.com/i.js?l=" +
+      locale +
+      "&o=json&q=" +
+      encodeURIComponent(query) +
+      "&vqd=" +
+      vqd +
+      "&f=,,,,&s=" +
+      String(offset);
+    const imgProxyUrl = HYDRA_PROXY_URL + "/?url=" + encodeURIComponent(imgTargetUrl);
 
     const imgRes = await fetch(imgProxyUrl, {
       headers,
@@ -153,10 +160,10 @@ async function searchDuckDuckGo(query: string, page: number) {
 
     return data.results
       .map((r: any, index: number) => ({
-        id: `ddg-${Date.now()}-${offset + index}`,
+        id: "ddg-" + String(Date.now()) + "-" + String(offset + index),
         src: r.image,
         thumb: r.thumbnail || r.image,
-        title: r.title || query,
+        title: (r.title || query).replace(/[\uE000\uE001]/g, ""),
         link: r.url || r.image,
         source: "duckduckgo",
       }))
@@ -179,8 +186,16 @@ async function searchBing(query: string, page: number) {
 
   try {
     const first = (page - 1) * PAGE_SIZE + 1;
-    const targetUrl = `https://www.bing.com/images/search?q=${encodeURIComponent(query)}&qft=+filterui:photo-photo&setmkt=${mkt}&setlang=${mkt}&form=HDRSC2&first=${first}`;
-    const proxyUrl = `${HYDRA_PROXY_URL}/?url=${encodeURIComponent(targetUrl)}`;
+    const targetUrl =
+      "https://www.bing.com/images/search?q=" +
+      encodeURIComponent(query) +
+      "&qft=+filterui:photo-photo&setmkt=" +
+      mkt +
+      "&setlang=" +
+      mkt +
+      "&form=HDRSC2&first=" +
+      String(first);
+    const proxyUrl = HYDRA_PROXY_URL + "/?url=" + encodeURIComponent(targetUrl);
 
     const response = await fetch(proxyUrl, {
       cache: "no-store",
@@ -193,19 +208,20 @@ async function searchBing(query: string, page: number) {
     clearTimeout(timeoutId);
 
     const html = await response.text();
-    const $ = cheerio.load(html);
+    const dom = cheerio.load(html);
     const visualArtifacts: any[] = [];
 
-    $("a.iusc").each((index, element) => {
-      const mData = $(element).attr("m");
+    dom("a.iusc").each((index, element) => {
+      const mData = dom(element).attr("m");
       if (mData) {
         const artifact = safelyParseJson(mData);
         if (artifact && artifact.murl) {
+          const cleanTitle = (artifact.t || query).replace(/[\uE000\uE001]/g, "");
           visualArtifacts.push({
-            id: `bing-${Date.now()}-${index}`,
+            id: "bing-" + String(Date.now()) + "-" + String(index),
             src: artifact.murl,
             thumb: artifact.turl || artifact.murl,
-            title: artifact.t || query,
+            title: cleanTitle,
             link: artifact.purl || "",
             source: "bing",
           });
@@ -226,20 +242,29 @@ async function searchBing(query: string, page: number) {
 async function searchInternalDatabase(query: string, page: number) {
   try {
     const offset = (page - 1) * PAGE_SIZE;
+    const filterStr =
+      "image_description.ilike.%" +
+      query +
+      "%,core_vibe.ilike.%" +
+      query +
+      "%,title.ilike.%" +
+      query +
+      "%";
+
     const { data, error } = await supabase
       .from("images")
       .select("*")
-      .or(`image_description.ilike.%${query}%,core_vibe.ilike.%${query}%,title.ilike.%${query}%`)
+      .or(filterStr)
       .order("created_at", { ascending: false })
       .range(offset, offset + PAGE_SIZE - 1);
 
     if (error || !data) return [];
 
     return data.map((img: any) => ({
-      id: `schiele-db-${img.id}`,
+      id: "schiele-db-" + String(img.id),
       src: img.src || img.image_url,
       thumb: img.src || img.image_url,
-      title: img.core_vibe ? `[Schiele] ${img.core_vibe}` : query,
+      title: img.core_vibe ? "[Schiele] " + img.core_vibe : query,
       link: img.src || img.image_url,
       isInternal: true,
       source: "internal_db",
@@ -261,13 +286,12 @@ export async function GET(req: Request) {
 
     let safeQuery = rawQuery
       .replace(/^[^a-zA-Z0-9А-Яа-яЁё]+/, "")
-      .replace(/([a-zA-Z0-9А-Яа-яЁё]+)(?:\s+\1\b)+/gi, "$1")
       .replace(/\s+/g, " ")
       .trim();
 
     if (!safeQuery) safeQuery = "cinematic aesthetic";
 
-    console.log(`[KASHMIR ROUTER] "${safeQuery}" -> ${intent}, User: ${userId}, Page: ${page}`);
+    console.log("[KASHMIR ROUTER] " + safeQuery + " -> " + intent + ", User: " + userId + ", Page: " + String(page));
 
     const optimizedQuery = safeQuery;
     const key = cacheKey(optimizedQuery, page);
@@ -281,7 +305,7 @@ export async function GET(req: Request) {
 
     const cached = await readCache(key);
     if (cached && cached.length > 0) {
-      console.log(`[KASHMIR CACHE] Hit для "${optimizedQuery}" (страница ${page})`);
+      console.log("[KASHMIR CACHE] Hit for " + optimizedQuery);
       externalArtifacts = heuristicGuillotine(cached, safeQuery);
       fromCache = externalArtifacts.length > 0;
     }
@@ -291,13 +315,13 @@ export async function GET(req: Request) {
       let source = "ddg";
 
       if (externalArtifacts.length === 0) {
-        console.warn(`[KASHMIR] DDG вернул пусто, пробуем Bing...`);
+        console.warn("[KASHMIR] DDG empty, trying Bing...");
         externalArtifacts = await searchBing(optimizedQuery, page);
         source = "bing";
       }
 
       if (externalArtifacts.length > 0) {
-        console.log(`[KASHMIR] Успешно извлечено ${externalArtifacts.length} артефактов через ${source}.`);
+        console.log("[KASHMIR] Extracted " + String(externalArtifacts.length) + " via " + source);
       }
     }
 
@@ -310,7 +334,7 @@ export async function GET(req: Request) {
         const bayesDeathToll = pureArtifacts.length - survivedArtifacts.length;
         externalArtifacts = survivedArtifacts;
         filterApplied = true;
-        console.log(`[OVERSEER: BAYES] Казнено: ${bayesDeathToll}. Итого выжило: ${externalArtifacts.length}`);
+        console.log("[OVERSEER: BAYES] Killed: " + String(bayesDeathToll) + ". Survived: " + String(externalArtifacts.length));
       } else {
         externalArtifacts = pureArtifacts;
       }

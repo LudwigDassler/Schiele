@@ -2138,7 +2138,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
 
       const pluckDisp = Math.sin(sNorm * Math.PI * 2.0) * pluckPx * env;
 
-      if (art.dimension === "2D_STUDIO" && s.topology !== "SCULPT3D" && s.topology !== "LIDAR") {
+      if (art.dimension === "2D_STUDIO" && stateRef.current.topology !== "SCULPT3D" && stateRef.current.topology !== "LIDAR") {
         const sx = ox + ((u - 0.5) * zoomScale + 0.5) * drawW + nxIn * pluckDisp;
         const sy = oy + ((v - 0.5) * zoomScale + 0.5) * drawH + nyIn * pluckDisp;
         return [sx, sy];

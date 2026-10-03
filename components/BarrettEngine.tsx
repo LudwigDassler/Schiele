@@ -2181,7 +2181,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
 
       // СТРОГОЕ РАЗДЕЛЕНИЕ 2D И 3D:
       // Если активен 2D_STUDIO — никакого 3D-сдвига по Z (предотвращает двоение букв и контуров!)
-      if (art.dimension === "2D_STUDIO" && s.topology !== "SCULPT3D" && s.topology !== "LIDAR") {
+   if (art.dimension === "2D_STUDIO" && stateRef.current.topology !== "SCULPT3D" && stateRef.current.topology !== "LIDAR") {
         const sx = ox + ((u - 0.5) * zoomScale + 0.5) * drawW + nxIn * pluckDisp;
         const sy = oy + ((v - 0.5) * zoomScale + 0.5) * drawH + nyIn * pluckDisp;
         return [sx, sy];

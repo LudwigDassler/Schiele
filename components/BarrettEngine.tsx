@@ -8,18 +8,27 @@ type AnimationStageMode = "ANIMATE_ART" | "DRAW_THEN_ANIMATE" | "ISOLATE_SUBJECT
 interface KineticPromptCoordinates {
   promptText: string;
   modeName: string;
-  // Анатомический 2.5D-риг головы (поворот, кивок, наклон)
-  headTurnYaw: number;     // Амплитуда 2.5D поворота головы влево-вправо
-  headNodPitch: number;    // Амплитуда кивка головы вверх-вниз
-  headTiltRoll: number;    // Наклон головы к плечу
-  headTurnDir: number;     // Направление: 0 = качание в обе стороны, -1 = влево, +1 = вправо
-  // Движение всего слоя
+  // 1. Голова и взгляд (2.5D Cranial Rig)
+  headTurnYaw: number;
+  headNodPitch: number;
+  headTiltRoll: number;
+  headTurnDir: number;
+  // 2. Руки, плечи и игра на гитаре (Upper Limb IK)
+  armSwingAmp: number;      // Взмахи руками / движение плеч
+  guitarStrumAmp: number;   // Быстрая игра на гитаре / соло в зоне рук
+  // 3. Ноги, шаг, прыжки и драйв (Lower Body / Vehicle Suspension)
+  strideWalkAmp: number;    // Противофазный шаг / бег
+  driveVibration: number;   // Езда машины / работа подвески и мотора
+  // 4. Кинокамера и траектория всего слоя (Camera & Layer Trajectory)
   layerMoveX: number;
   layerMoveY: number;
   layerTiltAmp: number;
   layerScaleAmp: number;
+  cameraDollyAmp: number;   // Глубокий пролет камеры сквозь сцену
   moveFreq: number;
-  // 3D и волновые поля
+  // 5. Глобальные физические поля (Vortex, Acoustic, Wave, 3D)
+  vortexSpinAmp: number;    // Закручивание спирали / вихря
+  acousticStringAmp: number;// Высокочастотный резонанс струн и контуров
   orbitYawAmp: number;
   orbitPitchAmp: number;
   orbitSpeed: number;
@@ -60,9 +69,9 @@ interface ArtStudioConfig {
   fastPerfMode: boolean;
   edition: TributeEdition;
   posterFrame: boolean;
-  strokeWeight: number;        // По умолчанию 0.58x (бритвенно-тонкие линии!)
-  coherenceCleanliness: number;// Порог чистоты черт лица
-  relief3DAndMotion: number;   // Амплитуда поворота головы и 3D-рельефа
+  strokeWeight: number;
+  coherenceCleanliness: number;
+  relief3DAndMotion: number;
   glowAndPrism: number;
   shadowHex: string;
   midtoneHex: string;
@@ -88,7 +97,7 @@ interface ContourStroke {
   ny: Float32Array;
   z: Float32Array;
   nPts: number;
-  tier: 0 | 1 | 2 | 3 | 4; // 0: Глаза/губы/текст (0.2px), 1: Контур, 2: Детали, 3: Тонкий штрих, 4: Блик
+  tier: 0 | 1 | 2 | 3 | 4;
   r: number;
   g: number;
   b: number;
@@ -139,7 +148,7 @@ interface MatrixBuffer {
   coherence: Float32Array;
   subjectAlpha: Float32Array;
   fdog: Float32Array;
-  nmsRidge: Float32Array; // 1-пиксельный скелет граней Кэнни для хирургической точности лиц!
+  nmsRidge: Float32Array;
   edge: Float32Array;
   scaleMap: Float32Array;
   gx: Float32Array;
@@ -153,7 +162,6 @@ interface MatrixBuffer {
   meanAnisotropy: number;
   charCenterU: number;
   charCenterV: number;
-  // Автоматически найденные координаты головы персонажа для 2.5D-поворотов!
   headU: number;
   headV: number;
   headRx: number;
@@ -198,43 +206,71 @@ const BACKDROP_COLORS: Record<CanvasBackdrop, string> = {
   ARCHIVAL_PAPER: "#e8dcc4",
 };
 
+// 8 РАЗНОПЛАНОВЫХ СЦЕНАРИЕВ АНИМАЦИИ (Гитара/Руки, Пролет камеры, Полна кинематика танца, Поворот головы, Драйв, Вихрь, 3D, Таймлапс)
 const PROMPT_PRESETS: { label: string; prompt: string; is3D?: boolean; stage?: AnimationStageMode }[] = [
   {
-    label: "Поверни голову (2.5D)",
-    prompt: "Плавно поверни голову влево и вправо, живой взгляд и легкое дыхание",
+    label: "Guitar Solo & Vibe",
+    prompt: "Играет экспрессивное соло на гитаре, движение рук по струнам, качает головой в такт и акустический резонанс",
     is3D: false,
     stage: "ANIMATE_ART",
   },
   {
-    label: "Кивок и ритм (Nod)",
-    prompt: "Кивни головой в такт, упругое покачивание плеч и живая пластика контуров",
+    label: "Full-Body Dance",
+    prompt: "Активный танец всем телом, взмахи руками, ритмичный шаг ногами и упругий грув",
     is3D: false,
     stage: "ANIMATE_ART",
   },
   {
-    label: "Draw -> Animate",
-    prompt: "Отрисовать тонкий скетч с нуля и плавно оживить поворот головы",
+    label: "Cinema Camera Fly",
+    prompt: "Глубокий кинематографический пролет камеры сквозь сцену, параллакс планов и парение",
     is3D: false,
-    stage: "DRAW_THEN_ANIMATE",
+    stage: "ANIMATE_ART",
   },
   {
-    label: "3D Front Bas-Relief",
-    prompt: "Объемный 3D барельеф анфас со скользящим студийным светом и мягким дыханием",
+    label: "Drive & Speed",
+    prompt: "Быстрая езда вперед, работа подвески автомобиля, вибрация мотора и встречный поток ветра",
+    is3D: false,
+    stage: "ANIMATE_ART",
+  },
+  {
+    label: "2.5D Head & Gaze",
+    prompt: "Плавно поверни голову влево и вправо, кивок и живое дыхание портрета",
+    is3D: false,
+    stage: "ANIMATE_ART",
+  },
+  {
+    label: "Cosmic Vortex",
+    prompt: "Галактический спиральный вихрь, невесомость, левитация и волновая турбулентность",
+    is3D: false,
+    stage: "ANIMATE_ART",
+  },
+  {
+    label: "3D Bas-Relief",
+    prompt: "Объемный 3D барельеф со скользящим студийным светом и мягким параллаксом глубины",
     is3D: true,
     stage: "ANIMATE_ART",
   },
   {
-    label: "Laminar Silk Wind",
-    prompt: "Ламинарный поток ветра вдоль волокон, колыхание прядей и фазовый сдвиг",
+    label: "Draw -> Animate",
+    prompt: "Отрисовать тонкий скетч с нуля и плавно оживить всю сцену в движении",
     is3D: false,
-    stage: "ANIMATE_ART",
+    stage: "DRAW_THEN_ANIMATE",
   },
-  {
-    label: "Radial Pulse Wave",
-    prompt: "Мощный радиальный импульс из центра фигуры, вибрация струн и отдача",
-    is3D: false,
-    stage: "ANIMATE_ART",
-  },
+];
+
+// Стоп-слова для фильтрации нерелевантных мультяшных результатов (вроде Jimmy Neutron при поиске Jimmy Page)
+const NOISE_BLACKLIST = [
+  "neutron",
+  "nickelodeon",
+  "spongebob",
+  "toon",
+  "clipart",
+  "meme",
+  "roblox",
+  "minecraft",
+  "fortnite",
+  "sticker",
+  "emoji",
 ];
 
 function clip(v: number, min = 0.0, max = 1.0): number {
@@ -259,10 +295,58 @@ function hexToRgb(hex: string): [number, number, number] {
 }
 
 // ==========================================
-// ИНТЕЛЛЕКТУАЛЬНЫЙ КОМПИЛЯТОР ПРОМПТА С ПОДДЕРЖКОЙ АНАТОМИИ ("ПОВЕРНИ ГОЛОВУ", "КИВНИ", "ВЗГЛЯД")
+// УМНЫЙ СЕМАНТИЧЕСКИЙ ФИЛЬТР ПОИСКА (ОТСЕКАЕТ ДЖИММИ НЕЙТРОНА ПРИ ПОИСКЕ ДЖИММИ ПЕЙДЖА!)
+// ==========================================
+function scoreSearchItemRelevance(item: any, rawQuery: string): number {
+  const qClean = rawQuery.trim().toLowerCase();
+  const tokens = qClean.split(/\s+/).filter((t) => t.length >= 2);
+  const meta = [
+    item.title || "",
+    item.alt || "",
+    item.description || "",
+    item.artist || "",
+    item.src || "",
+    item.image_url || "",
+  ]
+    .join(" ")
+    .toLowerCase();
+
+  // Если в метаданных есть слова из черного списка (например, "neutron"), а юзер их НЕ просил — жестко бракуем!
+  for (const badWord of NOISE_BLACKLIST) {
+    if (meta.includes(badWord) && !qClean.includes(badWord)) {
+      return -100;
+    }
+  }
+
+  if (tokens.length === 0) return 1;
+
+  // Проверяем точное вхождение всей фразы целиком (например, "jimmy page" или "jimmy_page" или "jimmypage")
+  let score = 0;
+  if (meta.includes(qClean) || meta.includes(tokens.join("_")) || meta.includes(tokens.join("-"))) {
+    score += 50;
+  }
+
+  let matchedTokens = 0;
+  for (const tk of tokens) {
+    if (meta.includes(tk)) {
+      matchedTokens++;
+      score += 10;
+    }
+  }
+
+  // Если запрос из 2+ слов (имя и фамилия), но совпало только первое слово ("jimmy" без "page") — штрафуем!
+  if (tokens.length >= 2 && matchedTokens < tokens.length) {
+    score -= 25;
+  }
+
+  return score;
+}
+
+// ==========================================
+// 12-КАНАЛЬНЫЙ КОМПИЛЯТОР РАЗНОПЛАНОВОЙ АНИМАЦИИ ИЗ ПРОМПТА
 // ==========================================
 function compileAnimationPrompt(rawPrompt: string): KineticPromptCoordinates {
-  const text = (rawPrompt || "Плавно поверни голову и оживи контуры").trim().toLowerCase();
+  const text = (rawPrompt || "Играет экспрессивное соло на гитаре, движение рук и живой грув").trim().toLowerCase();
 
   let hash = 2166136261;
   for (let i = 0; i < text.length; i++) {
@@ -275,11 +359,18 @@ function compileAnimationPrompt(rawPrompt: string): KineticPromptCoordinates {
   let headNodPitch = 0.0;
   let headTiltRoll = 0.0;
   let headTurnDir = 0;
+  let armSwingAmp = 0.0;
+  let guitarStrumAmp = 0.0;
+  let strideWalkAmp = 0.0;
+  let driveVibration = 0.0;
   let layerMoveX = 0.008;
   let layerMoveY = 0.012;
   let layerTiltAmp = 0.015;
   let layerScaleAmp = 0.015;
-  let moveFreq = 1.45;
+  let cameraDollyAmp = 0.0;
+  let moveFreq = 1.5;
+  let vortexSpinAmp = 0.0;
+  let acousticStringAmp = 0.0;
   let orbitYawAmp = 0.0;
   let orbitPitchAmp = 0.0;
   let orbitSpeed = 0.55;
@@ -290,13 +381,13 @@ function compileAnimationPrompt(rawPrompt: string): KineticPromptCoordinates {
   let timelapseLoop = false;
   const tags: string[] = [];
 
-  const speedMult = /(быстр|стремител|ритм|актив|резк|fast|rapid|quick|high|upbeat)/.test(text)
+  const speedMult = /(быстр|стремител|ритм|актив|резк|драйв|рок|fast|rapid|quick|high|upbeat|rock|solo)/.test(text)
     ? 1.65
     : /(медлен|плавн|спокойн|нежн|slow|smooth|calm|gentle|soft)/.test(text)
     ? 0.68
     : 1.0;
 
-  const powerMult = /(сильн|мощн|максим|амплитуд|глубок|strong|heavy|max|deep|wide)/.test(text)
+  const powerMult = /(сильн|мощн|максим|амплитуд|глубок|экспресс|strong|heavy|max|deep|wide|expressive)/.test(text)
     ? 1.45
     : /(едва|легк|тонк|чуть|subtle|slight|delicate)/.test(text)
     ? 0.6
@@ -304,89 +395,124 @@ function compileAnimationPrompt(rawPrompt: string): KineticPromptCoordinates {
 
   moveFreq *= speedMult;
 
-  // 1. ПОВОРОТ ГОЛОВЫ / ЛИЦА / ВЗГЛЯДА ("поверни голову", "повернуть", "посмотри", "turn head", "look")
-  if (/(голов|лиц|поверн|поворот|разверн|посмотр|взгляд|профил|head|face|turn|look|gaze)/.test(text)) {
-    headTurnYaw = 0.48 * powerMult;
-    headTiltRoll = 0.06 * powerMult;
-    headNodPitch = 0.12 * powerMult;
+  // 1. ИГРА НА ГИТАРЕ / СОЛО / СТРУНЫ / МУЗЫКА ("играет", "гитар", "соло", "струн", "аккорд", "guitar", "solo", "strum")
+  if (/(гитар|соло|струн|игра|аккорд|медиатор|гриф|музык|рок|guitar|solo|strum|play|riff|chord|acoustic)/.test(text)) {
+    guitarStrumAmp = 0.72 * powerMult;
+    armSwingAmp = 0.45 * powerMult;
+    acousticStringAmp = 0.75 * powerMult;
+    headNodPitch = 0.28 * powerMult;
+    headTiltRoll = 0.08 * powerMult;
+    layerMoveX = 0.025 * powerMult;
+    tags.push("GUITAR-SOLO-RIG");
+  }
+
+  // 2. ДВИЖЕНИЕ РУК / ЖЕСТЫ / ВЗМАХИ ("рукам", "руки", "машет", "жест", "привет", "arm", "hand", "wave")
+  if (/(рук|рукам|машет|махн|жест|привет|ладон|кулак|arm|hand|wave|gesture|clap)/.test(text)) {
+    armSwingAmp = Math.max(armSwingAmp, 0.75 * powerMult);
+    internalWaveAmp = Math.max(internalWaveAmp, 0.38 * powerMult);
+    tags.push("ARM-KINEMATICS");
+  }
+
+  // 3. ХОДЬБА / БЕГ / ТАНЕЦ ВСЕМ ТЕЛОМ / ПРЫЖКИ ("танц", "шаг", "идет", "бежит", "прыг", "ногам", "walk", "run", "dance", "jump")
+  if (/(танц|пляс|шаг|идет|ходьб|бег|бежит|прыг|прыж|ног|ногам|грув|dance|walk|stride|run|jump|groove|boogie)/.test(text)) {
+    strideWalkAmp = 0.68 * powerMult;
+    armSwingAmp = Math.max(armSwingAmp, 0.55 * powerMult);
+    layerMoveX = 0.048 * powerMult;
+    layerMoveY = 0.042 * powerMult;
+    layerTiltAmp = 0.065 * powerMult;
+    headNodPitch = Math.max(headNodPitch, 0.25 * powerMult);
+    tags.push("FULL-BODY-MOTION");
+  }
+
+  // 4. ЕЗДА / АВТОМОБИЛЬ / ДРАЙВ / МОТОР ("едет", "машин", "авто", "драйв", "гонк", "колес", "drive", "car", "speed", "engine")
+  if (/(едет|машин|авто|драйв|гонк|колес|мотор|дорог|трасс|подвеск|drive|driving|car|speed|engine|road|ride)/.test(text)) {
+    driveVibration = 0.78 * powerMult;
+    layerMoveX = 0.055 * powerMult;
+    windVecX = -0.65 * powerMult;
+    cameraDollyAmp = 0.35 * powerMult;
+    tags.push("VEHICLE-DRIVE");
+  }
+
+  // 5. ПРОЛЕТ КАМЕРЫ / ПАНОРАМА / НАЕЗД ("камер", "пролет", "наезд", "зум", "панорам", "облет", "camera", "fly", "dolly", "zoom", "pan")
+  if (/(камер|пролет|наезд|зум|приближ|отдален|панорам|план|camera|fly|dolly|zoom|pan|cinematic)/.test(text)) {
+    cameraDollyAmp = 0.75 * powerMult;
+    layerMoveX = Math.max(layerMoveX, 0.035 * powerMult);
+    orbitYawAmp = Math.max(orbitYawAmp, 0.14 * powerMult);
+    tags.push("CAMERA-FLY");
+  }
+
+  // 6. ПОВОРОТ И КИВОК ГОЛОВЫ ("голов", "лиц", "поверн", "кивн", "взгляд", "head", "face", "turn", "nod")
+  if (/(голов|лиц|поверн|поворот|разверн|посмотр|взгляд|кивн|кивок|кача|head|face|turn|look|nod)/.test(text)) {
+    headTurnYaw = Math.max(headTurnYaw, 0.48 * powerMult);
+    headNodPitch = Math.max(headNodPitch, 0.22 * powerMult);
+    headTiltRoll = Math.max(headTiltRoll, 0.07 * powerMult);
     if (/(влево|налево|left)/.test(text) && !/(вправо|направо|right)/.test(text)) {
       headTurnDir = -1;
     } else if (/(вправо|направо|right)/.test(text) && !/(влево|налево|left)/.test(text)) {
       headTurnDir = 1;
-    } else {
-      headTurnDir = 0; // Плавный поворот в обе стороны
     }
-    tags.push("HEAD-TURN-2.5D");
+    tags.push("HEAD-RIG-2.5D");
   }
 
-  // 2. КИВОК ГОЛОВОЙ ("кивни", "кивок", "кивает", "nod", "yes")
-  if (/(кивн|кивок|кива|вверх.?вниз|nod|nodding)/.test(text)) {
-    headNodPitch = 0.42 * powerMult;
-    headTurnYaw = Math.max(headTurnYaw, 0.12);
-    tags.push("HEAD-NOD");
+  // 7. СПИРАЛЬНЫЙ ВИХРЬ / ГАЛАКТИКА / КАЛЕЙДОСКОП ("вихр", "спирал", "галактик", "водоворот", "космос", "vortex", "spiral", "galaxy")
+  if (/(вихр|спирал|галактик|водоворот|вращен|круговорот|торнадо|vortex|spiral|galaxy|swirl|cyclone)/.test(text)) {
+    vortexSpinAmp = 0.72 * powerMult;
+    internalWaveAmp = Math.max(internalWaveAmp, 0.52 * powerMult);
+    tags.push("VORTEX-SPIRAL");
   }
 
-  // 3. ДВИЖЕНИЕ И ТАНЕЦ ФИГУРЫ
-  if (/(танц|ритм|покачив|шаг|ходьб|двигай|dance|groove|sway|move|walk)/.test(text)) {
-    layerMoveX = 0.042 * powerMult;
-    layerMoveY = 0.035 * powerMult;
-    layerTiltAmp = 0.055 * powerMult;
-    headTurnYaw = Math.max(headTurnYaw, 0.25 * powerMult);
-    headTiltRoll = 0.09 * powerMult;
-    internalWaveAmp = 0.42 * powerMult;
-    tags.push("BODY-GROOVE");
+  // 8. ПАРЕНИЕ И ЛЕВИТАЦИЯ
+  if (/(парен|парит|левит|невесом|космос|воздух|float|hover|levitat|space|zero.?g)/.test(text)) {
+    layerMoveY = Math.max(layerMoveY, 0.052 * powerMult);
+    layerScaleAmp = Math.max(layerScaleAmp, 0.038 * powerMult);
+    tags.push("ZERO-G-FLOAT");
   }
 
-  // 4. ПАРЕНИЕ И ЛЕВИТАЦИЯ
-  if (/(парен|парит|прыж|прыг|левит|невесом|float|hover|jump|bounce|levitat)/.test(text)) {
-    layerMoveY = 0.05 * powerMult;
-    layerScaleAmp = 0.035 * powerMult;
-    tags.push("FLOAT-Y");
+  // 9. ВЕТЕР / ВОЛНЫ / ОКЕАН
+  if (/(ветер|ветр|волн|поток|шелк|волос|пряд|вод|океан|wind|wave|flow|silk|breeze|hair|ocean)/.test(text)) {
+    windVecX = 0.55 * powerMult;
+    windVecY = -0.16 * powerMult;
+    internalWaveAmp = Math.max(internalWaveAmp, 0.58 * powerMult);
+    tags.push("WAVE-FLOW");
   }
 
-  // 5. ДЫХАНИЕ И ПУЛЬС
-  if (/(дыхан|дышит|пульс|зум|масштаб|сердц|breathe|breath|pulse|scale|zoom|heart)/.test(text)) {
-    layerScaleAmp = 0.042 * powerMult;
-    tags.push("BREATHE");
-  }
-
-  // 6. 3D БАРЕЛЬЕФ
+  // 10. 3D БАРЕЛЬЕФ
   if (/(3d|3д|скульпт|объем|рельеф|орбит|параллакс|sculpt|relief|orbit|parallax)/.test(text)) {
-    orbitYawAmp = /анфас|front/.test(text) ? 0.07 : 0.22 * powerMult;
-    orbitPitchAmp = /анфас|front/.test(text) ? 0.05 : 0.14 * powerMult;
-    orbitSpeed = 0.58 * speedMult;
+    orbitYawAmp = /анфас|front/.test(text) ? 0.07 : 0.24 * powerMult;
+    orbitPitchAmp = /анфас|front/.test(text) ? 0.05 : 0.15 * powerMult;
+    orbitSpeed = 0.6 * speedMult;
     tags.push("3D-RELIEF");
   }
 
-  // 7. ВЕТЕР И ВОЛОСЫ
-  if (/(ветер|ветр|волн|поток|шелк|волос|вихр|пряд|wind|wave|flow|silk|breeze|hair)/.test(text)) {
-    windVecX = 0.48 * powerMult;
-    windVecY = -0.14 * powerMult;
-    internalWaveAmp = Math.max(internalWaveAmp, 0.55 * powerMult);
-    tags.push("SILK-WIND");
+  // 11. РАДИАЛЬНЫЙ ИМПУЛЬС / УДАРНАЯ ВОЛНА
+  if (/(импульс|удар|взрыв|отдач|вибрац|бас|пульс|impulse|shock|blast|vibrat|impact|bass|pulse)/.test(text)) {
+    shockwaveAmp = 0.68 * powerMult;
+    acousticStringAmp = Math.max(acousticStringAmp, 0.55 * powerMult);
+    tags.push("SHOCK-PULSE");
   }
 
-  // 8. РАДИАЛЬНЫЙ ИМПУЛЬС
-  if (/(импульс|удар|взрыв|отдач|вибрац|impulse|shock|blast|vibrat|impact)/.test(text)) {
-    shockwaveAmp = 0.65 * powerMult;
-    tags.push("RADIAL-PULSE");
-  }
-
-  // 9. ОТРИСОВКА С НУЛЯ
+  // 12. ОТРИСОВКА С НУЛЯ
   if (/(отрисов|рисов|перо|с нуля|штрих|draw|sketch|trace|timelapse)/.test(text)) {
     timelapseLoop = true;
     tags.push("DRAW-&-ANIMATE");
   }
 
-  // 10. СТАТИКА
+  // 13. СТАТИКА
   if (/(статик|неподвиж|стоп|замри|static|still|freeze)/.test(text)) {
     headTurnYaw = 0;
     headNodPitch = 0;
     headTiltRoll = 0;
+    armSwingAmp = 0;
+    guitarStrumAmp = 0;
+    strideWalkAmp = 0;
+    driveVibration = 0;
     layerMoveX = 0;
     layerMoveY = 0;
     layerTiltAmp = 0;
     layerScaleAmp = 0;
+    cameraDollyAmp = 0;
+    vortexSpinAmp = 0;
+    acousticStringAmp = 0;
     orbitYawAmp = 0;
     orbitPitchAmp = 0;
     windVecX = 0;
@@ -397,12 +523,12 @@ function compileAnimationPrompt(rawPrompt: string): KineticPromptCoordinates {
   }
 
   if (tags.length === 0) {
-    // Даже если промпт нестандартный — включаем живой поворот головы и дыхание!
-    headTurnYaw = Number((0.28 + normHash * 0.2).toFixed(3));
-    headNodPitch = Number((0.1 + ((normHash * 7) % 1) * 0.12).toFixed(3));
-    layerMoveY = 0.018;
-    internalWaveAmp = 0.25;
-    tags.push("LIVE-HEAD-&-FLOW");
+    // Богатое комбинированное движение по умолчанию для любого произвольного текста!
+    headTurnYaw = Number((0.22 + normHash * 0.18).toFixed(3));
+    armSwingAmp = Number((0.25 + ((normHash * 7) % 1) * 0.25).toFixed(3));
+    cameraDollyAmp = 0.22;
+    internalWaveAmp = 0.3;
+    tags.push("MULTI-PLANAR-FLOW");
   }
 
   return {
@@ -412,11 +538,18 @@ function compileAnimationPrompt(rawPrompt: string): KineticPromptCoordinates {
     headNodPitch: Number(clip(headNodPitch, 0, 0.65).toFixed(3)),
     headTiltRoll: Number(clip(headTiltRoll, 0, 0.25).toFixed(3)),
     headTurnDir,
-    layerMoveX: Number(clip(layerMoveX, 0, 0.1).toFixed(3)),
-    layerMoveY: Number(clip(layerMoveY, 0, 0.1).toFixed(3)),
+    armSwingAmp: Number(clip(armSwingAmp, 0, 1.0).toFixed(3)),
+    guitarStrumAmp: Number(clip(guitarStrumAmp, 0, 1.0).toFixed(3)),
+    strideWalkAmp: Number(clip(strideWalkAmp, 0, 1.0).toFixed(3)),
+    driveVibration: Number(clip(driveVibration, 0, 1.0).toFixed(3)),
+    layerMoveX: Number(clip(layerMoveX, 0, 0.12).toFixed(3)),
+    layerMoveY: Number(clip(layerMoveY, 0, 0.12).toFixed(3)),
     layerTiltAmp: Number(clip(layerTiltAmp, 0, 0.2).toFixed(3)),
-    layerScaleAmp: Number(clip(layerScaleAmp, 0, 0.1).toFixed(3)),
+    layerScaleAmp: Number(clip(layerScaleAmp, 0, 0.12).toFixed(3)),
+    cameraDollyAmp: Number(clip(cameraDollyAmp, 0, 0.85).toFixed(3)),
     moveFreq: Number(clip(moveFreq, 0.2, 4.5).toFixed(2)),
+    vortexSpinAmp: Number(clip(vortexSpinAmp, 0, 1.0).toFixed(3)),
+    acousticStringAmp: Number(clip(acousticStringAmp, 0, 1.0).toFixed(3)),
     orbitYawAmp: Number(clip(orbitYawAmp, 0, 0.28).toFixed(3)),
     orbitPitchAmp: Number(clip(orbitPitchAmp, 0, 0.2).toFixed(3)),
     orbitSpeed: Number(clip(orbitSpeed, 0.1, 2.0).toFixed(3)),
@@ -581,9 +714,6 @@ function encodeAnimatedGIF89a(frames: ImageData[], width: number, height: number
   return new Blob([new Uint8Array(bytes)], { type: "image/gif" });
 }
 
-// ==========================================
-// ЦВЕТОВОЙ СОЛВЕР С ПОДДЕРЖКОЙ 4 ЗНАМЕНИТЫХ СТИЛЕЙ ПОП-АРТА
-// ==========================================
 function resolveEditionColor(
   art: ArtStudioConfig,
   nativeR: number,
@@ -624,38 +754,34 @@ function resolveEditionColor(
 
   const edition = art.edition;
 
-  // 1. ЭНДИ УОРХОЛ (Andy Warhol Factory Screenprint 1964)
   if (edition === "WARHOL_POP") {
     if (lum < 0.25) return forVectorStroke ? [255, 30, 130] : [22, 12, 38];
-    if (lum < 0.52) return [255, 20, 125]; // Hot Factory Magenta
-    if (lum < 0.76) return [0, 238, 248];  // Electric Turquoise
-    return [255, 240, 25];                 // Acid Banana Yellow
+    if (lum < 0.52) return [255, 20, 125];
+    if (lum < 0.76) return [0, 238, 248];
+    return [255, 240, 25];
   }
 
-  // 2. РОЙ ЛИХТЕНШТЕЙН (Roy Lichtenstein Ben-Day Comic Pop-Art)
   if (edition === "LICHTENSTEIN") {
     if (isHighlightStroke || lum > 0.78) return [255, 252, 240];
-    if (edge > 0.35 && !forVectorStroke) return [18, 16, 22]; // Комикс-тушь
-    if (lum < 0.32) return [32, 88, 225];                     // Deep Comic Cobalt
-    if (lum < 0.58) return [242, 42, 52];                     // Crimson Ben-Day Red
-    return [255, 218, 45];                                    // Primary Comic Yellow
+    if (edge > 0.35 && !forVectorStroke) return [18, 16, 22];
+    if (lum < 0.32) return [32, 88, 225];
+    if (lum < 0.58) return [242, 42, 52];
+    return [255, 218, 45];
   }
 
-  // 3. ШЕПАРД ФЕЙРИ OBEY (Shepard Fairey 4-Tone Constructivist Poster)
   if (edition === "OBEY_POSTER") {
-    if (lum < 0.26) return forVectorStroke ? [123, 164, 181] : [15, 30, 46]; // Dark Navy
-    if (lum < 0.52) return [217, 43, 43];                                    // Propaganda Red
-    if (lum < 0.75) return [123, 164, 181];                                  // Steel Cyan
-    return [245, 235, 214];                                                  // Vintage Cream
+    if (lum < 0.26) return forVectorStroke ? [123, 164, 181] : [15, 30, 46];
+    if (lum < 0.52) return [217, 43, 43];
+    if (lum < 0.75) return [123, 164, 181];
+    return [245, 235, 214];
   }
 
-  // 4. КИТ ХАРИНГ / БАСКИЯ (Street Pop Neo-Expressionism)
   if (edition === "STREET_POP") {
     const band = Math.floor((lum * 3.8 + phaseShift * 3.0) % 4);
-    if (band === 0) return [255, 55, 35];  // Radiant Orange-Red
-    if (band === 1) return [45, 245, 115]; // Toxic Street Green
-    if (band === 2) return [255, 230, 20]; // Crown Yellow
-    return [55, 195, 255];                 // Chalk Cyan
+    if (band === 0) return [255, 55, 35];
+    if (band === 1) return [45, 245, 115];
+    if (band === 2) return [255, 230, 20];
+    return [55, 195, 255];
   }
 
   if (edition === "DA_VINCI") {
@@ -807,7 +933,7 @@ function compileLexicalManifold(rawText: string): { tensor: Tensor5D; coeffs: Di
       mHarmonic,
       entropy: Number(entropy.toFixed(3)),
       lyapunov,
-      eigenAnisotropy: 0.946,
+      eigenAnisotropy: 0.948,
     },
   };
 }
@@ -864,10 +990,6 @@ function gaussianBlurField(src: Float32Array, w: number, h: number, passes: numb
   return curr;
 }
 
-// ==========================================
-// МАТЕМАТИЧЕСКОЕ ЯДРО 23.0:
-// 1-ПИКСЕЛЬНЫЙ NMS-СКЕЛЕТ ЛИЦА + АВТО-ДЕТЕКТОР ГОЛОВЫ ДЛЯ 2.5D ПОВОРОТОВ
-// ==========================================
 function buildMatrixFromImage(img: HTMLImageElement, useFastMode: boolean): MatrixBuffer {
   const baseRes = useFastMode ? 520 : 760;
   const aspect = img.width / Math.max(1, img.height);
@@ -1077,10 +1199,6 @@ function buildMatrixFromImage(img: HTMLImageElement, useFastMode: boolean): Matr
     }
   }
 
-  // ==========================================
-  // 1-ПИКСЕЛЬНОЕ ПОДАВЛЕНИЕ НЕМАКСИМУМОВ (NMS CANNY RIDGE):
-  // Убирает толстые белые колбасы на лице! Оставляет только бритвенно-тонкий 1-пиксельный пик грани!
-  // ==========================================
   for (let y = 2; y < h - 2; y++) {
     for (let x = 2; x < w - 2; x++) {
       const i = y * w + x;
@@ -1096,7 +1214,6 @@ function buildMatrixFromImage(img: HTMLImageElement, useFastMode: boolean): Matr
     }
   }
 
-  // Сегментация персонажа и АВТОМАТИЧЕСКИЙ ПОИСК ГОЛОВЫ (headU, headV, headRx, headRy)
   let bgR = 0, bgG = 0, bgB = 0, bgCount = 0;
   for (let x = 4; x < w - 4; x += 3) {
     const pTop = (4 * w + x) * 4;
@@ -1140,7 +1257,6 @@ function buildMatrixFromImage(img: HTMLImageElement, useFastMode: boolean): Matr
       const crowding = edgeEnvelope[i] * 3.2 + normRidge * 4.6;
       scaleMap[i] = clip(1.0 / (0.85 + crowding), 0.18, 1.25);
 
-      // Детектор головы и лица: ищем пик мелких черт (глаза, нос, рот, прическа) в верхней половине фигуры!
       if (vNorm > 0.12 && vNorm < 0.54 && uNorm > 0.18 && uNorm < 0.82) {
         const facialFeatureScore = nmsRidge[i] * (1.2 - scaleMap[i] * 0.7) * Math.exp(-Math.pow(uNorm - 0.45, 2) * 4.5);
         if (facialFeatureScore > 0.05) {
@@ -1165,7 +1281,6 @@ function buildMatrixFromImage(img: HTMLImageElement, useFastMode: boolean): Matr
 
   const headU = headMassSum > 1.0 ? clip(headSumU / headMassSum, 0.22, 0.78) : charCenterU;
   const headV = headMassSum > 1.0 ? clip(headSumV / headMassSum, 0.18, 0.46) : Math.max(0.24, charCenterV - 0.16);
-  // Вычисляем дисперсию (радиус) головы вокруг найденного центра лица
   let headVarU = 0, headVarV = 0;
   if (headMassSum > 1.0) {
     for (let y = Math.floor(h * 0.1); y < Math.floor(h * 0.6); y += 2) {
@@ -1186,7 +1301,6 @@ function buildMatrixFromImage(img: HTMLImageElement, useFastMode: boolean): Matr
   const headRx = clip((headVarU / Math.max(1, headMassSum)) * 2.3, 0.12, 0.28);
   const headRy = clip((headVarV / Math.max(1, headMassSum)) * 2.5, 0.15, 0.32);
 
-  // Оператор Кувахары
   const qBounds: [number, number, number, number][] = [
     [-2, 0, -2, 0],
     [0, 2, -2, 0],
@@ -1239,7 +1353,6 @@ function buildMatrixFromImage(img: HTMLImageElement, useFastMode: boolean): Matr
     }
   }
 
-  // Тонкополосный FDoG (сохраняет мелкие детали лица)
   const rawDoG = new Float32Array(total);
   for (let i = 0; i < total; i++) {
     const microDiff = lum[i] - gNarrow[i];
@@ -1269,7 +1382,6 @@ function buildMatrixFromImage(img: HTMLImageElement, useFastMode: boolean): Matr
     }
   }
 
-  // Шелковый станок SILK LOOM
   const silkStep = useFastMode ? 6 : 5;
   for (let y = 6; y < h - 6; y += silkStep) {
     for (let x = 6; x < w - 6; x += silkStep) {
@@ -1335,7 +1447,6 @@ function buildMatrixFromImage(img: HTMLImageElement, useFastMode: boolean): Matr
     }
   }
 
-  // Сверхточная РК2-трассировка черт лица и контуров
   const ridgeSeeds: { idx: number; score: number; tier: 0 | 1 | 2 | 4 }[] = [];
 
   for (let y = 3; y < h - 3; y++) {
@@ -1358,7 +1469,6 @@ function buildMatrixFromImage(img: HTMLImageElement, useFastMode: boolean): Matr
           : e0 > 0.2
           ? 1
           : 2;
-      // Повышаем приоритет чертам лица в 1.8 раза, чтобы глаза, нос и губы вычерчивались первыми и максимально подробно!
       ridgeSeeds.push({ idx: i, score: e0 * (inHeadBox ? 1.85 : 1.0) * (tier === 0 ? 1.4 : 1.0), tier });
     }
   }
@@ -1374,7 +1484,6 @@ function buildMatrixFromImage(img: HTMLImageElement, useFastMode: boolean): Matr
     const startIdx = Math.floor(cy) * w + Math.floor(cx);
     let prevTx = etfX[startIdx] * dirSign;
     let prevTy = etfY[startIdx] * dirSign;
-    // На лице шаг интеграции равен 0.95px для субпиксельной точности зрачков, век и губ!
     const stepSize = isFacial ? 0.95 : 1.35;
 
     for (let s = 0; s < maxSteps; s++) {
@@ -1437,7 +1546,6 @@ function buildMatrixFromImage(img: HTMLImageElement, useFastMode: boolean): Matr
     let curr = rawPts.map((p) => ({ x: p.x, y: p.y }));
     const n = curr.length;
 
-    // На лице (tier 0) не размываем острые уголки глаз и губ!
     const passes = tier === 0 ? 1 : 2;
     for (let pass = 0; pass < passes; pass++) {
       const next = curr.map((pt) => ({ x: pt.x, y: pt.y }));
@@ -1626,7 +1734,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
     fastPerfMode: false,
     edition: "SHINE_ON",
     posterFrame: true,
-    strokeWeight: 0.62,          // Утонченный хирургический калибр по умолчанию (0.62x вместо 0.92x!)
+    strokeWeight: 0.62,
     coherenceCleanliness: 0.32,
     relief3DAndMotion: 0.6,
     glowAndPrism: 0.8,
@@ -1638,7 +1746,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
   const [isRecording, setIsRecording] = useState(false);
   const [isExportingGif, setIsExportingGif] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
-  const [fieldStatus, setFieldStatus] = useState<string>("INITIALIZING BARRETT 23.0...");
+  const [fieldStatus, setFieldStatus] = useState<string>("INITIALIZING BARRETT 24.0...");
   const [candidateUrls, setCandidateUrls] = useState<string[]>([]);
   const [candidateIdx, setCandidateIdx] = useState<number>(0);
   const [loadedPage, setLoadedPage] = useState<number>(2);
@@ -1716,7 +1824,6 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
       } else if (compiled.timelapseLoop) {
         updateArt("stageMode", "DRAW_THEN_ANIMATE");
       } else {
-        // Чтобы при вводе "Поверни голову" движение начиналось мгновенно без ожидания прорисовки!
         updateArt("stageMode", "ANIMATE_ART");
         stateRef.current.traceProgress = 1.0;
       }
@@ -1738,7 +1845,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
   );
 
   const loadMatrixFromUrl = useCallback((rawUrl: string, idx: number, total: number) => {
-    setFieldStatus("SOLVING 1PX NMS FACIAL RIG & 3D DOME [" + String(idx + 1) + "/" + String(total) + "]...");
+    setFieldStatus("SOLVING 1PX NMS FACIAL RIG & 6-ZONE KINEMATICS [" + String(idx + 1) + "/" + String(total) + "]...");
     const img = new Image();
     img.crossOrigin = "anonymous";
     img.onload = () => {
@@ -1749,7 +1856,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
       stateRef.current.needsBaseRebuild = true;
       setCoeffs((prev) => ({ ...prev, eigenAnisotropy: buf.meanAnisotropy }));
       setFieldStatus(
-        "LOCKED // " + String(buf.strokes.length) + " MICRO-VECTORS & HEAD RIG AT (" + String(buf.headU.toFixed(2)) + "," + String(buf.headV.toFixed(2)) + ")"
+        "LOCKED // " + String(buf.strokes.length) + " MICRO-VECTORS & 6-ZONE RIG (" + String(buf.w) + "x" + String(buf.h) + ")"
       );
     };
     img.onerror = () => {
@@ -1762,6 +1869,9 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
     setCandidateUrls((prev) => prev.filter((u) => u !== brokenUrl));
   }, []);
 
+  // ==========================================
+  // ДВУХКОНТУРНЫЙ ПОИСКОВЫЙ ДВИЖОК С ЗАЩИТОЙ ОТ МУЛЬТЯШНЫХ ОШИБОК (WIKIMEDIA + RELEVANT FILTER)
+  // ==========================================
   useEffect(() => {
     const cleanQ = (query || "SHINE ON CRAZY DIAMOND").trim();
     const next = compileLexicalManifold(cleanQ);
@@ -1774,31 +1884,84 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
     setLoadedPage(2);
 
     let cancelled = false;
-    setFieldStatus("REFRACTING SPECTRUM TARGETS...");
+    setFieldStatus("VERIFYING EXACT ENTITY TARGETS...");
+
+    // Контур 1: Прямой энциклопедический поиск фотографий через Wikimedia Commons & Wikipedia API (всегда находит реального Джимми Пейджа!)
+    const wikiCommonsUrl =
+      "https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrsearch=" +
+      encodeURIComponent("filetype:bitmap " + cleanQ) +
+      "&gsrnamespace=6&gsrlimit=18&prop=imageinfo&iiprop=url|dimensions&iiurlwidth=800&format=json&origin=*";
+
+    const wikiPagesUrl =
+      "https://en.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch=" +
+      encodeURIComponent(cleanQ) +
+      "&gsrlimit=8&prop=pageimages&piprop=thumbnail|original&pithumbsize=800&format=json&origin=*";
 
     Promise.all([
+      fetch(wikiPagesUrl).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+      fetch(wikiCommonsUrl).then((r) => (r.ok ? r.json() : null)).catch(() => null),
       fetch("/api/search?page=1&query=" + encodeURIComponent(cleanQ)).then((r) => (r.ok ? r.json() : null)).catch(() => null),
       fetch("/api/search?page=2&query=" + encodeURIComponent(cleanQ)).then((r) => (r.ok ? r.json() : null)).catch(() => null),
-    ]).then(([d1, d2]) => {
+    ]).then(([wpData, wcData, d1, d2]) => {
       if (cancelled) return;
+
+      const scoredList: { url: string; score: number }[] = [];
+      const seen = new Set<string>();
+
+      const pushCandidate = (url: string, score: number) => {
+        if (!url || typeof url !== "string" || !url.startsWith("http")) return;
+        if (/\.svg|\.gif|\.tif|\.pdf|icon|logo/i.test(url)) return;
+        if (seen.has(url)) return;
+        seen.add(url);
+        scoredList.push({ url, score });
+      };
+
+      // 1. Точные портреты из статей Wikipedia (наивысший приоритет)
+      if (wpData?.query?.pages) {
+        for (const pKey of Object.keys(wpData.query.pages)) {
+          const pg = wpData.query.pages[pKey];
+          const u = pg?.thumbnail?.source || pg?.original?.source;
+          if (u) {
+            const sc = scoreSearchItemRelevance({ title: pg.title || "", src: u }, cleanQ);
+            if (sc >= -10) pushCandidate(u, sc + 65);
+          }
+        }
+      }
+
+      // 2. Архивные фотографии из Wikimedia Commons
+      if (wcData?.query?.pages) {
+        for (const pKey of Object.keys(wcData.query.pages)) {
+          const pg = wcData.query.pages[pKey];
+          const ii = pg?.imageinfo?.[0];
+          const u = ii?.thumburl || ii?.url;
+          if (u && (!ii.width || ii.width >= 260)) {
+            const sc = scoreSearchItemRelevance({ title: pg.title || "", src: u }, cleanQ);
+            if (sc >= 0) pushCandidate(u, sc + 45);
+          }
+        }
+      }
+
+      // 3. Результаты из /api/search, отфильтрованные от "Джимми Нейтрона" и нерелевантного шума!
       const a1 = d1 ? (Array.isArray(d1) ? d1 : d1.data || d1.photos || []) : [];
       const a2 = d2 ? (Array.isArray(d2) ? d2 : d2.data || d2.photos || []) : [];
       const combined = [...a1, ...a2];
 
-      const uniqueUrls: string[] = [];
-      const seen = new Set<string>();
       for (const item of combined) {
         const u = item.src || item.image_url || item.thumb;
-        if (typeof u === "string" && u.startsWith("http") && !seen.has(u)) {
-          seen.add(u);
-          uniqueUrls.push(u);
+        const sc = scoreSearchItemRelevance(item, cleanQ);
+        if (sc > -50) {
+          pushCandidate(u, sc);
         }
       }
 
-      if (uniqueUrls.length > 0) {
-        setCandidateUrls(uniqueUrls);
+      // Сортируем по релевантности (точные совпадения всех слов и энциклопедические фото идут первыми!)
+      scoredList.sort((a, b) => b.score - a.score);
+      const finalUrls = scoredList.map((item) => item.url);
+
+      if (finalUrls.length > 0) {
+        setCandidateUrls(finalUrls);
         setCandidateIdx(0);
-        loadMatrixFromUrl(uniqueUrls[0], 0, uniqueUrls.length);
+        loadMatrixFromUrl(finalUrls[0], 0, finalUrls.length);
       } else {
         setFieldStatus("PURE OPTICAL PRISM SYNTHESIS");
       }
@@ -1819,14 +1982,18 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
       if (res.ok) {
         const data = await res.json();
         const arr = Array.isArray(data) ? data : (data.data || data.photos || []);
-        const newUrls = arr
-          .map((item: any) => item.src || item.image_url || item.thumb)
-          .filter((u: any) => typeof u === "string" && u.startsWith("http"));
+        const validNew: string[] = [];
+        for (const item of arr) {
+          const u = item.src || item.image_url || item.thumb;
+          if (typeof u === "string" && u.startsWith("http") && scoreSearchItemRelevance(item, cleanQ) > -50) {
+            validNew.push(u);
+          }
+        }
 
         setCandidateUrls((prev) => {
           const set = new Set(prev);
           const merged = [...prev];
-          for (const u of newUrls) {
+          for (const u of validNew) {
             if (!set.has(u)) {
               set.add(u);
               merged.push(u);
@@ -1970,7 +2137,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
   };
 
   // ==========================================
-  // ЯДРО РЕНДЕРИНГА BARRETT 23.0 (RAZOR 0.2PX LINES + 2.5D HEAD RIG + POP-ART)
+  // ЯДРО РЕНДЕРИНГА BARRETT 24.0 (MULTI-PLANAR 6-ZONE KINEMATICS + RAZOR 0.2PX)
   // ==========================================
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -2010,7 +2177,6 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
     ro.observe(container);
     updateSize();
 
-    // Сборка 1-пиксельной бритвенно-тонкой гравировочной матрицы на базе nmsRidge (без толстых белых полос!)
     const rebuildPureSketchMatrixAndCache = (
       m: MatrixBuffer,
       art: ArtStudioConfig,
@@ -2039,8 +2205,6 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
 
           const p = i * 4;
           const rawL = m.lum[i];
-          // ИСПОЛЬЗУЕМ 1-ПИКСЕЛЬНЫЙ ГРЕБЕНЬ nmsRidge ВМЕСТО ШИРОКОГО edge!
-          // Благодаря этому глаза, нос и контуры машин становятся тонкими, как след иглы офорта!
           const thinRidge = m.nmsRidge[i] * (0.4 + 0.6 * m.coherence[i]);
           const fdogFine = Math.max(0.0, 1.0 - Math.tanh(14.0 * (m.fdog[i] - 0.19)));
 
@@ -2099,7 +2263,6 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
       const power = (0.45 + art.relief3DAndMotion * 0.95) * animGate;
       const phase = time * kin.moveFreq;
 
-      // Вычисление текущих углов 2.5D-поворота и кивка головы персонажа!
       const dirBias = kin.headTurnDir !== 0 ? kin.headTurnDir * 0.45 + Math.sin(phase) * 0.55 : Math.sin(phase);
       const headYaw = dirBias * kin.headTurnYaw * power;
       const headPitch = Math.sin(phase * 1.3) * kin.headNodPitch * power;
@@ -2110,16 +2273,18 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
       const tilt = Math.sin(phase) * kin.layerTiltAmp * power;
       const scale = 1.0 + Math.sin(phase * 2.0) * kin.layerScaleAmp * power;
 
-      return { dx, dy, tilt, scale, headYaw, headPitch, headRoll, animGate, power };
+      return { dx, dy, tilt, scale, headYaw, headPitch, headRoll, phase, animGate, power };
     };
 
     // ==========================================
-    // АНАТОМИЧЕСКИЙ ОПЕРАТОР 2.5D ПОВОРОТА ГОЛОВЫ И ДВИЖЕНИЯ ТЕЛА
+    // УНИВЕРСАЛЬНЫЙ 6-ЗОННЫЙ ОПЕРАТОР АНИМАЦИИ (ГОЛОВА + ГИТАРА/РУКИ + НОГИ/ШАГ + ДРАЙВ + КАМЕРА + ВИХРЬ)
     // ==========================================
-    const evaluateAnatomicalPoint = (
+    const evaluateMultiPlanarPoint = (
       uIn: number,
       vIn: number,
+      zIn: number,
       m: MatrixBuffer,
+      kin: KineticPromptCoordinates,
       layerTf: {
         dx: number;
         dy: number;
@@ -2128,6 +2293,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
         headYaw: number;
         headPitch: number;
         headRoll: number;
+        phase: number;
         animGate: number;
         power: number;
       }
@@ -2137,26 +2303,25 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
 
       if (layerTf.animGate <= 0.005) return [u, v];
 
-      // 1. Проверяем, находится ли точка внутри эллипсоида головы персонажа (headU, headV, headRx, headRy)
+      const cx = m.charCenterU;
+      const cy = m.charCenterV;
+      const ph = layerTf.phase;
+      const pwr = layerTf.power;
+
+      // ЗОНА 1: 2.5D ПОВОРОТ И КИВОК ГОЛОВЫ (Cranial Sphere Projection)
       if (Math.abs(layerTf.headYaw) > 0.005 || Math.abs(layerTf.headPitch) > 0.005 || Math.abs(layerTf.headRoll) > 0.005) {
         const dxH = (u - m.headU) / m.headRx;
         const dyH = (v - m.headV) / m.headRy;
         const rSq = dxH * dxH + dyH * dyH;
 
-        if (rSq < 1.8) {
-          // Плавный вес влияния рига головы (максимум в центре лица, плавно сходит к шее и плечам)
-          const headWeight = Math.exp(-rSq * 1.45);
-          // Выпуклая 3D-сфера черепа и лица (нос и глаза выступают вперед сильнее ушей!)
+        if (rSq < 1.85) {
+          const headWeight = Math.exp(-rSq * 1.4);
           const cranialZ = Math.sqrt(Math.max(0.0, 1.0 - Math.min(1.0, rSq * 0.85)));
 
-          // 2.5D поворот головы wokół шейной оси (Yaw) с перспективным сокращением дальней щеки!
-          const yawShift = Math.sin(layerTf.headYaw) * cranialZ * m.headRx * 0.72;
+          const yawShift = Math.sin(layerTf.headYaw) * cranialZ * m.headRx * 0.75;
           const foreshortenX = Math.cos(layerTf.headYaw * 0.65 * headWeight) - dxH * Math.sin(layerTf.headYaw) * 0.22 * headWeight;
-
-          // 2.5D кивок головы вверх-вниз (Pitch)
           const pitchShift = Math.sin(layerTf.headPitch) * cranialZ * m.headRy * 0.58;
 
-          // Наклон головы к плечу вокруг основания шеи (Roll)
           const cosR = Math.cos(layerTf.headRoll * headWeight);
           const sinR = Math.sin(layerTf.headRoll * headWeight);
           const rotDx = dxH * foreshortenX * cosR - dyH * sinR;
@@ -2167,11 +2332,75 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
         }
       }
 
-      // 2. Общее движение фигуры вокруг центра масс
-      const cx = m.charCenterU;
-      const cy = m.charCenterV;
-      const relU = (u - cx) * layerTf.scale;
-      const relV = (v - cy) / layerTf.scale;
+      // ЗОНА 2: РУКИ, ПЛЕЧИ И ИГРА НА ГИТАРЕ (Upper Limb & Guitar Strumming Rig)
+      if (kin.armSwingAmp > 0.01 || kin.guitarStrumAmp > 0.01) {
+        const armDistX = u - cx;
+        // Зона рук и корпуса гитары: средняя треть по вертикали (0.32 .. 0.78), смещенная от оси позвоночника
+        if (v > 0.3 && v < 0.8 && Math.abs(armDistX) > 0.06) {
+          const armMask = smoothstep(0.06, 0.28, Math.abs(armDistX)) * Math.sin(((v - 0.3) / 0.5) * Math.PI);
+          const sideSign = armDistX >= 0 ? 1 : -1;
+
+          // Взмахи рук в противофазе
+          if (kin.armSwingAmp > 0.01) {
+            const swing = Math.sin(ph * 1.5 + sideSign * 1.4) * kin.armSwingAmp * 0.048 * pwr * armMask;
+            v += swing;
+            u += Math.cos(ph * 1.5) * kin.armSwingAmp * 0.022 * pwr * armMask * sideSign;
+          }
+
+          // Экспрессивный бой по струнам и движение вдоль грифа гитары (Guitar Solo)
+          if (kin.guitarStrumAmp > 0.01) {
+            const strumFast = Math.sin(ph * 4.5 + sideSign * 0.8) * kin.guitarStrumAmp * 0.032 * pwr * armMask;
+            const neckSlide = Math.cos(ph * 2.2) * kin.guitarStrumAmp * 0.024 * pwr * armMask;
+            v += strumFast;
+            u += neckSlide * sideSign;
+          }
+        }
+      }
+
+      // ЗОНА 3: ШАГ НОГАМИ, БЕГ И ТАНЕЦ (Lower Body Stride Rig)
+      if (kin.strideWalkAmp > 0.01 && v > 0.58) {
+        const legMask = smoothstep(0.58, 0.92, v);
+        const legSide = u >= cx ? 1 : -1;
+        const strideX = Math.sin(ph * 2.0 + legSide * Math.PI * 0.5) * kin.strideWalkAmp * 0.045 * pwr * legMask;
+        const stepLiftY = -Math.max(0.0, Math.cos(ph * 2.0 + legSide * Math.PI * 0.5)) * kin.strideWalkAmp * 0.038 * pwr * legMask;
+        u += strideX;
+        v += stepLiftY;
+      }
+
+      // ЗОНА 4: АВТОМОБИЛЬНЫЙ ДРАЙВ И ПОДВЕСКА (Vehicle Suspension & Speed)
+      if (kin.driveVibration > 0.01) {
+        const engineTremor = Math.sin(ph * 9.0 + u * 12.0) * kin.driveVibration * 0.0045 * pwr;
+        const roadWave = Math.sin(ph * 2.2 - u * 3.5) * kin.driveVibration * 0.022 * pwr;
+        v += engineTremor + roadWave;
+        u += Math.cos(ph * 1.5) * kin.driveVibration * 0.028 * pwr * (zIn - 0.35);
+      }
+
+      // ЗОНА 5: СПИРАЛЬНЫЙ ВИХРЬ (Vortex Differential Rotation)
+      if (kin.vortexSpinAmp > 0.01) {
+        const du = u - cx;
+        const dv = v - cy;
+        const r = Math.hypot(du, dv);
+        const swirlAngle = Math.sin(ph * 0.8) * kin.vortexSpinAmp * 0.45 * pwr * Math.exp(-r * 2.2);
+        const cosV = Math.cos(swirlAngle);
+        const sinV = Math.sin(swirlAngle);
+        u = cx + du * cosV - dv * sinV;
+        v = cy + du * sinV + dv * cosV;
+      }
+
+      // ЗОНА 6: ПРОЛЕТ КИНОКАМЕРЫ С ПАРАЛЛАКСОМ ГЛУБИНЫ Z(x,y) (Cinema Camera Dolly Fly-Through)
+      let depthScaleMult = 1.0;
+      if (kin.cameraDollyAmp > 0.01) {
+        const dollyCycle = Math.sin(ph * 0.75) * kin.cameraDollyAmp * pwr;
+        // Ближние объекты (высокий zIn) смещаются и масштабируются сильнее дальнего фона!
+        depthScaleMult = 1.0 + dollyCycle * (0.12 + zIn * 0.28);
+        u += Math.cos(ph * 0.6) * kin.cameraDollyAmp * 0.045 * pwr * (zIn - 0.4);
+      }
+
+      // Общая трансформация слоя (Squash & Stretch + наклон + левитация)
+      const totalScaleX = layerTf.scale * depthScaleMult;
+      const totalScaleY = (1.0 / layerTf.scale) * depthScaleMult;
+      const relU = (u - cx) * totalScaleX;
+      const relV = (v - cy) * totalScaleY;
       const cosT = Math.cos(layerTf.tilt);
       const sinT = Math.sin(layerTf.tilt);
 
@@ -2210,18 +2439,26 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
         headYaw: number;
         headPitch: number;
         headRoll: number;
+        phase: number;
         animGate: number;
         power: number;
       }
     ): [number, number] => {
-      let [u, v] = evaluateAnatomicalPoint(uIn, vIn, m, layerTf);
+      let [u, v] = evaluateMultiPlanarPoint(uIn, vIn, zIn, m, kin, layerTf);
+      const env = Math.sin(sNorm * Math.PI);
 
       if (layerTf.animGate > 0.01) {
         if (!isMicro && kin.internalWaveAmp > 0.01) {
-          const env = Math.sin(sNorm * Math.PI);
           const wave = Math.sin((uIn * 5.0 + vIn * 4.0) * Math.PI - time * 3.0 + phase) * kin.internalWaveAmp * 0.006 * layerTf.power;
           u += kin.windVecX * 0.0035 * env + nxIn * wave;
           v += kin.windVecY * 0.0035 * env + nyIn * wave;
+        }
+
+        // Высокочастотная акустическая вибрация струн (для промптов про гитару и соло)
+        if (kin.acousticStringAmp > 0.01 && !isMicro) {
+          const stringVib = Math.sin(sNorm * Math.PI * 3.0 + time * 32.0 + phase) * kin.acousticStringAmp * 0.0045 * layerTf.power * env;
+          u += nxIn * stringVib;
+          v += nyIn * stringVib;
         }
 
         if (!isMicro && kin.shockwaveAmp > 0.01) {
@@ -2236,7 +2473,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
         }
       }
 
-      const pluckDisp = Math.sin(sNorm * Math.PI * 2.0) * pluckPx * Math.sin(sNorm * Math.PI);
+      const pluckDisp = Math.sin(sNorm * Math.PI * 2.0) * pluckPx * env;
 
       if (art.dimension === "2D_STUDIO" && stateRef.current.topology !== "SCULPT3D" && stateRef.current.topology !== "LIDAR") {
         const sx = ox + ((u - 0.5) * camZoom + 0.5) * drawW + nxIn * pluckDisp;
@@ -2438,12 +2675,11 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
       const layerTf = getLayerTransform(kin, art, time, clampedProg);
 
       // ==========================================
-      // РЕЖИМ 1 И 2: TRACE 23.0 & SKETCH (ЮВЕЛИРНЫЕ ЛИНИИ 0.2PX - 0.55PX + 2.5D ПОВОРОТ ГОЛОВЫ БЕЗ ЗЕЛЕНЫХ ТОЧЕК!)
+      // РЕЖИМ 1 И 2: TRACE 24.0 & SKETCH
       // ==========================================
       if (s.topology === "TRACE" || s.topology === "SKETCH") {
         const isSketchMode = s.topology === "SKETCH";
 
-        // В режиме SKETCH или Da Vinci добавляем тонкую 1-пиксельную гравировальную сетку с учетом поворота головы
         if (isSketchMode && shaderCtx) {
           const bW = Math.floor(m.w * 0.75);
           const bH = Math.floor(m.h * 0.75);
@@ -2510,8 +2746,6 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
               : 0.36;
           const baseAlpha = clip((0.28 + st.meanEdge * 0.65 + pAmp * 0.45) * tierAlpha * localProg, 0.14, 0.96);
 
-          // БРИТВЕННО-ТОНКИЙ КАЛИБР ЛИНИЙ (0.18px на глазах и губах, 0.45px на контурах!):
-          // Черты лица больше никогда не сливаются в толстые пятна!
           const maxW =
             (st.tier === 0
               ? 0.28
@@ -2563,7 +2797,6 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
           ctx.lineWidth = Math.max(0.18, maxW);
           ctx.stroke();
 
-          // В стиле STREET_POP (Кит Харинг) добавляем фирменные радиальные энергетические засечки вокруг главных контуров!
           if (art.edition === "STREET_POP" && st.tier === 1 && fullIdx >= 8 && i % 5 === 0) {
             const midK = Math.floor(fullIdx * 0.5);
             const [bx, by] = transformUnifiedPoint(
@@ -2600,7 +2833,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
       }
 
       // ==========================================
-      // РЕЖИМ 3: POPART 23.0 (ШЕЛКОГРАФИЯ ЭНДИ УОРХОЛА / КОМИКС РОЯ ЛИХТЕНШТЕЙНА / ПЛАКАТ OBEY!)
+      // РЕЖИМ 3: POPART 24.0
       // ==========================================
       else if (s.topology === "POPART" && shaderCtx) {
         const scaleDiv = art.fastPerfMode ? 2 : 1;
@@ -2615,14 +2848,12 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
         const kuw = m.kuwaharaRgba;
         const [bgR, bgG, bgB] = hexToRgb(bgHex);
 
-        // Выбираем активный поп-арт стиль (если выбран обычный пресет — по умолчанию включаем Роя Лихтенштейна / Уорхола!)
         const popStyle =
           art.edition === "WARHOL_POP" || art.edition === "LICHTENSTEIN" || art.edition === "OBEY_POSTER" || art.edition === "STREET_POP"
             ? art.edition
             : "LICHTENSTEIN";
 
         const dotFreq = (0.65 + t.symmetry * 0.55) / Math.max(0.45, art.strokeWeight);
-        // Легкий типографский сдвигом печатного клише Уорхола (Off-register screenprint shift)
         const regShiftX = Math.round(Math.sin(time * 1.5) * 2.5);
         const regShiftY = Math.round(Math.cos(time * 1.2) * 2.0);
 
@@ -2630,8 +2861,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
           const vOrig = y / bH;
           for (let x = 0; x < bW; x++) {
             const uOrig = x / bW;
-            // Применяем 2.5D-поворот головы и движение к поп-арт матрице!
-            const [uDef, vDef] = evaluateAnatomicalPoint(uOrig, vOrig, m, layerTf);
+            const [uDef, vDef] = evaluateMultiPlanarPoint(uOrig, vOrig, 0.5, m, kin, layerTf);
             const sx = clip(Math.round((2 * uOrig - uDef) * (m.w - 1)), 0, m.w - 1);
             const sy = clip(Math.round((2 * vOrig - vDef) * (m.h - 1)), 0, m.h - 1);
 
@@ -2648,14 +2878,12 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
               continue;
             }
 
-            // Координата со сдвигом клише для цветного слоя шелкографии
             const cIdx = clip(sy + regShiftY, 0, m.h - 1) * m.w + clip(sx + regShiftX, 0, m.w - 1);
             const l = m.lum[cIdx];
             const e = m.edge[idx];
             const nms = m.nmsRidge[idx];
             const fd = m.fdog[idx];
 
-            // Четкий черный трафаретный контур тушью (Woodcut / Comic Ink Outline)
             const isBlackInk = nms > 0.22 || fd < 0.24 || l < 0.16;
 
             if (isBlackInk) {
@@ -2679,7 +2907,6 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
               false
             );
 
-            // Точки растра Ben-Day (для Лихтенштейна и Поп-Арта) в полутонах
             const rotX = (sx * 0.866 - sy * 0.5) * dotFreq;
             const rotY = (sx * 0.5 + sy * 0.866) * dotFreq;
             const benDayGrid = 0.5 + 0.25 * (Math.cos(rotX) + Math.cos(rotY));
@@ -2688,7 +2915,6 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
             if (popStyle === "LICHTENSTEIN" && l > 0.22 && l < 0.76) {
               const inDot = benDayGrid > l * 0.95;
               if (!inDot) {
-                // Чистый кремово-белый бумажный фон между точками Ben-Day!
                 rFinal = 252;
                 gFinal = 246;
                 bFinal = 232;
@@ -2709,7 +2935,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
       }
 
       // ==========================================
-      // РЕЖИМ 4: SCULPT3D & LIDAR 23.0 (АНАТОМИЧЕСКИЙ 3D-КУПОЛ С 2.5D ПОВОРОТОМ ГОЛОВЫ!)
+      // РЕЖИМ 4: SCULPT3D & LIDAR 24.0
       // ==========================================
       else if (s.topology === "SCULPT3D" || s.topology === "LIDAR") {
         const isLidar = s.topology === "LIDAR";
@@ -2772,7 +2998,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
               const e = m.edge[mIdx];
               if (l < 0.03 && e < 0.04) continue;
 
-              const [uDef, vDef] = evaluateAnatomicalPoint(uOrig, vOrig, m, layerTf);
+              const [uDef, vDef] = evaluateMultiPlanarPoint(uOrig, vOrig, m.depthMap[mIdx], m, kin, layerTf);
               const zHeight = (m.depthMap[mIdx] - 0.35) * depthScale;
               const x3 = (uDef - 0.5) * fitScale;
               const y3 = (vDef - 0.5) * fitScale;
@@ -2836,7 +3062,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
       }
 
       // ==========================================
-      // РЕЖИМ 5: PRISM 23.0 (ТОНКАЯ ДИФРАКЦИЯ НА ГРАНЯХ БЕЗ ПЕРЕСВЕТА)
+      // РЕЖИМ 5: PRISM 24.0
       // ==========================================
       else if (s.topology === "PRISM" && shaderCtx) {
         const scaleDiv = art.fastPerfMode ? 2 : 1;
@@ -2862,7 +3088,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
           const vOrig = y / bH;
           for (let x = 0; x < bW; x++) {
             const uOrig = x / bW;
-            const [uDef, vDef] = evaluateAnatomicalPoint(uOrig, vOrig, m, layerTf);
+            const [uDef, vDef] = evaluateMultiPlanarPoint(uOrig, vOrig, 0.5, m, kin, layerTf);
             const sx = clip(Math.round((2 * uOrig - uDef) * (m.w - 1)), 0, m.w - 1);
             const sy = clip(Math.round((2 * vOrig - vDef) * (m.h - 1)), 0, m.h - 1);
 
@@ -2921,7 +3147,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
       }
 
       // ==========================================
-      // РЕЖИМ 6: SILK 23.0 (ТОНКИЙ ШЕЛК КАДЖИИ — КЭЯ С ПОВОРОТОМ ГОЛОВЫ)
+      // РЕЖИМ 6: SILK 24.0
       // ==========================================
       else if (s.topology === "SILK") {
         ctx.globalCompositeOperation = isPaper ? "source-over" : "screen";
@@ -3012,7 +3238,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
             const vOrig = y / bH;
             for (let x = 0; x < bW; x++) {
               const uOrig = x / bW;
-              const [uDef, vDef] = evaluateAnatomicalPoint(uOrig, vOrig, m, layerTf);
+              const [uDef, vDef] = evaluateMultiPlanarPoint(uOrig, vOrig, 0.5, m, kin, layerTf);
               const sx = clip(Math.round((2 * uOrig - uDef) * (m.w - 1)), 0, m.w - 1);
               const sy = clip(Math.round((2 * vOrig - vDef) * (m.h - 1)), 0, m.h - 1);
 
@@ -3163,7 +3389,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
         ctx.fillStyle = textFill;
         ctx.textAlign = "left";
         ctx.fillText(
-          "BARRETT 23.0 // " + (query || "SHINE ON").toUpperCase().slice(0, 18) + " [" + s.topology + " · " + art.edition + "]",
+          "BARRETT 24.0 // " + (query || "SHINE ON").toUpperCase().slice(0, 18) + " [" + s.topology + " · " + art.edition + "]",
           ox - 4,
           oy + drawH + 10
         );
@@ -3294,7 +3520,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
         .barrett-scroll::-webkit-scrollbar-thumb:hover { background: rgba(168,85,247,0.9); }
       `}} />
 
-      {/* МАТЕМАТИЧЕСКИЙ ХОЛСТ BARRETT 23.0 */}
+      {/* МАТЕМАТИЧЕСКИЙ ХОЛСТ BARRETT 24.0 */}
       <div
         ref={containerRef}
         className="lg:col-span-8 relative h-[600px] md:h-[780px] rounded-2xl overflow-hidden border border-white/10 bg-[#040308] shadow-[0_20px_60px_rgba(0,0,0,0.85)]"
@@ -3321,7 +3547,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
         {/* ВЕРХНИЙ БАР */}
         <div className="absolute top-4 left-4 right-4 flex flex-wrap justify-between items-start gap-2">
           <div className="bg-black/75 backdrop-blur-md border border-white/10 px-3 py-2 rounded font-mono text-[9px] uppercase tracking-widest text-neutral-300 pointer-events-none">
-            <div className="text-white font-bold">BARRETT 23.0 // {(query || "SHINE ON CRAZY DIAMOND").toUpperCase()}</div>
+            <div className="text-white font-bold">BARRETT 24.0 // {(query || "SHINE ON CRAZY DIAMOND").toUpperCase()}</div>
             <div className="text-[#10b981] mt-0.5">{fieldStatus}</div>
           </div>
 
@@ -3390,7 +3616,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
           </div>
         </div>
 
-        {/* НИЖНЯЯ ПАНЕЛЬ (ДОБАВЛЕН РЕЖИМ POPART) */}
+        {/* НИЖНЯЯ ПАНЕЛЬ */}
         <div className="absolute bottom-4 left-4 right-4 flex flex-col gap-2.5">
           <div className="barrett-scroll flex items-center gap-2 overflow-x-auto py-1.5 px-2.5 bg-black/80 backdrop-blur-md rounded-xl border border-white/10 self-center max-w-full">
             <span className="font-mono text-[8px] text-neutral-400 uppercase tracking-widest px-1 shrink-0">
@@ -3516,14 +3742,14 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
         </div>
       </div>
 
-      {/* ЕДИНАЯ ПРОФЕССИОНАЛЬНАЯ ПАНЕЛЬ BARRETT 23.0 */}
+      {/* ЕДИНАЯ ПРОФЕССИОНАЛЬНАЯ ПАНЕЛЬ BARRETT 24.0 */}
       <div className="lg:col-span-4 glass-panel p-5 flex flex-col justify-between gap-3.5">
         <div className="flex flex-col gap-3 font-mono text-[9px] uppercase tracking-widest">
-          {/* 1. ПРОМПТ-СИНТЕЗАТОР АНИМАЦИИ С ПОДДЕРЖКОЙ ПОВОРОТА ГОЛОВЫ */}
+          {/* 1. 12-КАНАЛЬНЫЙ СИНТЕЗАТОР АНИМАЦИИ */}
           <div className="p-3 rounded-xl bg-black/60 border border-[#10b981]/40 space-y-2.5">
             <div className="flex justify-between items-center">
-              <span className="text-[#10b981] font-bold">1. Prompt Animation Synthesizer:</span>
-              <span className="text-[7.5px] text-neutral-400">{kineticCoords.modeName}</span>
+              <span className="text-[#10b981] font-bold">1. Multi-Planar Animation Synthesizer:</span>
+              <span className="text-[7px] text-neutral-400 truncate max-w-[140px]">{kineticCoords.modeName}</span>
             </div>
 
             <div className="grid grid-cols-3 gap-1">
@@ -3561,7 +3787,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
                     handleApplyPrompt();
                   }
                 }}
-                placeholder="Напр.: Поверни голову влево, кивни в такт, парение..."
+                placeholder="Соло на гитаре, танец, пролет камеры, езда, вихрь..."
                 className="flex-1 rounded-lg bg-black/75 border border-white/15 px-2.5 py-1.5 text-[9.5px] text-white font-mono normal-case focus:outline-none focus:border-[#10b981]"
               />
               <button
@@ -3573,14 +3799,14 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
               </button>
             </div>
 
-            <div className="grid grid-cols-3 gap-1">
+            <div className="grid grid-cols-4 gap-1">
               {PROMPT_PRESETS.map((pr) => (
                 <button
                   key={pr.label}
                   type="button"
                   onClick={() => handleApplyPrompt(pr.prompt, pr.is3D, pr.stage)}
                   className={
-                    "py-1 px-1.5 rounded border text-[7.5px] tracking-wider truncate transition-all cursor-pointer " +
+                    "py-1 px-1 rounded border text-[7px] tracking-wider truncate transition-all cursor-pointer " +
                     (animPromptInput === pr.prompt
                       ? "bg-[#10b981]/25 text-[#10b981] border-[#10b981] font-bold"
                       : "bg-black/45 text-neutral-300 border-white/10 hover:border-white/30")
@@ -3637,7 +3863,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
             </div>
           </div>
 
-          {/* 3. ХУДОЖЕСТВЕННАЯ ПАЛИТРА + КУЛЬТОВЫЕ СТИЛИ ПОП-АРТА */}
+          {/* 3. ХУДОЖЕСТВЕННАЯ ПАЛИТРА + ПОП-АРТ */}
           <div>
             <div className="text-neutral-400 mb-1.5">3. Pop-Art & Master Editions (12 Styles):</div>
             <div className="grid grid-cols-3 gap-1.5">
@@ -3743,7 +3969,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
 
             <div className="flex flex-col gap-0.5">
               <div className="flex justify-between text-neutral-400">
-                <span>Head Turn & 3D Relief Amplitude</span>
+                <span>Multi-Zone Motion & 3D Amplitude</span>
                 <span className="text-[#a855f7]">{Math.round(artConfig.relief3DAndMotion * 100)}%</span>
               </div>
               <input

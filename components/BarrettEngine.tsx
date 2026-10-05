@@ -8,11 +8,18 @@ type AnimationStageMode = "ANIMATE_ART" | "DRAW_THEN_ANIMATE" | "ISOLATE_SUBJECT
 interface KineticPromptCoordinates {
   promptText: string;
   modeName: string;
+  // Анатомический 2.5D-риг головы (поворот, кивок, наклон)
+  headTurnYaw: number;     // Амплитуда 2.5D поворота головы влево-вправо
+  headNodPitch: number;    // Амплитуда кивка головы вверх-вниз
+  headTiltRoll: number;    // Наклон головы к плечу
+  headTurnDir: number;     // Направление: 0 = качание в обе стороны, -1 = влево, +1 = вправо
+  // Движение всего слоя
   layerMoveX: number;
   layerMoveY: number;
   layerTiltAmp: number;
   layerScaleAmp: number;
   moveFreq: number;
+  // 3D и волновые поля
   orbitYawAmp: number;
   orbitPitchAmp: number;
   orbitSpeed: number;
@@ -33,11 +40,14 @@ interface Tensor5D {
 
 type TributeEdition =
   | "SHINE_ON"
+  | "WARHOL_POP"
+  | "LICHTENSTEIN"
+  | "OBEY_POSTER"
+  | "STREET_POP"
   | "PIXAR_SSS"
   | "KODAK_800T"
   | "REMBRANDT"
   | "VOGUE_NOIR"
-  | "WARHOL_POP"
   | "DARK_SIDE"
   | "DA_VINCI"
   | "CUSTOM_GRADE";
@@ -50,9 +60,9 @@ interface ArtStudioConfig {
   fastPerfMode: boolean;
   edition: TributeEdition;
   posterFrame: boolean;
-  strokeWeight: number;
-  coherenceCleanliness: number;
-  relief3DAndMotion: number;
+  strokeWeight: number;        // По умолчанию 0.58x (бритвенно-тонкие линии!)
+  coherenceCleanliness: number;// Порог чистоты черт лица
+  relief3DAndMotion: number;   // Амплитуда поворота головы и 3D-рельефа
   glowAndPrism: number;
   shadowHex: string;
   midtoneHex: string;
@@ -78,7 +88,7 @@ interface ContourStroke {
   ny: Float32Array;
   z: Float32Array;
   nPts: number;
-  tier: 0 | 1 | 2 | 3 | 4; // 0: Микро-текст и глаза, 1: Главный контур, 2: Вторичный контур, 3: Штриховка объема, 4: Блик
+  tier: 0 | 1 | 2 | 3 | 4; // 0: Глаза/губы/текст (0.2px), 1: Контур, 2: Детали, 3: Тонкий штрих, 4: Блик
   r: number;
   g: number;
   b: number;
@@ -129,6 +139,7 @@ interface MatrixBuffer {
   coherence: Float32Array;
   subjectAlpha: Float32Array;
   fdog: Float32Array;
+  nmsRidge: Float32Array; // 1-пиксельный скелет граней Кэнни для хирургической точности лиц!
   edge: Float32Array;
   scaleMap: Float32Array;
   gx: Float32Array;
@@ -142,18 +153,23 @@ interface MatrixBuffer {
   meanAnisotropy: number;
   charCenterU: number;
   charCenterV: number;
+  // Автоматически найденные координаты головы персонажа для 2.5D-поворотов!
+  headU: number;
+  headV: number;
+  headRx: number;
+  headRy: number;
 }
 
 type ManifoldTopology =
   | "TRACE"
   | "SKETCH"
+  | "POPART"
   | "SCULPT3D"
   | "PRISM"
   | "SILK"
   | "PAINT"
   | "ENGRAVE"
   | "CINEMA"
-  | "HALFTONE"
   | "LIDAR";
 
 interface Props {
@@ -165,13 +181,13 @@ const PHI = 1.618033988749;
 const VOWELS = new Set(["a", "e", "i", "o", "u", "y", "а", "е", "ё", "и", "о", "у", "ы", "э", "ю", "я"]);
 
 const CAUCHY_SPECTRUM: [number, number, number][] = [
-  [255, 42, 75],   // Ruby Red
-  [255, 138, 25],  // Amber Orange
-  [255, 232, 45],  // Solar Gold
-  [35, 242, 130],  // Emerald Green
-  [30, 215, 255],  // Cyan Ice
-  [75, 110, 255],  // Cobalt Blue
-  [195, 60, 255],  // Deep Violet
+  [255, 42, 75],
+  [255, 138, 25],
+  [255, 232, 45],
+  [35, 242, 130],
+  [30, 215, 255],
+  [75, 110, 255],
+  [195, 60, 255],
 ];
 
 const BACKDROP_COLORS: Record<CanvasBackdrop, string> = {
@@ -184,22 +200,22 @@ const BACKDROP_COLORS: Record<CanvasBackdrop, string> = {
 
 const PROMPT_PRESETS: { label: string; prompt: string; is3D?: boolean; stage?: AnimationStageMode }[] = [
   {
-    label: "Draw -> Animate",
-    prompt: "Отрисовать чистый скетч на кастомном фоне с нуля и плавно оживить в движении",
-    is3D: false,
-    stage: "DRAW_THEN_ANIMATE",
-  },
-  {
-    label: "Floating Breathing",
-    prompt: "Плавное парение в невесомости, мягкое дыхание контуров и волна света",
+    label: "Поверни голову (2.5D)",
+    prompt: "Плавно поверни голову влево и вправо, живой взгляд и легкое дыхание",
     is3D: false,
     stage: "ANIMATE_ART",
   },
   {
-    label: "Rhythmic Groove",
-    prompt: "Ритмичное упругое покачивание влево-вправо в такт и живая пластика линий",
+    label: "Кивок и ритм (Nod)",
+    prompt: "Кивни головой в такт, упругое покачивание плеч и живая пластика контуров",
     is3D: false,
-    stage: "ISOLATE_SUBJECT",
+    stage: "ANIMATE_ART",
+  },
+  {
+    label: "Draw -> Animate",
+    prompt: "Отрисовать тонкий скетч с нуля и плавно оживить поворот головы",
+    is3D: false,
+    stage: "DRAW_THEN_ANIMATE",
   },
   {
     label: "3D Front Bas-Relief",
@@ -209,7 +225,7 @@ const PROMPT_PRESETS: { label: string; prompt: string; is3D?: boolean; stage?: A
   },
   {
     label: "Laminar Silk Wind",
-    prompt: "Ламинарный поток ветра вдоль волокон, колыхание штрихов и фазовый сдвиг",
+    prompt: "Ламинарный поток ветра вдоль волокон, колыхание прядей и фазовый сдвиг",
     is3D: false,
     stage: "ANIMATE_ART",
   },
@@ -242,8 +258,11 @@ function hexToRgb(hex: string): [number, number, number] {
   return [(num >> 16) & 255, (num >> 8) & 255, num & 255];
 }
 
+// ==========================================
+// ИНТЕЛЛЕКТУАЛЬНЫЙ КОМПИЛЯТОР ПРОМПТА С ПОДДЕРЖКОЙ АНАТОМИИ ("ПОВЕРНИ ГОЛОВУ", "КИВНИ", "ВЗГЛЯД")
+// ==========================================
 function compileAnimationPrompt(rawPrompt: string): KineticPromptCoordinates {
-  const text = (rawPrompt || "Плавное парение и мягкое дыхание контуров").trim().toLowerCase();
+  const text = (rawPrompt || "Плавно поверни голову и оживи контуры").trim().toLowerCase();
 
   let hash = 2166136261;
   for (let i = 0; i < text.length; i++) {
@@ -252,58 +271,86 @@ function compileAnimationPrompt(rawPrompt: string): KineticPromptCoordinates {
   }
   const normHash = (Math.abs(hash) % 1000) / 1000;
 
-  let layerMoveX = 0.012;
-  let layerMoveY = 0.016;
-  let layerTiltAmp = 0.022;
-  let layerScaleAmp = 0.018;
-  let moveFreq = 1.5;
+  let headTurnYaw = 0.0;
+  let headNodPitch = 0.0;
+  let headTiltRoll = 0.0;
+  let headTurnDir = 0;
+  let layerMoveX = 0.008;
+  let layerMoveY = 0.012;
+  let layerTiltAmp = 0.015;
+  let layerScaleAmp = 0.015;
+  let moveFreq = 1.45;
   let orbitYawAmp = 0.0;
   let orbitPitchAmp = 0.0;
   let orbitSpeed = 0.55;
-  let windVecX = 0.14;
-  let windVecY = -0.04;
-  let internalWaveAmp = 0.22;
+  let windVecX = 0.1;
+  let windVecY = -0.03;
+  let internalWaveAmp = 0.18;
   let shockwaveAmp = 0.0;
   let timelapseLoop = false;
   const tags: string[] = [];
 
-  const speedMult = /(быстр|стремител|ритм|актив|fast|rapid|quick|high|upbeat)/.test(text)
-    ? 1.6
+  const speedMult = /(быстр|стремител|ритм|актив|резк|fast|rapid|quick|high|upbeat)/.test(text)
+    ? 1.65
     : /(медлен|плавн|спокойн|нежн|slow|smooth|calm|gentle|soft)/.test(text)
-    ? 0.65
+    ? 0.68
     : 1.0;
 
   const powerMult = /(сильн|мощн|максим|амплитуд|глубок|strong|heavy|max|deep|wide)/.test(text)
     ? 1.45
-    : /(едва|легк|тонк|subtle|slight|delicate)/.test(text)
-    ? 0.55
+    : /(едва|легк|тонк|чуть|subtle|slight|delicate)/.test(text)
+    ? 0.6
     : 1.0;
 
   moveFreq *= speedMult;
 
-  if (/(влево|вправо|шаг|ходьб|скольж|горизонт|танц|ритм|покачив|left|right|walk|slide|sway|dance|groove)/.test(text)) {
-    layerMoveX = 0.045 * powerMult;
-    layerTiltAmp = 0.06 * powerMult;
-    internalWaveAmp = 0.45 * powerMult;
-    tags.push("SWAY-X");
+  // 1. ПОВОРОТ ГОЛОВЫ / ЛИЦА / ВЗГЛЯДА ("поверни голову", "повернуть", "посмотри", "turn head", "look")
+  if (/(голов|лиц|поверн|поворот|разверн|посмотр|взгляд|профил|head|face|turn|look|gaze)/.test(text)) {
+    headTurnYaw = 0.48 * powerMult;
+    headTiltRoll = 0.06 * powerMult;
+    headNodPitch = 0.12 * powerMult;
+    if (/(влево|налево|left)/.test(text) && !/(вправо|направо|right)/.test(text)) {
+      headTurnDir = -1;
+    } else if (/(вправо|направо|right)/.test(text) && !/(влево|налево|left)/.test(text)) {
+      headTurnDir = 1;
+    } else {
+      headTurnDir = 0; // Плавный поворот в обе стороны
+    }
+    tags.push("HEAD-TURN-2.5D");
   }
 
-  if (/(вверх|вниз|парен|парит|прыж|прыг|левит|невесом|up|down|float|hover|jump|bounce|levitat)/.test(text)) {
-    layerMoveY = 0.048 * powerMult;
+  // 2. КИВОК ГОЛОВОЙ ("кивни", "кивок", "кивает", "nod", "yes")
+  if (/(кивн|кивок|кива|вверх.?вниз|nod|nodding)/.test(text)) {
+    headNodPitch = 0.42 * powerMult;
+    headTurnYaw = Math.max(headTurnYaw, 0.12);
+    tags.push("HEAD-NOD");
+  }
+
+  // 3. ДВИЖЕНИЕ И ТАНЕЦ ФИГУРЫ
+  if (/(танц|ритм|покачив|шаг|ходьб|двигай|dance|groove|sway|move|walk)/.test(text)) {
+    layerMoveX = 0.042 * powerMult;
+    layerMoveY = 0.035 * powerMult;
+    layerTiltAmp = 0.055 * powerMult;
+    headTurnYaw = Math.max(headTurnYaw, 0.25 * powerMult);
+    headTiltRoll = 0.09 * powerMult;
+    internalWaveAmp = 0.42 * powerMult;
+    tags.push("BODY-GROOVE");
+  }
+
+  // 4. ПАРЕНИЕ И ЛЕВИТАЦИЯ
+  if (/(парен|парит|прыж|прыг|левит|невесом|float|hover|jump|bounce|levitat)/.test(text)) {
+    layerMoveY = 0.05 * powerMult;
     layerScaleAmp = 0.035 * powerMult;
     tags.push("FLOAT-Y");
   }
 
-  if (/(наклон|качан|качает|круж|поворот|tilt|rock|nod|spin|swing)/.test(text)) {
-    layerTiltAmp = 0.085 * powerMult;
-    tags.push("TILT");
-  }
-
+  // 5. ДЫХАНИЕ И ПУЛЬС
   if (/(дыхан|дышит|пульс|зум|масштаб|сердц|breathe|breath|pulse|scale|zoom|heart)/.test(text)) {
-    layerScaleAmp = 0.045 * powerMult;
+    layerScaleAmp = 0.042 * powerMult;
     tags.push("BREATHE");
   }
 
+  // 6. 3D БАРЕЛЬЕФ
   if (/(3d|3д|скульпт|объем|рельеф|орбит|параллакс|sculpt|relief|orbit|parallax)/.test(text)) {
     orbitYawAmp = /анфас|front/.test(text) ? 0.07 : 0.22 * powerMult;
     orbitPitchAmp = /анфас|front/.test(text) ? 0.05 : 0.14 * powerMult;
@@ -311,24 +358,31 @@ function compileAnimationPrompt(rawPrompt: string): KineticPromptCoordinates {
     tags.push("3D-RELIEF");
   }
 
-  if (/(ветер|ветр|волн|поток|шелк|волос|вихр|wind|wave|flow|silk|breeze|vortex)/.test(text)) {
+  // 7. ВЕТЕР И ВОЛОСЫ
+  if (/(ветер|ветр|волн|поток|шелк|волос|вихр|пряд|wind|wave|flow|silk|breeze|hair)/.test(text)) {
     windVecX = 0.48 * powerMult;
     windVecY = -0.14 * powerMult;
     internalWaveAmp = Math.max(internalWaveAmp, 0.55 * powerMult);
     tags.push("SILK-WIND");
   }
 
+  // 8. РАДИАЛЬНЫЙ ИМПУЛЬС
   if (/(импульс|удар|взрыв|отдач|вибрац|impulse|shock|blast|vibrat|impact)/.test(text)) {
     shockwaveAmp = 0.65 * powerMult;
     tags.push("RADIAL-PULSE");
   }
 
-  if (/(отрисов|рисов|перо|с нуля|штрих|ожив|draw|sketch|trace|timelapse|alive)/.test(text)) {
+  // 9. ОТРИСОВКА С НУЛЯ
+  if (/(отрисов|рисов|перо|с нуля|штрих|draw|sketch|trace|timelapse)/.test(text)) {
     timelapseLoop = true;
     tags.push("DRAW-&-ANIMATE");
   }
 
+  // 10. СТАТИКА
   if (/(статик|неподвиж|стоп|замри|static|still|freeze)/.test(text)) {
+    headTurnYaw = 0;
+    headNodPitch = 0;
+    headTiltRoll = 0;
     layerMoveX = 0;
     layerMoveY = 0;
     layerTiltAmp = 0;
@@ -343,16 +397,21 @@ function compileAnimationPrompt(rawPrompt: string): KineticPromptCoordinates {
   }
 
   if (tags.length === 0) {
-    layerMoveX = Number((0.014 + normHash * 0.022).toFixed(3));
-    layerMoveY = Number((0.016 + ((normHash * 7) % 1) * 0.024).toFixed(3));
-    layerTiltAmp = Number((0.018 + ((normHash * 13) % 1) * 0.03).toFixed(3));
-    internalWaveAmp = Number((0.2 + ((normHash * 19) % 1) * 0.28).toFixed(3));
-    tags.push("HARMONIC-MOTION");
+    // Даже если промпт нестандартный — включаем живой поворот головы и дыхание!
+    headTurnYaw = Number((0.28 + normHash * 0.2).toFixed(3));
+    headNodPitch = Number((0.1 + ((normHash * 7) % 1) * 0.12).toFixed(3));
+    layerMoveY = 0.018;
+    internalWaveAmp = 0.25;
+    tags.push("LIVE-HEAD-&-FLOW");
   }
 
   return {
     promptText: rawPrompt,
     modeName: tags.join(" · "),
+    headTurnYaw: Number(clip(headTurnYaw, 0, 0.75).toFixed(3)),
+    headNodPitch: Number(clip(headNodPitch, 0, 0.65).toFixed(3)),
+    headTiltRoll: Number(clip(headTiltRoll, 0, 0.25).toFixed(3)),
+    headTurnDir,
     layerMoveX: Number(clip(layerMoveX, 0, 0.1).toFixed(3)),
     layerMoveY: Number(clip(layerMoveY, 0, 0.1).toFixed(3)),
     layerTiltAmp: Number(clip(layerTiltAmp, 0, 0.2).toFixed(3)),
@@ -523,7 +582,7 @@ function encodeAnimatedGIF89a(frames: ImageData[], width: number, height: number
 }
 
 // ==========================================
-// ИСПРАВЛЕННЫЙ ЦВЕТОВОЙ СОЛВЕР (УБИРАЕТ ГОЛУБЫЕ ПЯТНА В ТЕНЯХ PAINT И TRACE!)
+// ЦВЕТОВОЙ СОЛВЕР С ПОДДЕРЖКОЙ 4 ЗНАМЕНИТЫХ СТИЛЕЙ ПОП-АРТА
 // ==========================================
 function resolveEditionColor(
   art: ArtStudioConfig,
@@ -536,8 +595,7 @@ function resolveEditionColor(
   isHighlightStroke = false,
   forVectorStroke = false
 ): [number, number, number] {
-  // Для векторных линий на темном фоне минимальная яркость выше, а для заливок PAINT она строго пропорциональна lum!
-  const minVis = forVectorStroke ? 0.32 : 0.02;
+  const minVis = forVectorStroke ? 0.35 : 0.02;
   const energy = clip(Math.max(minVis, lum * 0.65 + edge * 0.55), 0.0, 1.0);
   const contrastBoost = 0.88 + art.glowAndPrism * 0.38;
 
@@ -565,6 +623,40 @@ function resolveEditionColor(
   }
 
   const edition = art.edition;
+
+  // 1. ЭНДИ УОРХОЛ (Andy Warhol Factory Screenprint 1964)
+  if (edition === "WARHOL_POP") {
+    if (lum < 0.25) return forVectorStroke ? [255, 30, 130] : [22, 12, 38];
+    if (lum < 0.52) return [255, 20, 125]; // Hot Factory Magenta
+    if (lum < 0.76) return [0, 238, 248];  // Electric Turquoise
+    return [255, 240, 25];                 // Acid Banana Yellow
+  }
+
+  // 2. РОЙ ЛИХТЕНШТЕЙН (Roy Lichtenstein Ben-Day Comic Pop-Art)
+  if (edition === "LICHTENSTEIN") {
+    if (isHighlightStroke || lum > 0.78) return [255, 252, 240];
+    if (edge > 0.35 && !forVectorStroke) return [18, 16, 22]; // Комикс-тушь
+    if (lum < 0.32) return [32, 88, 225];                     // Deep Comic Cobalt
+    if (lum < 0.58) return [242, 42, 52];                     // Crimson Ben-Day Red
+    return [255, 218, 45];                                    // Primary Comic Yellow
+  }
+
+  // 3. ШЕПАРД ФЕЙРИ OBEY (Shepard Fairey 4-Tone Constructivist Poster)
+  if (edition === "OBEY_POSTER") {
+    if (lum < 0.26) return forVectorStroke ? [123, 164, 181] : [15, 30, 46]; // Dark Navy
+    if (lum < 0.52) return [217, 43, 43];                                    // Propaganda Red
+    if (lum < 0.75) return [123, 164, 181];                                  // Steel Cyan
+    return [245, 235, 214];                                                  // Vintage Cream
+  }
+
+  // 4. КИТ ХАРИНГ / БАСКИЯ (Street Pop Neo-Expressionism)
+  if (edition === "STREET_POP") {
+    const band = Math.floor((lum * 3.8 + phaseShift * 3.0) % 4);
+    if (band === 0) return [255, 55, 35];  // Radiant Orange-Red
+    if (band === 1) return [45, 245, 115]; // Toxic Street Green
+    if (band === 2) return [255, 230, 20]; // Crown Yellow
+    return [55, 195, 255];                 // Chalk Cyan
+  }
 
   if (edition === "DA_VINCI") {
     if (isHighlightStroke) return [255, 250, 238];
@@ -596,13 +688,6 @@ function resolveEditionColor(
     return finalize(r, g, b);
   }
 
-  if (edition === "WARHOL_POP") {
-    if (lum < 0.25) return [24, 14, 42];
-    if (lum < 0.52) return [255, 22, 120];
-    if (lum < 0.76) return [0, 238, 248];
-    return [255, 240, 28];
-  }
-
   if (edition === "KODAK_800T") {
     if (isHighlightStroke) return [255, 232, 194];
     const shadowWeight = (1.0 - smoothstep(0.15, 0.65, lum)) * energy;
@@ -631,7 +716,6 @@ function resolveEditionColor(
     return finalize(v, v, v + 10);
   }
 
-  // SHINE_ON: сохраняет родной цвет и умножает монохромные участки на energy (никаких голубых пятен в черных тенях!)
   const avg = (nativeR + nativeG + nativeB) * 0.333;
   const sat = Math.max(nativeR, nativeG, nativeB) - Math.min(nativeR, nativeG, nativeB);
   const boost = forVectorStroke ? 48 : 18;
@@ -723,7 +807,7 @@ function compileLexicalManifold(rawText: string): { tensor: Tensor5D; coeffs: Di
       mHarmonic,
       entropy: Number(entropy.toFixed(3)),
       lyapunov,
-      eigenAnisotropy: 0.942,
+      eigenAnisotropy: 0.946,
     },
   };
 }
@@ -781,8 +865,8 @@ function gaussianBlurField(src: Float32Array, w: number, h: number, passes: numb
 }
 
 // ==========================================
-// МАТЕМАТИЧЕСКОЕ ЯДРО 22.0:
-// ЧИСТЫЙ ВЕКТОРНЫЙ СКЕТЧ БЕЗ ФОТО-ПОДЛОЖКИ + НЕОБРЕЗАННЫЙ 3D Z-BUFFER 800x800
+// МАТЕМАТИЧЕСКОЕ ЯДРО 23.0:
+// 1-ПИКСЕЛЬНЫЙ NMS-СКЕЛЕТ ЛИЦА + АВТО-ДЕТЕКТОР ГОЛОВЫ ДЛЯ 2.5D ПОВОРОТОВ
 // ==========================================
 function buildMatrixFromImage(img: HTMLImageElement, useFastMode: boolean): MatrixBuffer {
   const baseRes = useFastMode ? 520 : 760;
@@ -808,6 +892,7 @@ function buildMatrixFromImage(img: HTMLImageElement, useFastMode: boolean): Matr
   const coherence = new Float32Array(total);
   const subjectAlpha = new Float32Array(total);
   const fdog = new Float32Array(total);
+  const nmsRidge = new Float32Array(total);
   const edge = new Float32Array(total);
   const scaleMap = new Float32Array(total);
   const gx = new Float32Array(total);
@@ -830,6 +915,7 @@ function buildMatrixFromImage(img: HTMLImageElement, useFastMode: boolean): Matr
       coherence,
       subjectAlpha,
       fdog,
+      nmsRidge,
       edge,
       scaleMap,
       gx,
@@ -840,9 +926,13 @@ function buildMatrixFromImage(img: HTMLImageElement, useFastMode: boolean): Matr
       strokes,
       silkLoom,
       pluckAmps: new Float32Array(0),
-      meanAnisotropy: 0.94,
+      meanAnisotropy: 0.95,
       charCenterU: 0.5,
       charCenterV: 0.5,
+      headU: 0.5,
+      headV: 0.35,
+      headRx: 0.18,
+      headRy: 0.22,
     };
   }
 
@@ -883,7 +973,7 @@ function buildMatrixFromImage(img: HTMLImageElement, useFastMode: boolean): Matr
   }
 
   const gNarrow = gaussianBlurField(lum, w, h, 1);
-  const gWide = gaussianBlurField(lum, w, h, 4);
+  const gWide = gaussianBlurField(lum, w, h, 3);
   const smoothLum = gaussianBlurField(lum, w, h, 12);
   const domeLum = gaussianBlurField(lum, w, h, 26);
 
@@ -934,9 +1024,9 @@ function buildMatrixFromImage(img: HTMLImageElement, useFastMode: boolean): Matr
     }
   }
 
-  const sJ11 = gaussianBlurField(j11, w, h, 3);
-  const sJ12 = gaussianBlurField(j12, w, h, 3);
-  const sJ22 = gaussianBlurField(j22, w, h, 3);
+  const sJ11 = gaussianBlurField(j11, w, h, 2);
+  const sJ12 = gaussianBlurField(j12, w, h, 2);
+  const sJ22 = gaussianBlurField(j22, w, h, 2);
 
   let anisotropySum = 0;
   let anisotropyCount = 0;
@@ -972,22 +1062,41 @@ function buildMatrixFromImage(img: HTMLImageElement, useFastMode: boolean): Matr
   const meanAnisotropy = Number((anisotropySum / Math.max(1, anisotropyCount)).toFixed(3));
 
   const localEnv = gaussianBlurField(rawGradMag, w, h, 5);
-  const absFloor = globalMaxEdge * 0.028;
+  const absFloor = globalMaxEdge * 0.024;
 
   for (let i = 0; i < total; i++) {
     const gVal = rawGradMag[i];
-    const rVal = (hessianRidge[i] / globalMaxRidge) * globalMaxEdge * 0.48 * coherence[i];
+    const rVal = (hessianRidge[i] / globalMaxRidge) * globalMaxEdge * 0.52 * coherence[i];
     const combinedSignal = Math.max(gVal, rVal);
 
     if (combinedSignal < absFloor) {
       edge[i] = 0.0;
     } else {
-      const denom = Math.max(globalMaxEdge * 0.14, localEnv[i] * 2.0 + globalMaxEdge * 0.06);
-      edge[i] = clip((combinedSignal - absFloor * 0.7) / denom);
+      const denom = Math.max(globalMaxEdge * 0.13, localEnv[i] * 1.9 + globalMaxEdge * 0.05);
+      edge[i] = clip((combinedSignal - absFloor * 0.65) / denom);
     }
   }
 
-  // Сегментация слоя и гладкий 3D-купол (не обрезающий верх и низ композиции!)
+  // ==========================================
+  // 1-ПИКСЕЛЬНОЕ ПОДАВЛЕНИЕ НЕМАКСИМУМОВ (NMS CANNY RIDGE):
+  // Убирает толстые белые колбасы на лице! Оставляет только бритвенно-тонкий 1-пиксельный пик грани!
+  // ==========================================
+  for (let y = 2; y < h - 2; y++) {
+    for (let x = 2; x < w - 2; x++) {
+      const i = y * w + x;
+      const e0 = edge[i];
+      if (e0 < 0.04) continue;
+      const nx = Math.round(gx[i]);
+      const ny = Math.round(gy[i]);
+      const ePrev = edge[(y - ny) * w + (x - nx)];
+      const eNext = edge[(y + ny) * w + (x + nx)];
+      if (e0 >= ePrev * 0.96 && e0 >= eNext * 0.96) {
+        nmsRidge[i] = e0;
+      }
+    }
+  }
+
+  // Сегментация персонажа и АВТОМАТИЧЕСКИЙ ПОИСК ГОЛОВЫ (headU, headV, headRx, headRy)
   let bgR = 0, bgG = 0, bgB = 0, bgCount = 0;
   for (let x = 4; x < w - 4; x += 3) {
     const pTop = (4 * w + x) * 4;
@@ -1004,14 +1113,15 @@ function buildMatrixFromImage(img: HTMLImageElement, useFastMode: boolean): Matr
   const edgeEnvelope = gaussianBlurField(edge, w, h, 8);
   const rawAlpha = new Float32Array(total);
 
-  let massSum = 1e-5;
-  let massU = 0;
-  let massV = 0;
+  let massSum = 1e-5, massU = 0, massV = 0;
+  let headMassSum = 1e-5, headSumU = 0, headSumV = 0;
 
   for (let y = 0; y < h; y++) {
-    const ny = (y / h) - 0.5;
+    const vNorm = y / h;
+    const ny = vNorm - 0.5;
     for (let x = 0; x < w; x++) {
-      const nx = (x / w) - 0.5;
+      const uNorm = x / w;
+      const nx = uNorm - 0.5;
       const i = y * w + x;
       const p = i * 4;
 
@@ -1023,16 +1133,25 @@ function buildMatrixFromImage(img: HTMLImageElement, useFastMode: boolean): Matr
 
       const mWeight = rawAlpha[i] + edge[i];
       massSum += mWeight;
-      massU += (x / w) * mWeight;
-      massV += (y / h) * mWeight;
-
-      // Гладкая 3D-высота, которая сохраняет и верхние буквы PINK FLOYD, и нижние волны!
-      const safeDetail = Math.max(domeLum[i] - 0.1, smoothLum[i]);
-      depthMap[i] = clip((radialDome * 0.38 + domeLum[i] * 0.42 + safeDetail * 0.2) * (0.35 + 0.65 * rawAlpha[i])) * mask[i];
+      massU += uNorm * mWeight;
+      massV += vNorm * mWeight;
 
       const normRidge = (hessianRidge[i] / globalMaxRidge) * coherence[i];
-      const crowding = edgeEnvelope[i] * 3.0 + normRidge * 4.2;
-      scaleMap[i] = clip(1.0 / (0.82 + crowding), 0.22, 1.35);
+      const crowding = edgeEnvelope[i] * 3.2 + normRidge * 4.6;
+      scaleMap[i] = clip(1.0 / (0.85 + crowding), 0.18, 1.25);
+
+      // Детектор головы и лица: ищем пик мелких черт (глаза, нос, рот, прическа) в верхней половине фигуры!
+      if (vNorm > 0.12 && vNorm < 0.54 && uNorm > 0.18 && uNorm < 0.82) {
+        const facialFeatureScore = nmsRidge[i] * (1.2 - scaleMap[i] * 0.7) * Math.exp(-Math.pow(uNorm - 0.45, 2) * 4.5);
+        if (facialFeatureScore > 0.05) {
+          headMassSum += facialFeatureScore;
+          headSumU += uNorm * facialFeatureScore;
+          headSumV += vNorm * facialFeatureScore;
+        }
+      }
+
+      const safeDetail = Math.max(domeLum[i] - 0.1, smoothLum[i]);
+      depthMap[i] = clip((radialDome * 0.38 + domeLum[i] * 0.42 + safeDetail * 0.2) * (0.35 + 0.65 * rawAlpha[i])) * mask[i];
     }
   }
 
@@ -1041,10 +1160,33 @@ function buildMatrixFromImage(img: HTMLImageElement, useFastMode: boolean): Matr
     subjectAlpha[i] = clip(blurredAlpha[i] + edge[i] * 0.45) * mask[i];
   }
 
-  const charCenterU = clip(massU / massSum, 0.35, 0.65);
-  const charCenterV = clip(massV / massSum, 0.35, 0.65);
+  const charCenterU = clip(massU / massSum, 0.3, 0.7);
+  const charCenterV = clip(massV / massSum, 0.35, 0.68);
 
-  // Анизотропный фильтр минимальной дисперсии Кувахары
+  const headU = headMassSum > 1.0 ? clip(headSumU / headMassSum, 0.22, 0.78) : charCenterU;
+  const headV = headMassSum > 1.0 ? clip(headSumV / headMassSum, 0.18, 0.46) : Math.max(0.24, charCenterV - 0.16);
+  // Вычисляем дисперсию (радиус) головы вокруг найденного центра лица
+  let headVarU = 0, headVarV = 0;
+  if (headMassSum > 1.0) {
+    for (let y = Math.floor(h * 0.1); y < Math.floor(h * 0.6); y += 2) {
+      const vNorm = y / h;
+      for (let x = Math.floor(w * 0.15); x < Math.floor(w * 0.85); x += 2) {
+        const uNorm = x / w;
+        const du = uNorm - headU;
+        const dv = vNorm - headV;
+        if (du * du + dv * dv < 0.09) {
+          const i = y * w + x;
+          const wgt = nmsRidge[i];
+          headVarU += Math.abs(du) * wgt;
+          headVarV += Math.abs(dv) * wgt;
+        }
+      }
+    }
+  }
+  const headRx = clip((headVarU / Math.max(1, headMassSum)) * 2.3, 0.12, 0.28);
+  const headRy = clip((headVarV / Math.max(1, headMassSum)) * 2.5, 0.15, 0.32);
+
+  // Оператор Кувахары
   const qBounds: [number, number, number, number][] = [
     [-2, 0, -2, 0],
     [0, 2, -2, 0],
@@ -1097,26 +1239,26 @@ function buildMatrixFromImage(img: HTMLImageElement, useFastMode: boolean): Matr
     }
   }
 
-  // Потоковый офорт Канга FDoG
+  // Тонкополосный FDoG (сохраняет мелкие детали лица)
   const rawDoG = new Float32Array(total);
   for (let i = 0; i < total; i++) {
     const microDiff = lum[i] - gNarrow[i];
     const macroDiff = gNarrow[i] - gWide[i];
-    const pAdaptive = 26.0 * smoothstep(0.02, 0.2, edge[i] * (0.3 + 0.7 * coherence[i]));
-    rawDoG[i] = clip(lum[i] + (microDiff * 0.62 + macroDiff * 0.38) * pAdaptive);
+    const pAdaptive = 28.0 * smoothstep(0.02, 0.2, edge[i] * (0.35 + 0.65 * coherence[i]));
+    rawDoG[i] = clip(lum[i] + (microDiff * 0.72 + macroDiff * 0.28) * pAdaptive);
   }
 
   for (let y = 4; y < h - 4; y++) {
     for (let x = 4; x < w - 4; x++) {
       const i = y * w + x;
-      let acc = rawDoG[i] * 0.34;
+      let acc = rawDoG[i] * 0.42;
       const tx = etfX[i];
       const ty = etfY[i];
       const stepScale = scaleMap[i];
 
-      for (let step = 1; step <= 3; step++) {
-        const wgt = step === 1 ? 0.16 : step === 2 ? 0.11 : 0.06;
-        const dist = step * stepScale * 1.25;
+      for (let step = 1; step <= 2; step++) {
+        const wgt = step === 1 ? 0.19 : 0.1;
+        const dist = step * stepScale * 1.1;
         const xPlus = Math.min(w - 1, Math.max(0, Math.round(x + tx * dist)));
         const yPlus = Math.min(h - 1, Math.max(0, Math.round(y + ty * dist)));
         const xMinus = Math.min(w - 1, Math.max(0, Math.round(x - tx * dist)));
@@ -1188,49 +1330,43 @@ function buildMatrixFromImage(img: HTMLImageElement, useFastMode: boolean): Matr
         edge: edge[idx],
         subjectWeight: subjectAlpha[idx],
         phase: (silkLoom.length * PHI) % (Math.PI * 2),
-        weight: clip(0.45 + edge[idx] * 0.95 + lum[idx] * 0.35, 0.35, 1.5),
+        weight: clip(0.35 + edge[idx] * 0.8 + lum[idx] * 0.3, 0.25, 1.25),
       });
     }
   }
 
-  // ==========================================
-  // САМОДОСТАТОЧНАЯ 5-УРОВНЕВАЯ РК2-ТРАССИРОВКА (ДЛЯ ИДЕАЛЬНОГО СКЕТЧА НА ЧИСТОМ ФОНЕ!)
-  // ==========================================
+  // Сверхточная РК2-трассировка черт лица и контуров
   const ridgeSeeds: { idx: number; score: number; tier: 0 | 1 | 2 | 4 }[] = [];
 
   for (let y = 3; y < h - 3; y++) {
     for (let x = 3; x < w - 3; x++) {
       const i = y * w + x;
-      const e0 = edge[i];
+      const e0 = nmsRidge[i];
       const coh = coherence[i];
-      if (e0 < 0.042 || (e0 < 0.12 && coh < 0.22) || mask[i] < 0.05) continue;
+      if (e0 < 0.04 || (e0 < 0.11 && coh < 0.2) || mask[i] < 0.05) continue;
 
-      const nx = Math.round(gx[i]);
-      const ny = Math.round(gy[i]);
-      if (nx === 0 && ny === 0) continue;
+      const uNorm = x / w;
+      const vNorm = y / h;
+      const inHeadBox = Math.hypot((uNorm - headU) / headRx, (vNorm - headV) / headRy) < 1.25;
 
-      const ePrev = edge[(y - ny) * w + (x - nx)];
-      const eNext = edge[(y + ny) * w + (x + nx)];
-
-      if (e0 >= ePrev * 0.96 && e0 >= eNext * 0.96) {
-        const isBrightHighlight = positiveRidge[i] > globalMaxRidge * 0.13 && lum[i] > gWide[i] + 0.03 && coh > 0.28;
-        const tier: 0 | 1 | 2 | 4 =
-          scaleMap[i] < 0.48 && e0 > 0.14
-            ? 0
-            : isBrightHighlight
-            ? 4
-            : e0 > 0.2
-            ? 1
-            : 2;
-        ridgeSeeds.push({ idx: i, score: e0 * (0.45 + 0.55 * coh) * (tier === 0 || tier === 4 ? 1.45 : 1.0), tier });
-      }
+      const isBrightHighlight = positiveRidge[i] > globalMaxRidge * 0.13 && lum[i] > gWide[i] + 0.03 && coh > 0.26;
+      const tier: 0 | 1 | 2 | 4 =
+        inHeadBox || (scaleMap[i] < 0.5 && e0 > 0.12)
+          ? 0
+          : isBrightHighlight
+          ? 4
+          : e0 > 0.2
+          ? 1
+          : 2;
+      // Повышаем приоритет чертам лица в 1.8 раза, чтобы глаза, нос и губы вычерчивались первыми и максимально подробно!
+      ridgeSeeds.push({ idx: i, score: e0 * (inHeadBox ? 1.85 : 1.0) * (tier === 0 ? 1.4 : 1.0), tier });
     }
   }
 
   ridgeSeeds.sort((a, b) => b.score - a.score);
   const visited = new Uint8Array(total);
 
-  const traceRK2Spline = (startX: number, startY: number, dirSign: number, maxSteps: number, minEdge: number) => {
+  const traceRK2Spline = (startX: number, startY: number, dirSign: number, maxSteps: number, minEdge: number, isFacial: boolean) => {
     const chain: { x: number; y: number }[] = [];
     let cx = startX + 0.5;
     let cy = startY + 0.5;
@@ -1238,7 +1374,8 @@ function buildMatrixFromImage(img: HTMLImageElement, useFastMode: boolean): Matr
     const startIdx = Math.floor(cy) * w + Math.floor(cx);
     let prevTx = etfX[startIdx] * dirSign;
     let prevTy = etfY[startIdx] * dirSign;
-    const stepSize = 1.4;
+    // На лице шаг интеграции равен 0.95px для субпиксельной точности зрачков, век и губ!
+    const stepSize = isFacial ? 0.95 : 1.35;
 
     for (let s = 0; s < maxSteps; s++) {
       const ix = Math.floor(cx);
@@ -1271,10 +1408,11 @@ function buildMatrixFromImage(img: HTMLImageElement, useFastMode: boolean): Matr
         ty2 = -ty2;
       }
 
-      if (s > 0 && tx2 * prevTx + ty2 * prevTy < 0.12) break;
+      if (s > 0 && tx2 * prevTx + ty2 * prevTy < (isFacial ? -0.15 : 0.12)) break;
 
-      const smoothTx = prevTx * 0.35 + tx2 * 0.65;
-      const smoothTy = prevTy * 0.35 + ty2 * 0.65;
+      const inertia = isFacial ? 0.2 : 0.35;
+      const smoothTx = prevTx * inertia + tx2 * (1.0 - inertia);
+      const smoothTy = prevTy * inertia + ty2 * (1.0 - inertia);
       const norm = Math.hypot(smoothTx, smoothTy) + 1e-6;
       const finalTx = smoothTx / norm;
       const finalTy = smoothTy / norm;
@@ -1284,9 +1422,9 @@ function buildMatrixFromImage(img: HTMLImageElement, useFastMode: boolean): Matr
 
       const nX = -finalTy;
       const nY = finalTx;
-      const ePlus = sampleBilinearScalar(edge, w, h, cx + nX * 0.75, cy + nY * 0.75);
-      const eMinus = sampleBilinearScalar(edge, w, h, cx - nX * 0.75, cy - nY * 0.75);
-      const ridgePull = (ePlus - eMinus) * 0.28;
+      const ePlus = sampleBilinearScalar(edge, w, h, cx + nX * 0.65, cy + nY * 0.65);
+      const eMinus = sampleBilinearScalar(edge, w, h, cx - nX * 0.65, cy - nY * 0.65);
+      const ridgePull = (ePlus - eMinus) * 0.32;
 
       cx += finalTx * stepSize + nX * ridgePull;
       cy += finalTy * stepSize + nY * ridgePull;
@@ -1299,12 +1437,15 @@ function buildMatrixFromImage(img: HTMLImageElement, useFastMode: boolean): Matr
     let curr = rawPts.map((p) => ({ x: p.x, y: p.y }));
     const n = curr.length;
 
+    // На лице (tier 0) не размываем острые уголки глаз и губ!
     const passes = tier === 0 ? 1 : 2;
     for (let pass = 0; pass < passes; pass++) {
       const next = curr.map((pt) => ({ x: pt.x, y: pt.y }));
       for (let i = 1; i < n - 1; i++) {
-        next[i].x = 0.24 * curr[i - 1].x + 0.52 * curr[i].x + 0.24 * curr[i + 1].x;
-        next[i].y = 0.24 * curr[i - 1].y + 0.52 * curr[i].y + 0.24 * curr[i + 1].y;
+        const wSide = tier === 0 ? 0.15 : 0.24;
+        const wMid = 1.0 - 2.0 * wSide;
+        next[i].x = wSide * curr[i - 1].x + wMid * curr[i].x + wSide * curr[i + 1].x;
+        next[i].y = wSide * curr[i - 1].y + wMid * curr[i].y + wSide * curr[i + 1].y;
       }
       curr = next;
     }
@@ -1352,7 +1493,7 @@ function buildMatrixFromImage(img: HTMLImageElement, useFastMode: boolean): Matr
     const meanEdge = eSum / n;
     const meanCoh = cohSum / n;
     const meanScale = scaleSum / n;
-    const importance = clip((meanEdge * 0.85 + meanCoh * 0.45) + (tier === 0 || tier === 4 ? 0.38 : Math.min(0.35, n / 65.0)));
+    const importance = clip((meanEdge * 0.85 + meanCoh * 0.45) + (tier === 0 || tier === 4 ? 0.42 : Math.min(0.35, n / 65.0)));
     const rAvg = Math.round(rSum / n);
     const gAvg = Math.round(gSum / n);
     const bAvg = Math.round(bSum / n);
@@ -1379,14 +1520,14 @@ function buildMatrixFromImage(img: HTMLImageElement, useFastMode: boolean): Matr
       importance,
       phase: (strokes.length * PHI) % (Math.PI * 2),
       speed: 0.65 + ((strokes.length * 7) % 13) * 0.06,
-      arcLen: n * 1.4,
+      arcLen: n * 1.25,
       centerU: uSum / n,
       centerV: vSum / n,
       centerZ: zSum / n,
     });
   };
 
-  const maxRidgeStrokes = useFastMode ? 3800 : 6400;
+  const maxRidgeStrokes = useFastMode ? 4200 : 7200;
   for (let i = 0; i < ridgeSeeds.length && strokes.length < maxRidgeStrokes; i++) {
     const seed = ridgeSeeds[i];
     if (visited[seed.idx]) continue;
@@ -1394,28 +1535,26 @@ function buildMatrixFromImage(img: HTMLImageElement, useFastMode: boolean): Matr
     const sx = seed.idx % w;
     const sy = Math.floor(seed.idx / w);
     const isMicro = seed.tier === 0;
-    const maxHalf = isMicro ? 30 : 72;
-    const minE = isMicro ? 0.048 : 0.038;
+    const maxHalf = isMicro ? 34 : 72;
+    const minE = isMicro ? 0.038 : 0.035;
 
-    const back = traceRK2Spline(sx, sy, -1, maxHalf, minE).reverse();
-    const fwd = traceRK2Spline(sx, sy, 1, maxHalf, minE);
+    const back = traceRK2Spline(sx, sy, -1, maxHalf, minE, isMicro).reverse();
+    const fwd = traceRK2Spline(sx, sy, 1, maxHalf, minE, isMicro);
     const rawPts = [...back, ...(fwd.length > 1 ? fwd.slice(1) : [])];
 
-    if (rawPts.length < (isMicro ? 3 : 6)) continue;
+    if (rawPts.length < (isMicro ? 3 : 5)) continue;
     packAdaptiveStroke(rawPts, seed.tier);
   }
 
-  // Добавляем направленные штрихи полутонов (Tier 3) вдоль изофот, чтобы в TRACE и SKETCH
-  // объем лица, пирамиды и волн читался на 100% БЕЗ растровой фотографии сзади!
   const hatchStep = useFastMode ? 6 : 5;
-  const maxTotal = useFastMode ? 5200 : 8600;
+  const maxTotal = useFastMode ? 5400 : 9000;
   for (let y = 6; y < h - 6; y += hatchStep) {
     for (let x = 6; x < w - 6; x += hatchStep) {
       if (strokes.length >= maxTotal) break;
       const idx = y * w + x;
       if (visited[idx] || mask[idx] < 0.08) continue;
-      if (lum[idx] > 0.1 && (coherence[idx] > 0.22 || edge[idx] > 0.05)) {
-        const hatchChain = traceRK2Spline(x, y, 1, 14, 0.015);
+      if (lum[idx] > 0.12 && (coherence[idx] > 0.24 || edge[idx] > 0.05)) {
+        const hatchChain = traceRK2Spline(x, y, 1, 14, 0.015, false);
         if (hatchChain.length >= 5) {
           packAdaptiveStroke(hatchChain, 3);
         }
@@ -1426,9 +1565,9 @@ function buildMatrixFromImage(img: HTMLImageElement, useFastMode: boolean): Matr
   strokes.sort((a, b) => {
     const tierOrder = (a.tier === 3 ? 1 : 0) - (b.tier === 3 ? 1 : 0);
     if (tierOrder !== 0) return tierOrder;
-    const da = Math.hypot(a.centerU - charCenterU, a.centerV - charCenterV);
-    const db = Math.hypot(b.centerU - charCenterU, b.centerV - charCenterV);
-    return (da - db) * 0.45 + (b.importance - a.importance) * 0.55;
+    const da = Math.hypot(a.centerU - headU, a.centerV - headV);
+    const db = Math.hypot(b.centerU - headU, b.centerV - headV);
+    return (da - db) * 0.5 + (b.importance - a.importance) * 0.5;
   });
 
   return {
@@ -1442,6 +1581,7 @@ function buildMatrixFromImage(img: HTMLImageElement, useFastMode: boolean): Matr
     coherence,
     subjectAlpha,
     fdog,
+    nmsRidge,
     edge,
     scaleMap,
     gx,
@@ -1455,6 +1595,10 @@ function buildMatrixFromImage(img: HTMLImageElement, useFastMode: boolean): Matr
     meanAnisotropy,
     charCenterU,
     charCenterV,
+    headU,
+    headV,
+    headRx,
+    headRy,
   };
 }
 
@@ -1482,10 +1626,10 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
     fastPerfMode: false,
     edition: "SHINE_ON",
     posterFrame: true,
-    strokeWeight: 0.92,
+    strokeWeight: 0.62,          // Утонченный хирургический калибр по умолчанию (0.62x вместо 0.92x!)
     coherenceCleanliness: 0.32,
-    relief3DAndMotion: 0.55,
-    glowAndPrism: 0.82,
+    relief3DAndMotion: 0.6,
+    glowAndPrism: 0.8,
     shadowHex: "#18122b",
     midtoneHex: "#a855f7",
     highlightHex: "#fde047",
@@ -1494,7 +1638,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
   const [isRecording, setIsRecording] = useState(false);
   const [isExportingGif, setIsExportingGif] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
-  const [fieldStatus, setFieldStatus] = useState<string>("INITIALIZING BARRETT 22.0...");
+  const [fieldStatus, setFieldStatus] = useState<string>("INITIALIZING BARRETT 23.0...");
   const [candidateUrls, setCandidateUrls] = useState<string[]>([]);
   const [candidateIdx, setCandidateIdx] = useState<number>(0);
   const [loadedPage, setLoadedPage] = useState<number>(2);
@@ -1564,11 +1708,17 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
       const compiled = compileAnimationPrompt(targetText);
       setKineticCoords(compiled);
       stateRef.current.kinetic = compiled;
+      stateRef.current.isPaused = false;
+      setIsPaused(false);
 
       if (forceStage) {
         updateArt("stageMode", forceStage);
       } else if (compiled.timelapseLoop) {
         updateArt("stageMode", "DRAW_THEN_ANIMATE");
+      } else {
+        // Чтобы при вводе "Поверни голову" движение начиналось мгновенно без ожидания прорисовки!
+        updateArt("stageMode", "ANIMATE_ART");
+        stateRef.current.traceProgress = 1.0;
       }
 
       if (force3D !== undefined) {
@@ -1588,7 +1738,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
   );
 
   const loadMatrixFromUrl = useCallback((rawUrl: string, idx: number, total: number) => {
-    setFieldStatus("SOLVING PURE VECTOR SKETCH & 3D DOME [" + String(idx + 1) + "/" + String(total) + "]...");
+    setFieldStatus("SOLVING 1PX NMS FACIAL RIG & 3D DOME [" + String(idx + 1) + "/" + String(total) + "]...");
     const img = new Image();
     img.crossOrigin = "anonymous";
     img.onload = () => {
@@ -1599,7 +1749,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
       stateRef.current.needsBaseRebuild = true;
       setCoeffs((prev) => ({ ...prev, eigenAnisotropy: buf.meanAnisotropy }));
       setFieldStatus(
-        "LOCKED // " + String(buf.strokes.length) + " PURE VECTORS & " + String(buf.w * buf.h) + " 3D VOXELS (" + String(buf.w) + "x" + String(buf.h) + ")"
+        "LOCKED // " + String(buf.strokes.length) + " MICRO-VECTORS & HEAD RIG AT (" + String(buf.headU.toFixed(2)) + "," + String(buf.headV.toFixed(2)) + ")"
       );
     };
     img.onerror = () => {
@@ -1820,7 +1970,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
   };
 
   // ==========================================
-  // ЯДРО РЕНДЕРИНГА BARRETT 22.0
+  // ЯДРО РЕНДЕРИНГА BARRETT 23.0 (RAZOR 0.2PX LINES + 2.5D HEAD RIG + POP-ART)
   // ==========================================
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -1833,14 +1983,12 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
     let viewW = 900;
     let viewH = 680;
 
-    // Буфер ЧИСТОГО ГРАФИЧЕСКОГО ОФОРТА (100% прозрачный фон, содержит только линии FDoG и штриховку без фото!)
     const pureSketchCanvas = document.createElement("canvas");
     const pureSketchCtx = pureSketchCanvas.getContext("2d");
 
     const shaderCanvas = document.createElement("canvas");
     const shaderCtx = shaderCanvas.getContext("2d");
 
-    // Увеличенный Z-буфер на 800x800 = 640,000 вокселей (никакого обрезания нижней части 3D-модели!)
     const MAX_ZBUF_SIZE = 800 * 800;
     const zBuffer = new Float32Array(MAX_ZBUF_SIZE);
 
@@ -1862,10 +2010,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
     ro.observe(container);
     updateSize();
 
-    // ==========================================
-    // СБОРКА ЧИСТОЙ ГРАФИЧЕСКОЙ МАТРИЦЫ ЛИНИЙ (БЕЗ ФОТОГРАФИИ НА ЗАДНЕМ ПЛАНЕ!)
-    // В каждом пикселе, где нет контура или штриховки, альфа = 0 (виден чистый кастомный фон юзера!)
-    // ==========================================
+    // Сборка 1-пиксельной бритвенно-тонкой гравировочной матрицы на базе nmsRidge (без толстых белых полос!)
     const rebuildPureSketchMatrixAndCache = (
       m: MatrixBuffer,
       art: ArtStudioConfig,
@@ -1894,50 +2039,39 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
 
           const p = i * 4;
           const rawL = m.lum[i];
-          const e = m.edge[i];
-          const fd = m.fdog[i];
-          const coh = m.coherence[i];
+          // ИСПОЛЬЗУЕМ 1-ПИКСЕЛЬНЫЙ ГРЕБЕНЬ nmsRidge ВМЕСТО ШИРОКОГО edge!
+          // Благодаря этому глаза, нос и контуры машин становятся тонкими, как след иглы офорта!
+          const thinRidge = m.nmsRidge[i] * (0.4 + 0.6 * m.coherence[i]);
+          const fdogFine = Math.max(0.0, 1.0 - Math.tanh(14.0 * (m.fdog[i] - 0.19)));
 
-          // Выделяем ТОЛЬКО линии контуров, микро-текст и перекрестную штриховку (никакой заливки фото!)
-          const fdogRidge = Math.max(0.0, 1.0 - Math.tanh(11.0 * (fd - 0.22)));
-          const cleanEdge = e * (0.35 + 0.65 * coh);
-
-          // Тонкая гравировальная штриховка вдоль касательного поля ETF
-          const hatchCoord = (x * m.etfY[i] - y * m.etfX[i]) * 1.35;
-          const crossCoord = (x * m.etfX[i] + y * m.etfY[i]) * 1.35;
+          const hatchCoord = (x * m.etfY[i] - y * m.etfX[i]) * 1.65;
           const hatchWave = 0.5 + 0.5 * Math.sin(hatchCoord);
-          const crossWave = 0.5 + 0.5 * Math.sin(crossCoord);
 
           let lineSignal = 0.0;
           if (isPaper) {
-            // На светлой бумаге штрихуем тени
-            const shadow = Math.pow(1.0 - rawL, 1.4);
-            if (shadow > 0.25 && hatchWave < shadow * 0.75) lineSignal += 0.38;
-            if (shadow > 0.55 && crossWave < shadow * 0.75) lineSignal += 0.35;
-            lineSignal = clip(lineSignal + cleanEdge * 0.95 + fdogRidge * 0.65, 0.0, 1.0);
+            const shadow = Math.pow(1.0 - rawL, 1.5);
+            if (shadow > 0.28 && hatchWave < shadow * 0.65) lineSignal += 0.32;
+            lineSignal = clip(lineSignal + thinRidge * 1.15 + fdogFine * 0.5, 0.0, 1.0);
           } else {
-            // На темном кастомном фоне рисуем светящиеся контуры, буквы и деликатную штриховку светов!
-            if (rawL > 0.25 && cleanEdge > 0.08 && hatchWave > 0.55) {
-              lineSignal += rawL * 0.32;
+            if (rawL > 0.28 && m.edge[i] > 0.12 && hatchWave > 0.68) {
+              lineSignal += rawL * 0.22;
             }
-            lineSignal = clip(lineSignal + cleanEdge * 1.15 + fdogRidge * 0.55 * rawL, 0.0, 1.0);
+            lineSignal = clip(lineSignal + thinRidge * 1.25 + fdogFine * 0.42 * rawL, 0.0, 1.0);
           }
 
-          // Если в пикселе нет линии скетча — оставляем его 100% прозрачным (альфа = 0), чтобы сиял чистый кастомный фон!
-          if (lineSignal < 0.06) continue;
+          if (lineSignal < 0.08) continue;
 
-          const [colR, colG, colB] = resolveEditionColor(art, kuw[p], kuw[p + 1], kuw[p + 2], rawL, cleanEdge, t.tone, false, true);
+          const [colR, colG, colB] = resolveEditionColor(art, kuw[p], kuw[p + 1], kuw[p + 2], rawL, m.edge[i], t.tone, false, true);
 
           skDst[p] = colR;
           skDst[p + 1] = colG;
           skDst[p + 2] = colB;
-          skDst[p + 3] = Math.round(clip(lineSignal * vMask, 0.0, 0.92) * 255);
+          skDst[p + 3] = Math.round(clip(lineSignal * vMask, 0.0, 0.88) * 255);
         }
       }
 
       pureSketchCtx.putImageData(skImg, 0, 0);
 
-      // Кэшируем цвета для всех векторных сплайнов и нитей шелка
       for (let i = 0; i < m.strokes.length; i++) {
         const st = m.strokes[i];
         const [rC, gC, bC] = resolveEditionColor(art, st.r, st.g, st.b, st.meanLum, st.meanEdge, t.tone, st.tier === 4, true);
@@ -1962,15 +2096,89 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
       prog: number
     ) => {
       const animGate = art.stageMode === "DRAW_THEN_ANIMATE" ? smoothstep(0.45, 0.92, prog) : 1.0;
-      const power = (0.4 + art.relief3DAndMotion * 0.9) * animGate;
+      const power = (0.45 + art.relief3DAndMotion * 0.95) * animGate;
       const phase = time * kin.moveFreq;
+
+      // Вычисление текущих углов 2.5D-поворота и кивка головы персонажа!
+      const dirBias = kin.headTurnDir !== 0 ? kin.headTurnDir * 0.45 + Math.sin(phase) * 0.55 : Math.sin(phase);
+      const headYaw = dirBias * kin.headTurnYaw * power;
+      const headPitch = Math.sin(phase * 1.3) * kin.headNodPitch * power;
+      const headRoll = Math.cos(phase * 0.9) * kin.headTiltRoll * power;
 
       const dx = Math.sin(phase) * kin.layerMoveX * power;
       const dy = -Math.abs(Math.sin(phase * 1.5)) * kin.layerMoveY * power + Math.cos(phase * 0.8) * kin.layerMoveY * 0.35 * power;
       const tilt = Math.sin(phase) * kin.layerTiltAmp * power;
       const scale = 1.0 + Math.sin(phase * 2.0) * kin.layerScaleAmp * power;
 
-      return { dx, dy, tilt, scale, animGate, power };
+      return { dx, dy, tilt, scale, headYaw, headPitch, headRoll, animGate, power };
+    };
+
+    // ==========================================
+    // АНАТОМИЧЕСКИЙ ОПЕРАТОР 2.5D ПОВОРОТА ГОЛОВЫ И ДВИЖЕНИЯ ТЕЛА
+    // ==========================================
+    const evaluateAnatomicalPoint = (
+      uIn: number,
+      vIn: number,
+      m: MatrixBuffer,
+      layerTf: {
+        dx: number;
+        dy: number;
+        tilt: number;
+        scale: number;
+        headYaw: number;
+        headPitch: number;
+        headRoll: number;
+        animGate: number;
+        power: number;
+      }
+    ): [number, number] => {
+      let u = uIn;
+      let v = vIn;
+
+      if (layerTf.animGate <= 0.005) return [u, v];
+
+      // 1. Проверяем, находится ли точка внутри эллипсоида головы персонажа (headU, headV, headRx, headRy)
+      if (Math.abs(layerTf.headYaw) > 0.005 || Math.abs(layerTf.headPitch) > 0.005 || Math.abs(layerTf.headRoll) > 0.005) {
+        const dxH = (u - m.headU) / m.headRx;
+        const dyH = (v - m.headV) / m.headRy;
+        const rSq = dxH * dxH + dyH * dyH;
+
+        if (rSq < 1.8) {
+          // Плавный вес влияния рига головы (максимум в центре лица, плавно сходит к шее и плечам)
+          const headWeight = Math.exp(-rSq * 1.45);
+          // Выпуклая 3D-сфера черепа и лица (нос и глаза выступают вперед сильнее ушей!)
+          const cranialZ = Math.sqrt(Math.max(0.0, 1.0 - Math.min(1.0, rSq * 0.85)));
+
+          // 2.5D поворот головы wokół шейной оси (Yaw) с перспективным сокращением дальней щеки!
+          const yawShift = Math.sin(layerTf.headYaw) * cranialZ * m.headRx * 0.72;
+          const foreshortenX = Math.cos(layerTf.headYaw * 0.65 * headWeight) - dxH * Math.sin(layerTf.headYaw) * 0.22 * headWeight;
+
+          // 2.5D кивок головы вверх-вниз (Pitch)
+          const pitchShift = Math.sin(layerTf.headPitch) * cranialZ * m.headRy * 0.58;
+
+          // Наклон головы к плечу вокруг основания шеи (Roll)
+          const cosR = Math.cos(layerTf.headRoll * headWeight);
+          const sinR = Math.sin(layerTf.headRoll * headWeight);
+          const rotDx = dxH * foreshortenX * cosR - dyH * sinR;
+          const rotDy = dxH * foreshortenX * sinR + dyH * cosR;
+
+          u = m.headU + rotDx * m.headRx + yawShift * headWeight;
+          v = m.headV + rotDy * m.headRy + pitchShift * headWeight;
+        }
+      }
+
+      // 2. Общее движение фигуры вокруг центра масс
+      const cx = m.charCenterU;
+      const cy = m.charCenterV;
+      const relU = (u - cx) * layerTf.scale;
+      const relV = (v - cy) / layerTf.scale;
+      const cosT = Math.cos(layerTf.tilt);
+      const sinT = Math.sin(layerTf.tilt);
+
+      u = cx + (relU * cosT - relV * sinT) + layerTf.dx;
+      v = cy + (relU * sinT + relV * cosT) + layerTf.dy;
+
+      return [u, v];
     };
 
     const transformUnifiedPoint = (
@@ -1994,36 +2202,34 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
       camPitch: number,
       camZoom: number,
       pluckPx: number,
-      layerTf: { dx: number; dy: number; tilt: number; scale: number; animGate: number; power: number }
+      layerTf: {
+        dx: number;
+        dy: number;
+        tilt: number;
+        scale: number;
+        headYaw: number;
+        headPitch: number;
+        headRoll: number;
+        animGate: number;
+        power: number;
+      }
     ): [number, number] => {
-      const cx = m.charCenterU;
-      const cy = m.charCenterV;
-
-      let u = uIn;
-      let v = vIn;
+      let [u, v] = evaluateAnatomicalPoint(uIn, vIn, m, layerTf);
 
       if (layerTf.animGate > 0.01) {
-        const relU = (u - cx) * layerTf.scale;
-        const relV = (v - cy) / layerTf.scale;
-        const cosT = Math.cos(layerTf.tilt);
-        const sinT = Math.sin(layerTf.tilt);
-
-        u = cx + (relU * cosT - relV * sinT) + layerTf.dx;
-        v = cy + (relU * sinT + relV * cosT) + layerTf.dy;
-
         if (!isMicro && kin.internalWaveAmp > 0.01) {
           const env = Math.sin(sNorm * Math.PI);
-          const wave = Math.sin((uIn * 5.0 + vIn * 4.0) * Math.PI - time * 3.0 + phase) * kin.internalWaveAmp * 0.007 * layerTf.power;
-          u += kin.windVecX * 0.004 * env + nxIn * wave;
-          v += kin.windVecY * 0.004 * env + nyIn * wave;
+          const wave = Math.sin((uIn * 5.0 + vIn * 4.0) * Math.PI - time * 3.0 + phase) * kin.internalWaveAmp * 0.006 * layerTf.power;
+          u += kin.windVecX * 0.0035 * env + nxIn * wave;
+          v += kin.windVecY * 0.0035 * env + nyIn * wave;
         }
 
         if (!isMicro && kin.shockwaveAmp > 0.01) {
-          const du = u - cx;
-          const dv = v - cy;
+          const du = u - m.charCenterU;
+          const dv = v - m.charCenterV;
           const r = Math.hypot(du, dv) + 0.001;
           if (r < 0.45) {
-            const shock = Math.sin(r * 16.0 - time * 5.0) * (1.0 - r / 0.45) * kin.shockwaveAmp * 0.015 * layerTf.power;
+            const shock = Math.sin(r * 16.0 - time * 5.0) * (1.0 - r / 0.45) * kin.shockwaveAmp * 0.014 * layerTf.power;
             u += (du / r) * shock;
             v += (dv / r) * shock;
           }
@@ -2120,7 +2326,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
         if (kin.timelapseLoop || art.stageMode === "DRAW_THEN_ANIMATE") {
           s.traceProgress = (s.traceProgress + 0.0042 * (0.6 + t.energy)) % 1.45;
         } else if (s.traceProgress < 1.0) {
-          s.traceProgress = Math.min(1.0, s.traceProgress + 0.015 * (0.65 + t.energy * 1.15));
+          s.traceProgress = Math.min(1.0, s.traceProgress + 0.016 * (0.65 + t.energy * 1.15));
         }
       }
       const time = s.time;
@@ -2130,7 +2336,6 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
         s.needsBaseRebuild = false;
       }
 
-      // 1. Заливаем весь холст ЧИСТЫМ кастомным фоном (Obsidian, Void Black, Midnight, Velvet или Paper)
       ctx.globalCompositeOperation = "source-over";
       ctx.fillStyle = bgHex;
       ctx.fillRect(0, 0, viewW, viewH);
@@ -2232,64 +2437,29 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
       const clampedProg = Math.min(1.0, s.traceProgress);
       const layerTf = getLayerTransform(kin, art, time, clampedProg);
 
-      // Отрисовка ЧИСТОЙ ГРАФИЧЕСКОЙ СЕТКИ ШТРИХОВ (без фото!) с синхронной трансформацией
-      const renderPureSketchEtchLayer = (opacity: number) => {
-        if (opacity <= 0.01) return;
-        ctx.save();
-        ctx.beginPath();
-        ctx.rect(ox, oy, drawW, drawH);
-        ctx.clip();
-
-        const pivotX = ox + m.charCenterU * drawW;
-        const pivotY = oy + m.charCenterV * drawH;
-
-        ctx.translate(pivotX + layerTf.dx * drawW, pivotY + layerTf.dy * drawH);
-        ctx.rotate(layerTf.tilt);
-        ctx.scale(layerTf.scale * camZoom, (1.0 / layerTf.scale) * camZoom);
-        ctx.translate(-pivotX, -pivotY);
-
-        ctx.globalCompositeOperation = isPaper ? "source-over" : "screen";
-        ctx.globalAlpha = clip(opacity, 0, 1.0);
-        ctx.drawImage(
-          pureSketchCanvas,
-          ox - s.smoothYaw * art.relief3DAndMotion * 20,
-          oy - s.smoothPitch * art.relief3DAndMotion * 20,
-          drawW,
-          drawH
-        );
-        ctx.restore();
-      };
-
       // ==========================================
-      // РЕЖИМ 1 И 2: TRACE 22.0 & SKETCH (100% ЧИСТЫЙ СКЕТЧ НА КАСТОМНОМ ФОНЕ — НИКАКОЙ ФОТКИ СЗАДИ!)
+      // РЕЖИМ 1 И 2: TRACE 23.0 & SKETCH (ЮВЕЛИРНЫЕ ЛИНИИ 0.2PX - 0.55PX + 2.5D ПОВОРОТ ГОЛОВЫ БЕЗ ЗЕЛЕНЫХ ТОЧЕК!)
       // ==========================================
       if (s.topology === "TRACE" || s.topology === "SKETCH") {
         const isSketchMode = s.topology === "SKETCH";
-        const etchReveal = smoothstep(0.1, 0.85, clampedProg);
 
-        // 1. Сначала проявляется тончайший гравировальный офорт (только линии и штриховка на кастомном фоне!)
-        renderPureSketchEtchLayer((isSketchMode ? 0.92 : 0.78) * etchReveal);
-
-        // В режиме SKETCH или Da Vinci добавляем чертежные линии построения Леонардо
-        if (isSketchMode || art.edition === "DA_VINCI") {
+        // В режиме SKETCH или Da Vinci добавляем тонкую 1-пиксельную гравировальную сетку с учетом поворота головы
+        if (isSketchMode && shaderCtx) {
+          const bW = Math.floor(m.w * 0.75);
+          const bH = Math.floor(m.h * 0.75);
+          if (shaderCanvas.width !== bW || shaderCanvas.height !== bH) {
+            shaderCanvas.width = bW;
+            shaderCanvas.height = bH;
+          }
+          shaderCtx.clearRect(0, 0, bW, bH);
+          shaderCtx.drawImage(pureSketchCanvas, 0, 0, bW, bH);
           ctx.save();
-          ctx.strokeStyle = isPaper ? "rgba(140, 55, 35, 0.24)" : "rgba(215, 165, 105, 0.14)";
-          ctx.lineWidth = 0.8;
-          const cx = ox + (m.charCenterU + layerTf.dx) * drawW;
-          const cy = oy + (m.charCenterV + layerTf.dy) * drawH;
-          const rVitruvian = Math.min(drawW, drawH) * 0.36;
-          ctx.beginPath();
-          ctx.arc(cx, cy, rVitruvian, 0, Math.PI * 2);
-          ctx.arc(cx, cy, rVitruvian / PHI, 0, Math.PI * 2);
-          ctx.moveTo(ox, cy);
-          ctx.lineTo(ox + drawW, cy);
-          ctx.moveTo(cx, oy);
-          ctx.lineTo(cx, oy + drawH);
-          ctx.stroke();
+          ctx.globalCompositeOperation = isPaper ? "source-over" : "screen";
+          ctx.globalAlpha = 0.55 * smoothstep(0.1, 0.8, clampedProg);
+          ctx.drawImage(shaderCanvas, ox + layerTf.dx * drawW, oy + layerTf.dy * drawH, drawW, drawH);
           ctx.restore();
         }
 
-        // 2. Поверх гравировки вычерчиваются 7 500 каллиграфических векторных сплайнов РК2!
         const strokes = m.strokes;
         const pluckAmps = m.pluckAmps;
         const totalStrokes = strokes.length;
@@ -2327,35 +2497,36 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
 
           ctx.globalCompositeOperation = isPaper && !isHighlight ? "source-over" : "screen";
 
-          const stringPluckPx = pAmp * (isMicroFeature ? 1.4 : 5.5 + t.chaos * 7.0) * Math.sin(time * 28.0 + st.phase);
+          const stringPluckPx = pAmp * (isMicroFeature ? 1.2 : 4.8 + t.chaos * 6.0) * Math.sin(time * 28.0 + st.phase);
           const tierAlpha =
             st.tier === 0
-              ? 0.96
+              ? 0.94
               : st.tier === 4
-              ? 0.92
+              ? 0.88
               : st.tier === 1
-              ? 0.92
+              ? 0.88
               : st.tier === 2
-              ? 0.68
-              : 0.42;
-          const baseAlpha = clip((0.32 + st.meanEdge * 0.65 + pAmp * 0.45) * tierAlpha * localProg, 0.15, 0.98);
+              ? 0.62
+              : 0.36;
+          const baseAlpha = clip((0.28 + st.meanEdge * 0.65 + pAmp * 0.45) * tierAlpha * localProg, 0.14, 0.96);
 
+          // БРИТВЕННО-ТОНКИЙ КАЛИБР ЛИНИЙ (0.18px на глазах и губах, 0.45px на контурах!):
+          // Черты лица больше никогда не сливаются в толстые пятна!
           const maxW =
             (st.tier === 0
-              ? 0.42
+              ? 0.28
               : st.tier === 4
-              ? 0.65 * st.featureScale
+              ? 0.42 * st.featureScale
               : st.tier === 1
-              ? (0.72 + st.meanEdge * 0.75) * st.featureScale
+              ? (0.45 + st.meanEdge * 0.45) * st.featureScale
               : st.tier === 2
-              ? 0.48 * st.featureScale
-              : 0.36 * st.featureScale) *
+              ? 0.32 * st.featureScale
+              : 0.24 * st.featureScale) *
             art.strokeWeight *
-            (1.0 + pAmp * 0.75);
+            (1.0 + pAmp * 0.65);
 
           ctx.beginPath();
           let prevX = 0, prevY = 0;
-          let tipX = 0, tipY = 0;
           for (let k = 0; k <= fullIdx; k++) {
             const sNorm = k / Math.max(1, nPts - 1);
             const [curX, curY] = transformUnifiedPoint(
@@ -2386,27 +2557,159 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
             else ctx.quadraticCurveTo(prevX, prevY, (prevX + curX) * 0.5, (prevY + curY) * 0.5);
             prevX = curX;
             prevY = curY;
-            if (k === fullIdx) {
-              tipX = curX;
-              tipY = curY;
-            }
           }
           ctx.lineTo(prevX, prevY);
           ctx.strokeStyle = "rgba(" + String(st.cachedR) + "," + String(st.cachedG) + "," + String(st.cachedB) + "," + String(baseAlpha.toFixed(2)) + ")";
-          ctx.lineWidth = Math.max(0.28, maxW);
+          ctx.lineWidth = Math.max(0.18, maxW);
           ctx.stroke();
 
-          if (localProg < 0.96 && st.tier === 1 && i % 4 === 0) {
-            ctx.fillStyle = isPaper ? "#8f3d27" : "#10b981";
+          // В стиле STREET_POP (Кит Харинг) добавляем фирменные радиальные энергетические засечки вокруг главных контуров!
+          if (art.edition === "STREET_POP" && st.tier === 1 && fullIdx >= 8 && i % 5 === 0) {
+            const midK = Math.floor(fullIdx * 0.5);
+            const [bx, by] = transformUnifiedPoint(
+              st.u[midK],
+              st.v[midK],
+              st.z[midK],
+              st.nx[midK],
+              st.ny[midK],
+              0.5,
+              st.phase,
+              false,
+              ox,
+              oy,
+              drawW,
+              drawH,
+              m,
+              time,
+              kin,
+              art,
+              s.smoothYaw,
+              s.smoothPitch,
+              camZoom,
+              0,
+              layerTf
+            );
             ctx.beginPath();
-            ctx.arc(tipX, tipY, 2.2, 0, Math.PI * 2);
-            ctx.fill();
+            ctx.moveTo(bx + st.nx[midK] * 5, by + st.ny[midK] * 5);
+            ctx.lineTo(bx + st.nx[midK] * 12, by + st.ny[midK] * 12);
+            ctx.strokeStyle = "rgba(255, 230, 20, 0.85)";
+            ctx.lineWidth = 1.2 * art.strokeWeight;
+            ctx.stroke();
           }
         }
       }
 
       // ==========================================
-      // РЕЖИМ 3: SCULPT3D & LIDAR 22.0 (ПОЛНЫЙ КАДР 800x800 БЕЗ ОБРЕЗАНИЯ ВЕРХА И НИЗА!)
+      // РЕЖИМ 3: POPART 23.0 (ШЕЛКОГРАФИЯ ЭНДИ УОРХОЛА / КОМИКС РОЯ ЛИХТЕНШТЕЙНА / ПЛАКАТ OBEY!)
+      // ==========================================
+      else if (s.topology === "POPART" && shaderCtx) {
+        const scaleDiv = art.fastPerfMode ? 2 : 1;
+        const bW = Math.floor(m.w / scaleDiv);
+        const bH = Math.floor(m.h / scaleDiv);
+        if (shaderCanvas.width !== bW || shaderCanvas.height !== bH) {
+          shaderCanvas.width = bW;
+          shaderCanvas.height = bH;
+        }
+        const outImg = shaderCtx.createImageData(bW, bH);
+        const dst = outImg.data;
+        const kuw = m.kuwaharaRgba;
+        const [bgR, bgG, bgB] = hexToRgb(bgHex);
+
+        // Выбираем активный поп-арт стиль (если выбран обычный пресет — по умолчанию включаем Роя Лихтенштейна / Уорхола!)
+        const popStyle =
+          art.edition === "WARHOL_POP" || art.edition === "LICHTENSTEIN" || art.edition === "OBEY_POSTER" || art.edition === "STREET_POP"
+            ? art.edition
+            : "LICHTENSTEIN";
+
+        const dotFreq = (0.65 + t.symmetry * 0.55) / Math.max(0.45, art.strokeWeight);
+        // Легкий типографский сдвигом печатного клише Уорхола (Off-register screenprint shift)
+        const regShiftX = Math.round(Math.sin(time * 1.5) * 2.5);
+        const regShiftY = Math.round(Math.cos(time * 1.2) * 2.0);
+
+        for (let y = 0; y < bH; y++) {
+          const vOrig = y / bH;
+          for (let x = 0; x < bW; x++) {
+            const uOrig = x / bW;
+            // Применяем 2.5D-поворот головы и движение к поп-арт матрице!
+            const [uDef, vDef] = evaluateAnatomicalPoint(uOrig, vOrig, m, layerTf);
+            const sx = clip(Math.round((2 * uOrig - uDef) * (m.w - 1)), 0, m.w - 1);
+            const sy = clip(Math.round((2 * vOrig - vDef) * (m.h - 1)), 0, m.h - 1);
+
+            const idx = sy * m.w + sx;
+            const outP = (y * bW + x) * 4;
+            const vMask = m.mask[idx];
+            const subjW = m.subjectAlpha[idx];
+
+            if (vMask <= 0.005 || (art.stageMode === "ISOLATE_SUBJECT" && subjW < art.coherenceCleanliness)) {
+              dst[outP] = bgR;
+              dst[outP + 1] = bgG;
+              dst[outP + 2] = bgB;
+              dst[outP + 3] = 255;
+              continue;
+            }
+
+            // Координата со сдвигом клише для цветного слоя шелкографии
+            const cIdx = clip(sy + regShiftY, 0, m.h - 1) * m.w + clip(sx + regShiftX, 0, m.w - 1);
+            const l = m.lum[cIdx];
+            const e = m.edge[idx];
+            const nms = m.nmsRidge[idx];
+            const fd = m.fdog[idx];
+
+            // Четкий черный трафаретный контур тушью (Woodcut / Comic Ink Outline)
+            const isBlackInk = nms > 0.22 || fd < 0.24 || l < 0.16;
+
+            if (isBlackInk) {
+              dst[outP] = 12;
+              dst[outP + 1] = 10;
+              dst[outP + 2] = 16;
+              dst[outP + 3] = 255;
+              continue;
+            }
+
+            const p = cIdx * 4;
+            const [popR, popG, popB] = resolveEditionColor(
+              { ...art, edition: popStyle },
+              kuw[p],
+              kuw[p + 1],
+              kuw[p + 2],
+              l,
+              e,
+              t.tone,
+              false,
+              false
+            );
+
+            // Точки растра Ben-Day (для Лихтенштейна и Поп-Арта) в полутонах
+            const rotX = (sx * 0.866 - sy * 0.5) * dotFreq;
+            const rotY = (sx * 0.5 + sy * 0.866) * dotFreq;
+            const benDayGrid = 0.5 + 0.25 * (Math.cos(rotX) + Math.cos(rotY));
+
+            let rFinal = popR, gFinal = popG, bFinal = popB;
+            if (popStyle === "LICHTENSTEIN" && l > 0.22 && l < 0.76) {
+              const inDot = benDayGrid > l * 0.95;
+              if (!inDot) {
+                // Чистый кремово-белый бумажный фон между точками Ben-Day!
+                rFinal = 252;
+                gFinal = 246;
+                bFinal = 232;
+              }
+            } else if (popStyle === "WARHOL_POP" && l > 0.3 && l < 0.65 && benDayGrid < 0.35) {
+              rFinal = Math.min(255, popR + 45);
+              gFinal = Math.max(0, popG - 35);
+            }
+
+            dst[outP] = Math.round(bgR * (1 - vMask) + rFinal * vMask);
+            dst[outP + 1] = Math.round(bgG * (1 - vMask) + gFinal * vMask);
+            dst[outP + 2] = Math.round(bgB * (1 - vMask) + bFinal * vMask);
+            dst[outP + 3] = 255;
+          }
+        }
+        shaderCtx.putImageData(outImg, 0, 0);
+        ctx.drawImage(shaderCanvas, ox, oy, drawW, drawH);
+      }
+
+      // ==========================================
+      // РЕЖИМ 4: SCULPT3D & LIDAR 23.0 (АНАТОМИЧЕСКИЙ 3D-КУПОЛ С 2.5D ПОВОРОТОМ ГОЛОВЫ!)
       // ==========================================
       else if (s.topology === "SCULPT3D" || s.topology === "LIDAR") {
         const isLidar = s.topology === "LIDAR";
@@ -2437,8 +2740,6 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
           const cosX = Math.cos(s.smoothPitch);
           const sinX = Math.sin(s.smoothPitch);
           const depthScale = 0.22 + art.relief3DAndMotion * 0.52;
-
-          // Коэффициент 0.88 гарантирует, что при 3D-экструзии вперёд ни верх надписи PINK FLOYD, ни низ не выйдут за рамку!
           const fitScale = 0.88 * camZoom;
 
           const lx = (s.fluidU - 0.5) * 2.4;
@@ -2471,9 +2772,10 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
               const e = m.edge[mIdx];
               if (l < 0.03 && e < 0.04) continue;
 
+              const [uDef, vDef] = evaluateAnatomicalPoint(uOrig, vOrig, m, layerTf);
               const zHeight = (m.depthMap[mIdx] - 0.35) * depthScale;
-              const x3 = (uOrig + layerTf.dx * 0.6 - 0.5) * fitScale;
-              const y3 = (vOrig + layerTf.dy * 0.6 - 0.5) * fitScale;
+              const x3 = (uDef - 0.5) * fitScale;
+              const y3 = (vDef - 0.5) * fitScale;
 
               const rx = x3 * cosY + zHeight * sinY;
               const rz1 = -x3 * sinY + zHeight * cosY;
@@ -2534,7 +2836,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
       }
 
       // ==========================================
-      // РЕЖИМ 4: PRISM 22.0 (ЮВЕЛИРНАЯ СПЕКТРАЛЬНАЯ ДИФРАКЦИЯ НА ГРАНЯХ — БЕЗ БЕЛОГО ПЕРЕСВЕТА!)
+      // РЕЖИМ 5: PRISM 23.0 (ТОНКАЯ ДИФРАКЦИЯ НА ГРАНЯХ БЕЗ ПЕРЕСВЕТА)
       // ==========================================
       else if (s.topology === "PRISM" && shaderCtx) {
         const scaleDiv = art.fastPerfMode ? 2 : 1;
@@ -2549,21 +2851,20 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
         const kuw = m.kuwaharaRgba;
         const [bgR, bgG, bgB] = hexToRgb(bgHex);
 
-        // Вектор преломления призмы
         const prismAngle = s.mouseActive
           ? Math.atan2(mNormY - 0.5, mNormX - 0.5)
           : time * 0.4 + 0.38;
         const dirX = Math.cos(prismAngle);
         const dirY = Math.sin(prismAngle);
-        // Компактный, четкий шаг хроматического расщепления (4..16px), чтобы не размазывать картинку в белое мыло!
-        const dispStep = (1.2 + art.glowAndPrism * 2.2);
+        const dispStep = 1.2 + art.glowAndPrism * 2.2;
 
         for (let y = 0; y < bH; y++) {
           const vOrig = y / bH;
           for (let x = 0; x < bW; x++) {
             const uOrig = x / bW;
-            const sx = clip(Math.round((uOrig - layerTf.dx) * (m.w - 1)), 0, m.w - 1);
-            const sy = clip(Math.round((vOrig - layerTf.dy) * (m.h - 1)), 0, m.h - 1);
+            const [uDef, vDef] = evaluateAnatomicalPoint(uOrig, vOrig, m, layerTf);
+            const sx = clip(Math.round((2 * uOrig - uDef) * (m.w - 1)), 0, m.w - 1);
+            const sy = clip(Math.round((2 * vOrig - vDef) * (m.h - 1)), 0, m.h - 1);
 
             const idx = sy * m.w + sx;
             const outP = (y * bW + x) * 4;
@@ -2578,18 +2879,14 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
 
             const p = idx * 4;
             const l = m.lum[idx];
-            const e = m.edge[idx];
+            const e = m.nmsRidge[idx];
             const fd = m.fdog[idx];
 
-            // 1. Темнопольная кристаллическая база (не выгорает в белый цвет!)
-            const darkCrystal = Math.pow(l, 1.15) * 0.52 * clip(0.25 + 0.75 * fd, 0.15, 1.0);
+            const darkCrystal = Math.pow(l, 1.15) * 0.48 * clip(0.25 + 0.75 * fd, 0.15, 1.0);
             let rAcc = (kuw[p] / 255.0) * darkCrystal;
             let gAcc = (kuw[p + 1] / 255.0) * darkCrystal;
             let bAcc = (kuw[p + 2] / 255.0) * darkCrystal;
 
-            // 2. Истинная хроматическая дисперсия Коши:
-            // Вместо сложения всех 7 цветов в белый, каждая длина волны берет ТОЛЬКО тонкий контурный гребень `edge * coherence`
-            // на своем индивидуальном расстоянии преломления!
             for (let band = 0; band < 7; band++) {
               const offset = (band - 3.0) * dispStep;
               const rx = Math.round(sx + dirX * offset);
@@ -2599,7 +2896,6 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
                 const sIdx = ry * m.w + rx;
                 const ridgeOnly = m.edge[sIdx] * (0.4 + 0.6 * m.coherence[sIdx]);
                 if (ridgeOnly > 0.16) {
-                  // Нормированный вес (0.24), чтобы 7 полос давали чистую радужную кайму вокруг граней и букв!
                   const wgt = (ridgeOnly - 0.14) * (0.18 + art.glowAndPrism * 0.22);
                   const [cr, cg, cb] = CAUCHY_SPECTRUM[band];
                   rAcc += (cr / 255.0) * wgt;
@@ -2609,8 +2905,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
               }
             }
 
-            // 3. Четкое алмазное ядро на самой грани
-            const coreEdge = e * m.coherence[idx] * 0.35;
+            const coreEdge = e * 0.42;
             const rFinal = Math.round(acesTonemap(rAcc + coreEdge) * 255);
             const gFinal = Math.round(acesTonemap(gAcc + coreEdge) * 255);
             const bFinal = Math.round(acesTonemap(bAcc + coreEdge * 1.1) * 255);
@@ -2626,11 +2921,9 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
       }
 
       // ==========================================
-      // РЕЖИМ 5: SILK 22.0 (ШЕЛК КАДЖИИ — КЭЯ НА ЧИСТОМ КАСТОМНОМ ФОНЕ)
+      // РЕЖИМ 6: SILK 23.0 (ТОНКИЙ ШЕЛК КАДЖИИ — КЭЯ С ПОВОРОТОМ ГОЛОВЫ)
       // ==========================================
       else if (s.topology === "SILK") {
-        renderPureSketchEtchLayer(0.35);
-
         ctx.globalCompositeOperation = isPaper ? "source-over" : "screen";
         ctx.lineCap = "round";
 
@@ -2658,7 +2951,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
           const gS = Math.min(255, Math.round(st.cachedG + kajiyaSpec * 0.98));
           const bS = Math.min(255, Math.round(st.cachedB + kajiyaSpec * 1.12));
 
-          const alpha = clip(0.24 + st.edge * 0.62 + st.lum * 0.28 + sheenWave * 0.2, 0.12, 0.95);
+          const alpha = clip(0.22 + st.edge * 0.62 + st.lum * 0.28 + sheenWave * 0.2, 0.12, 0.95);
 
           ctx.beginPath();
           for (let k = 0; k < nPts; k++) {
@@ -2691,131 +2984,99 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
           }
 
           ctx.strokeStyle = "rgba(" + String(rS) + "," + String(gS) + "," + String(bS) + "," + String(alpha.toFixed(2)) + ")";
-          ctx.lineWidth = (0.42 + st.edge * 0.82) * st.weight * art.strokeWeight;
+          ctx.lineWidth = (0.35 + st.edge * 0.65) * st.weight * art.strokeWeight;
           ctx.stroke();
         }
       }
 
       // ==========================================
-      // РЕЖИМ 6: PAINT 22.0 (МУЗЕЙНЫЙ АНИЗОТРОПНЫЙ ИМПАСТО БЕЗ ДЕТСКИХ ПЯТЕН!)
+      // РЕЖИМЫ 7, 8, 9 (PAINT, ENGRAVE, CINEMA)
       // ==========================================
-      else if (s.topology === "PAINT" && shaderCtx) {
-        const scaleDiv = art.fastPerfMode ? 2 : 1;
-        const bW = Math.floor(m.w / scaleDiv);
-        const bH = Math.floor(m.h / scaleDiv);
-        if (shaderCanvas.width !== bW || shaderCanvas.height !== bH) {
-          shaderCanvas.width = bW;
-          shaderCanvas.height = bH;
-        }
-        const outImg = shaderCtx.createImageData(bW, bH);
-        const dst = outImg.data;
-        const kuw = m.kuwaharaRgba;
-        const [bgR, bgG, bgB] = hexToRgb(bgHex);
+      else if (s.topology === "PAINT" || s.topology === "CINEMA") {
+        if (shaderCtx) {
+          const scaleDiv = art.fastPerfMode ? 2 : 1;
+          const bW = Math.floor(m.w / scaleDiv);
+          const bH = Math.floor(m.h / scaleDiv);
+          if (shaderCanvas.width !== bW || shaderCanvas.height !== bH) {
+            shaderCanvas.width = bW;
+            shaderCanvas.height = bH;
+          }
+          const outImg = shaderCtx.createImageData(bW, bH);
+          const dst = outImg.data;
+          const kuw = m.kuwaharaRgba;
+          const [bgR, bgG, bgB] = hexToRgb(bgHex);
+          const lightU = s.fluidU;
+          const lightV = s.fluidV;
 
-        const lightU = s.fluidU;
-        const lightV = s.fluidV;
+          for (let y = 0; y < bH; y++) {
+            const vOrig = y / bH;
+            for (let x = 0; x < bW; x++) {
+              const uOrig = x / bW;
+              const [uDef, vDef] = evaluateAnatomicalPoint(uOrig, vOrig, m, layerTf);
+              const sx = clip(Math.round((2 * uOrig - uDef) * (m.w - 1)), 0, m.w - 1);
+              const sy = clip(Math.round((2 * vOrig - vDef) * (m.h - 1)), 0, m.h - 1);
 
-        for (let y = 0; y < bH; y++) {
-          const vOrig = y / bH;
-          for (let x = 0; x < bW; x++) {
-            const uOrig = x / bW;
-            const sx = clip(Math.round((uOrig - layerTf.dx) * (m.w - 1)), 0, m.w - 1);
-            const sy = clip(Math.round((vOrig - layerTf.dy) * (m.h - 1)), 0, m.h - 1);
+              const idx = sy * m.w + sx;
+              const outP = (y * bW + x) * 4;
+              const vMask = m.mask[idx];
+              if (vMask <= 0.005) {
+                dst[outP] = bgR;
+                dst[outP + 1] = bgG;
+                dst[outP + 2] = bgB;
+                dst[outP + 3] = 255;
+                continue;
+              }
 
-            const idx = sy * m.w + sx;
-            const outP = (y * bW + x) * 4;
-            const vMask = m.mask[idx];
-            if (vMask <= 0.005) {
-              dst[outP] = bgR;
-              dst[outP + 1] = bgG;
-              dst[outP + 2] = bgB;
+              const p = idx * 4;
+              const l = m.lum[idx];
+              const e = m.edge[idx];
+              const fd = m.fdog[idx];
+
+              let rFinal = 0, gFinal = 0, bFinal = 0;
+              if (s.topology === "PAINT") {
+                const bristleCoord = (sx * m.etfY[idx] - sy * m.etfX[idx]) * (0.85 / Math.max(0.35, m.scaleMap[idx]));
+                const bristleRelief = Math.sin(bristleCoord) * (0.1 + e * 0.32) * art.strokeWeight;
+                const lx = lightU - uOrig;
+                const ly = lightV - vOrig;
+                const lNorm = Math.hypot(lx, ly, 0.5);
+                const nx = m.gx[idx] * e + m.etfY[idx] * bristleRelief;
+                const ny = m.gy[idx] * e - m.etfX[idx] * bristleRelief;
+                const dotLight = Math.max(0.0, (nx * lx + ny * ly + 0.5) / lNorm);
+                const oilSpec = Math.pow(dotLight, 14.0) * art.glowAndPrism * 135.0 * smoothstep(0.08, 0.45, l + e);
+                const [edR, edG, edB] = resolveEditionColor(art, kuw[p], kuw[p + 1], kuw[p + 2], l, e, t.tone, false, false);
+                const inkContour = clip(0.28 + 0.72 * Math.tanh(9.0 * (fd - 0.23)), 0.15, 1.0);
+                const shade = inkContour * (0.92 + bristleRelief * 0.25) * smoothstep(0.02, 0.14, l + e * 0.8);
+                rFinal = Math.min(255, Math.max(0, Math.round((kuw[p] * 0.65 + edR * 0.35) * shade + oilSpec)));
+                gFinal = Math.min(255, Math.max(0, Math.round((kuw[p + 1] * 0.65 + edG * 0.35) * shade + oilSpec * 0.96)));
+                bFinal = Math.min(255, Math.max(0, Math.round((kuw[p + 2] * 0.65 + edB * 0.35) * shade + oilSpec * 0.9)));
+              } else {
+                const halation = Math.max(0.0, m.smoothLum[idx] - 0.34) * art.glowAndPrism * 185.0;
+                const [edR, edG, edB] = resolveEditionColor(
+                  art.edition === "SHINE_ON" ? { ...art, edition: "KODAK_800T" } : art,
+                  kuw[p],
+                  kuw[p + 1],
+                  kuw[p + 2],
+                  l,
+                  e,
+                  t.tone
+                );
+                const grain = ((Math.sin(x * 12.989 + y * 78.233 + time * 35) * 43758.54) % 1.0 - 0.5) * 16.0;
+                rFinal = Math.round(acesTonemap((edR + halation * 1.15 + grain) / 255.0) * 255);
+                gFinal = Math.round(acesTonemap((edG + halation * 0.32 + grain) / 255.0) * 255);
+                bFinal = Math.round(acesTonemap((edB + halation * 0.08 + grain) / 255.0) * 255);
+              }
+
+              dst[outP] = Math.round(bgR * (1 - vMask) + rFinal * vMask);
+              dst[outP + 1] = Math.round(bgG * (1 - vMask) + gFinal * vMask);
+              dst[outP + 2] = Math.round(bgB * (1 - vMask) + bFinal * vMask);
               dst[outP + 3] = 255;
-              continue;
             }
-
-            const p = idx * 4;
-            const l = m.lum[idx];
-            const e = m.edge[idx];
-            const fd = m.fdog[idx];
-
-            // 1. Тонкий рельеф масляной кисти вдоль векторного поля касательных ETF (без грубых палок!)
-            const bristleCoord = (sx * m.etfY[idx] - sy * m.etfX[idx]) * (0.85 / Math.max(0.35, m.scaleMap[idx]));
-            const bristleRelief = Math.sin(bristleCoord) * (0.1 + e * 0.32) * art.strokeWeight;
-
-            // 2. 3D-освещение гребней мазка по Блинну-Фонгу (умноженное на l, чтобы черные зоны оставались глубокими черными!)
-            const lx = lightU - uOrig;
-            const ly = lightV - vOrig;
-            const lNorm = Math.hypot(lx, ly, 0.5);
-            const nx = m.gx[idx] * e + m.etfY[idx] * bristleRelief;
-            const ny = m.gy[idx] * e - m.etfX[idx] * bristleRelief;
-            const dotLight = Math.max(0.0, (nx * lx + ny * ly + 0.5) / lNorm);
-            const oilSpecular = Math.pow(dotLight, 14.0) * art.glowAndPrism * 135.0 * smoothstep(0.08, 0.45, l + e);
-
-            const [edR, edG, edB] = resolveEditionColor(art, kuw[p], kuw[p + 1], kuw[p + 2], l, e, t.tone, false, false);
-            const inkContour = clip(0.28 + 0.72 * Math.tanh(9.0 * (fd - 0.23)), 0.15, 1.0);
-            const shade = inkContour * (0.92 + bristleRelief * 0.25) * smoothstep(0.02, 0.14, l + e * 0.8);
-
-            const rFinal = Math.min(255, Math.max(0, Math.round((kuw[p] * 0.65 + edR * 0.35) * shade + oilSpecular)));
-            const gFinal = Math.min(255, Math.max(0, Math.round((kuw[p + 1] * 0.65 + edG * 0.35) * shade + oilSpecular * 0.96)));
-            const bFinal = Math.min(255, Math.max(0, Math.round((kuw[p + 2] * 0.65 + edB * 0.35) * shade + oilSpecular * 0.9)));
-
-            dst[outP] = Math.round(bgR * (1 - vMask) + rFinal * vMask);
-            dst[outP + 1] = Math.round(bgG * (1 - vMask) + gFinal * vMask);
-            dst[outP + 2] = Math.round(bgB * (1 - vMask) + bFinal * vMask);
-            dst[outP + 3] = 255;
           }
+          shaderCtx.putImageData(outImg, 0, 0);
+          ctx.drawImage(shaderCanvas, ox, oy, drawW, drawH);
         }
-        shaderCtx.putImageData(outImg, 0, 0);
-        ctx.drawImage(shaderCanvas, ox, oy, drawW, drawH);
-
-        // Поверх масляной основы укладываем плавные изогнутые мазки РК2 вдоль контуров!
-        ctx.globalCompositeOperation = "screen";
-        ctx.lineCap = "round";
-        const strokes = m.strokes;
-        for (let i = 0; i < strokes.length; i++) {
-          const st = strokes[i];
-          if (st.tier > 1 || st.meanLum < 0.08) continue;
-          ctx.beginPath();
-          for (let k = 0; k < st.nPts; k++) {
-            const [cx, cy] = transformUnifiedPoint(
-              st.u[k],
-              st.v[k],
-              st.z[k],
-              st.nx[k],
-              st.ny[k],
-              k / Math.max(1, st.nPts - 1),
-              st.phase,
-              true,
-              ox,
-              oy,
-              drawW,
-              drawH,
-              m,
-              time,
-              kin,
-              art,
-              s.smoothYaw,
-              s.smoothPitch,
-              camZoom,
-              0,
-              layerTf
-            );
-            if (k === 0) ctx.moveTo(cx, cy);
-            else ctx.lineTo(cx, cy);
-          }
-          ctx.strokeStyle = "rgba(" + String(st.cachedR) + "," + String(st.cachedG) + "," + String(st.cachedB) + ",0.42)";
-          ctx.lineWidth = (0.55 + st.meanEdge * 0.85) * art.strokeWeight;
-          ctx.stroke();
-        }
-      }
-
-      // ==========================================
-      // РЕЖИМ 7: ENGRAVE 22.0
-      // ==========================================
-      else if (s.topology === "ENGRAVE") {
-        renderPureSketchEtchLayer(0.28);
-
-        const numLines = Math.floor(125 + (1.0 - art.coherenceCleanliness) * 65);
+      } else if (s.topology === "ENGRAVE") {
+        const numLines = Math.floor(135 + (1.0 - art.coherenceCleanliness) * 65);
         const numCols = 230;
         const maxElevation = (drawH / numLines) * (2.2 + t.structure * 2.4);
 
@@ -2873,7 +3134,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
               const [rC, gC, bC] = resolveEditionColor(art, m.kuwaharaRgba[p4], m.kuwaharaRgba[p4 + 1], m.kuwaharaRgba[p4 + 2], l, e, t.tone, false, true);
               const alpha = clip((0.2 + l * 0.65 + e * 0.55) * vMask, 0.08, 0.95);
               ctx.strokeStyle = "rgba(" + String(rC) + "," + String(gC) + "," + String(bC) + "," + String(alpha.toFixed(2)) + ")";
-              ctx.lineWidth = (0.35 + l * 1.15 + e * 0.95) * art.strokeWeight;
+              ctx.lineWidth = (0.3 + l * 0.95 + e * 0.75) * art.strokeWeight;
               ctx.beginPath();
               ctx.moveTo(prevX, prevY);
               ctx.lineTo(px, curY);
@@ -2882,78 +3143,6 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
             prevX = px;
             prevY = curY;
           }
-        }
-      }
-
-      // ==========================================
-      // РЕЖИМЫ 8, 9: CINEMA & HALFTONE
-      // ==========================================
-      else if (s.topology === "CINEMA" || s.topology === "HALFTONE") {
-        if (shaderCtx) {
-          const scaleDiv = art.fastPerfMode ? 2 : 1;
-          const bW = Math.floor(m.w / scaleDiv);
-          const bH = Math.floor(m.h / scaleDiv);
-          if (shaderCanvas.width !== bW || shaderCanvas.height !== bH) {
-            shaderCanvas.width = bW;
-            shaderCanvas.height = bH;
-          }
-          const outImg = shaderCtx.createImageData(bW, bH);
-          const dst = outImg.data;
-          const kuw = m.kuwaharaRgba;
-          const dotFreq = (0.55 + t.symmetry * 0.65) / Math.max(0.5, art.strokeWeight);
-
-          for (let y = 0; y < bH; y++) {
-            const vOrig = y / bH;
-            for (let x = 0; x < bW; x++) {
-              const uOrig = x / bW;
-              const sx = clip(Math.round((uOrig - layerTf.dx) * (m.w - 1)), 0, m.w - 1);
-              const sy = clip(Math.round((vOrig - layerTf.dy) * (m.h - 1)), 0, m.h - 1);
-
-              const idx = sy * m.w + sx;
-              const outP = (y * bW + x) * 4;
-              const vMask = m.mask[idx];
-              if (vMask <= 0.005) continue;
-
-              const p = idx * 4;
-              const l = m.lum[idx];
-              const e = m.edge[idx];
-              const fd = m.fdog[idx];
-
-              let rOut = kuw[p], gOut = kuw[p + 1], bOut = kuw[p + 2];
-
-              if (s.topology === "CINEMA") {
-                const halation = Math.max(0.0, m.smoothLum[idx] - 0.34) * art.glowAndPrism * 185.0;
-                const [edR, edG, edB] = resolveEditionColor(
-                  art.edition === "SHINE_ON" ? { ...art, edition: "KODAK_800T" } : art,
-                  kuw[p],
-                  kuw[p + 1],
-                  kuw[p + 2],
-                  l,
-                  e,
-                  t.tone
-                );
-                const grain = ((Math.sin(x * 12.989 + y * 78.233 + time * 35) * 43758.54) % 1.0 - 0.5) * 16.0;
-                rOut = acesTonemap((edR + halation * 1.15 + grain) / 255.0) * 255;
-                gOut = acesTonemap((edG + halation * 0.32 + grain) / 255.0) * 255;
-                bOut = acesTonemap((edB + halation * 0.08 + grain) / 255.0) * 255;
-              } else {
-                const cGrid = 0.5 + 0.25 * (Math.cos((sx * 0.966 - sy * 0.259) * dotFreq) + Math.cos((sx * 0.259 + sy * 0.966) * dotFreq));
-                const [edR, edG, edB] = resolveEditionColor(art, kuw[p], kuw[p + 1], kuw[p + 2], l, e, t.tone, false, true);
-                const inkLine = fd < 0.26 && e > 0.16 ? 0.08 : 1.0;
-                const dotVal = (l + e * 0.3 > cGrid * 0.85 ? 1.0 : 0.18) * inkLine;
-                rOut = edR * dotVal;
-                gOut = edG * dotVal;
-                bOut = edB * dotVal;
-              }
-
-              dst[outP] = Math.min(255, Math.max(0, Math.round(rOut * vMask)));
-              dst[outP + 1] = Math.min(255, Math.max(0, Math.round(gOut * vMask)));
-              dst[outP + 2] = Math.min(255, Math.max(0, Math.round(bOut * vMask)));
-              dst[outP + 3] = 255;
-            }
-          }
-          shaderCtx.putImageData(outImg, 0, 0);
-          ctx.drawImage(shaderCanvas, ox, oy, drawW, drawH);
         }
       }
 
@@ -2974,7 +3163,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
         ctx.fillStyle = textFill;
         ctx.textAlign = "left";
         ctx.fillText(
-          "BARRETT 22.0 // " + (query || "SHINE ON").toUpperCase().slice(0, 18) + " [" + s.topology + " · " + art.backdrop + "]",
+          "BARRETT 23.0 // " + (query || "SHINE ON").toUpperCase().slice(0, 18) + " [" + s.topology + " · " + art.edition + "]",
           ox - 4,
           oy + drawH + 10
         );
@@ -3105,7 +3294,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
         .barrett-scroll::-webkit-scrollbar-thumb:hover { background: rgba(168,85,247,0.9); }
       `}} />
 
-      {/* МАТЕМАТИЧЕСКИЙ ХОЛСТ BARRETT 22.0 */}
+      {/* МАТЕМАТИЧЕСКИЙ ХОЛСТ BARRETT 23.0 */}
       <div
         ref={containerRef}
         className="lg:col-span-8 relative h-[600px] md:h-[780px] rounded-2xl overflow-hidden border border-white/10 bg-[#040308] shadow-[0_20px_60px_rgba(0,0,0,0.85)]"
@@ -3132,7 +3321,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
         {/* ВЕРХНИЙ БАР */}
         <div className="absolute top-4 left-4 right-4 flex flex-wrap justify-between items-start gap-2">
           <div className="bg-black/75 backdrop-blur-md border border-white/10 px-3 py-2 rounded font-mono text-[9px] uppercase tracking-widest text-neutral-300 pointer-events-none">
-            <div className="text-white font-bold">BARRETT 22.0 // {(query || "SHINE ON CRAZY DIAMOND").toUpperCase()}</div>
+            <div className="text-white font-bold">BARRETT 23.0 // {(query || "SHINE ON CRAZY DIAMOND").toUpperCase()}</div>
             <div className="text-[#10b981] mt-0.5">{fieldStatus}</div>
           </div>
 
@@ -3201,7 +3390,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
           </div>
         </div>
 
-        {/* НИЖНЯЯ ПАНЕЛЬ */}
+        {/* НИЖНЯЯ ПАНЕЛЬ (ДОБАВЛЕН РЕЖИМ POPART) */}
         <div className="absolute bottom-4 left-4 right-4 flex flex-col gap-2.5">
           <div className="barrett-scroll flex items-center gap-2 overflow-x-auto py-1.5 px-2.5 bg-black/80 backdrop-blur-md rounded-xl border border-white/10 self-center max-w-full">
             <span className="font-mono text-[8px] text-neutral-400 uppercase tracking-widest px-1 shrink-0">
@@ -3264,13 +3453,13 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
                 [
                   "TRACE",
                   "SKETCH",
+                  "POPART",
                   "SCULPT3D",
                   "PRISM",
                   "SILK",
                   "PAINT",
                   "ENGRAVE",
                   "CINEMA",
-                  "HALFTONE",
                   "LIDAR",
                 ] as ManifoldTopology[]
               ).map((mode) => (
@@ -3327,10 +3516,10 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
         </div>
       </div>
 
-      {/* ЕДИНАЯ ПРОФЕССИОНАЛЬНАЯ ПАНЕЛЬ BARRETT 22.0 */}
+      {/* ЕДИНАЯ ПРОФЕССИОНАЛЬНАЯ ПАНЕЛЬ BARRETT 23.0 */}
       <div className="lg:col-span-4 glass-panel p-5 flex flex-col justify-between gap-3.5">
         <div className="flex flex-col gap-3 font-mono text-[9px] uppercase tracking-widest">
-          {/* 1. ПРОМПТ-СИНТЕЗАТОР АНИМАЦИИ */}
+          {/* 1. ПРОМПТ-СИНТЕЗАТОР АНИМАЦИИ С ПОДДЕРЖКОЙ ПОВОРОТА ГОЛОВЫ */}
           <div className="p-3 rounded-xl bg-black/60 border border-[#10b981]/40 space-y-2.5">
             <div className="flex justify-between items-center">
               <span className="text-[#10b981] font-bold">1. Prompt Animation Synthesizer:</span>
@@ -3372,7 +3561,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
                     handleApplyPrompt();
                   }
                 }}
-                placeholder="Опиши движение (парение, дыхание, ритм, ветер, пульс)..."
+                placeholder="Напр.: Поверни голову влево, кивни в такт, парение..."
                 className="flex-1 rounded-lg bg-black/75 border border-white/15 px-2.5 py-1.5 text-[9.5px] text-white font-mono normal-case focus:outline-none focus:border-[#10b981]"
               />
               <button
@@ -3448,19 +3637,22 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
             </div>
           </div>
 
-          {/* 3. ХУДОЖЕСТВЕННАЯ ПАЛИТРА */}
+          {/* 3. ХУДОЖЕСТВЕННАЯ ПАЛИТРА + КУЛЬТОВЫЕ СТИЛИ ПОП-АРТА */}
           <div>
-            <div className="text-neutral-400 mb-1.5">3. Artistic & Optical Grade:</div>
+            <div className="text-neutral-400 mb-1.5">3. Pop-Art & Master Editions (12 Styles):</div>
             <div className="grid grid-cols-3 gap-1.5">
               {(
                 [
                   { id: "SHINE_ON", label: "Shine On", dot: "linear-gradient(135deg,#38bdf8,#f59e0b)" },
+                  { id: "WARHOL_POP", label: "Warhol '64", dot: "linear-gradient(135deg,#ff147d,#ffe619)" },
+                  { id: "LICHTENSTEIN", label: "Lichtenstein", dot: "linear-gradient(135deg,#f22a34,#2058e1)" },
+                  { id: "OBEY_POSTER", label: "Obey Poster", dot: "linear-gradient(135deg,#d92b2b,#7ba4b5)" },
+                  { id: "STREET_POP", label: "Street Pop", dot: "linear-gradient(135deg,#2df573,#ff3723)" },
                   { id: "PIXAR_SSS", label: "Pixar 3D", dot: "linear-gradient(135deg,#fb7185,#38bdf8)" },
                   { id: "DARK_SIDE", label: "Prism Ray", dot: "linear-gradient(135deg,#ef4444,#3b82f6)" },
                   { id: "REMBRANDT", label: "Rembrandt", dot: "linear-gradient(135deg,#451a03,#fde68a)" },
                   { id: "KODAK_800T", label: "35mm Film", dot: "linear-gradient(135deg,#0284c7,#f97316)" },
                   { id: "VOGUE_NOIR", label: "Noir Red", dot: "linear-gradient(135deg,#f8fafc,#ef4444)" },
-                  { id: "WARHOL_POP", label: "Pop Art", dot: "linear-gradient(135deg,#ff1476,#00ebf5)" },
                   { id: "DA_VINCI", label: "Da Vinci", dot: "linear-gradient(135deg,#e8dcc4,#963d28)" },
                   { id: "CUSTOM_GRADE", label: "Custom RGB", dot: "linear-gradient(135deg,#a855f7,#fde047)" },
                 ] as { id: TributeEdition; label: string; dot: string }[]
@@ -3470,7 +3662,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
                   type="button"
                   onClick={() => updateArt("edition", ed.id)}
                   className={
-                    "py-1.5 px-2 rounded-lg border text-[8px] tracking-wider flex items-center gap-1.5 transition-all cursor-pointer " +
+                    "py-1.5 px-2 rounded-lg border text-[7.5px] tracking-wider flex items-center gap-1.5 transition-all cursor-pointer " +
                     (artConfig.edition === ed.id
                       ? "bg-white text-black border-white font-bold shadow-[0_0_12px_rgba(255,255,255,0.25)]"
                       : "bg-black/45 text-neutral-300 border-white/10 hover:border-white/30")
@@ -3519,6 +3711,22 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
           <div className="flex flex-col gap-2 pt-0.5">
             <div className="flex flex-col gap-0.5">
               <div className="flex justify-between text-neutral-400">
+                <span>Micro-Needle Line Calibre (0.2px - 1.5px)</span>
+                <span className="text-white">{artConfig.strokeWeight.toFixed(2)}x</span>
+              </div>
+              <input
+                type="range"
+                min="0.25"
+                max="1.6"
+                step="0.05"
+                value={artConfig.strokeWeight}
+                onChange={(e) => updateArt("strokeWeight", parseFloat(e.target.value))}
+                className="w-full accent-white cursor-pointer h-1 bg-white/10 rounded-lg"
+              />
+            </div>
+
+            <div className="flex flex-col gap-0.5">
+              <div className="flex justify-between text-neutral-400">
                 <span>Sketch Cleanliness & Cutout Gate</span>
                 <span className="text-[#10b981]">{Math.round(artConfig.coherenceCleanliness * 100)}%</span>
               </div>
@@ -3535,23 +3743,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
 
             <div className="flex flex-col gap-0.5">
               <div className="flex justify-between text-neutral-400">
-                <span>Calligraphic Spline & Silk Calibre</span>
-                <span className="text-white">{artConfig.strokeWeight.toFixed(2)}x</span>
-              </div>
-              <input
-                type="range"
-                min="0.4"
-                max="2.0"
-                step="0.05"
-                value={artConfig.strokeWeight}
-                onChange={(e) => updateArt("strokeWeight", parseFloat(e.target.value))}
-                className="w-full accent-white cursor-pointer h-1 bg-white/10 rounded-lg"
-              />
-            </div>
-
-            <div className="flex flex-col gap-0.5">
-              <div className="flex justify-between text-neutral-400">
-                <span>3D Dome Depth & Motion Amplitude</span>
+                <span>Head Turn & 3D Relief Amplitude</span>
                 <span className="text-[#a855f7]">{Math.round(artConfig.relief3DAndMotion * 100)}%</span>
               </div>
               <input

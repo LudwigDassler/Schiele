@@ -86,6 +86,7 @@ interface ContourStroke {
   featureScale: number;
   importance: number;
   phase: number;
+  speed: number;
   arcLen: number;
   centerU: number;
   centerV: number;
@@ -114,7 +115,7 @@ interface MatrixBuffer {
   w: number;
   h: number;
   rgba: Uint8ClampedArray;
-  cleanRgba: Uint8ClampedArray;
+  licRgba: Uint8ClampedArray;
   lum: Float32Array;
   smoothLum: Float32Array;
   depthMap: Float32Array;
@@ -341,9 +342,10 @@ function resolveEditionColor(
   if (edition === "CUSTOM_GRADE") return energy < 0.5 ? finalize(hexToRgb(art.shadowHex)[0] * (1 - energy * 2) + hexToRgb(art.midtoneHex)[0] * energy * 2, hexToRgb(art.shadowHex)[1] * (1 - energy * 2) + hexToRgb(art.midtoneHex)[1] * energy * 2, hexToRgb(art.shadowHex)[2] * (1 - energy * 2) + hexToRgb(art.midtoneHex)[2] * energy * 2) : finalize(hexToRgb(art.midtoneHex)[0] * (1 - (energy - 0.5) * 2) + hexToRgb(art.highlightHex)[0] * (energy - 0.5) * 2, hexToRgb(art.midtoneHex)[1] * (1 - (energy - 0.5) * 2) + hexToRgb(art.highlightHex)[1] * (energy - 0.5) * 2, hexToRgb(art.midtoneHex)[2] * (1 - (energy - 0.5) * 2) + hexToRgb(art.highlightHex)[2] * (energy - 0.5) * 2);
 
   const avg = (nativeR + nativeG + nativeB) * 0.333;
+  const boost = forVectorStroke ? 52 : 18;
   if (Math.max(nativeR, nativeG, nativeB) - Math.min(nativeR, nativeG, nativeB) > 12) {
     const scaleLum = forVectorStroke ? Math.max(0.55, energy) / Math.max(0.15, avg / 255.0) : 1.0;
-    return finalize((avg + (nativeR - avg) * 1.48) * scaleLum + edge * (forVectorStroke ? 52 : 18), (avg + (nativeG - avg) * 1.48) * scaleLum + edge * (forVectorStroke ? 52 : 18), (avg + (nativeB - avg) * 1.48) * scaleLum + edge * ((forVectorStroke ? 52 : 18) + 8));
+    return finalize((avg + (nativeR - avg) * 1.48) * scaleLum + edge * boost, (avg + (nativeG - avg) * 1.48) * scaleLum + edge * boost, (avg + (nativeB - avg) * 1.48) * scaleLum + edge * (boost + 10));
   }
   const baseV = (45 + energy * 210) * (forVectorStroke ? 1.0 : clip(lum * 1.35 + edge * 0.6, 0.04, 1.0));
   return finalize(baseV * 0.96, baseV * 0.98, baseV * 1.05);
@@ -362,7 +364,7 @@ function compileLexicalManifold(rawText: string): { tensor: Tensor5D; coeffs: Di
   const entropy = computeShannonEntropy(rawText);
   return {
     tensor: { energy: 0.75, chaos: 0.25, tone: 0.5, structure: 0.95, symmetry: 0.36 },
-    coeffs: { alpha: 1.0, beta: 0.5, gamma: 1.2, delta: 0.8, nHarmonic: 3, mHarmonic: 4, entropy, lyapunov: 0.45, eigenAnisotropy: 0.965 },
+    coeffs: { alpha: 1.0, beta: 0.5, gamma: 1.2, delta: 0.8, nHarmonic: 3, mHarmonic: 4, entropy, lyapunov: 0.45, eigenAnisotropy: 0.968 },
   };
 }
 
@@ -372,15 +374,11 @@ function gaussianBlurField(src: Float32Array, w: number, h: number, passes: numb
   for (let p = 0; p < passes; p++) {
     for (let y = 0; y < h; y++) {
       const row = y * w;
-      for (let x = 0; x < w; x++) {
-        temp[row + x] = (curr[row + Math.max(0, x - 2)] + 4 * curr[row + Math.max(0, x - 1)] + 6 * curr[row + x] + 4 * curr[row + Math.min(w - 1, x + 1)] + curr[row + Math.min(w - 1, x + 2)]) * 0.0625;
-      }
+      for (let x = 0; x < w; x++) temp[row + x] = (curr[row + Math.max(0, x - 2)] + 4 * curr[row + Math.max(0, x - 1)] + 6 * curr[row + x] + 4 * curr[row + Math.min(w - 1, x + 1)] + curr[row + Math.min(w - 1, x + 2)]) * 0.0625;
     }
     for (let y = 0; y < h; y++) {
       const ym2 = Math.max(0, y - 2) * w, ym1 = Math.max(0, y - 1) * w, y0 = y * w, yp1 = Math.min(h - 1, y + 1) * w, yp2 = Math.min(h - 1, y + 2) * w;
-      for (let x = 0; x < w; x++) {
-        curr[y0 + x] = (temp[ym2 + x] + 4 * temp[ym1 + x] + 6 * temp[y0 + x] + 4 * temp[yp1 + x] + temp[yp2 + x]) * 0.0625;
-      }
+      for (let x = 0; x < w; x++) curr[y0 + x] = (temp[ym2 + x] + 4 * temp[ym1 + x] + 6 * temp[y0 + x] + 4 * temp[yp1 + x] + temp[yp2 + x]) * 0.0625;
     }
   }
   return curr;
@@ -406,10 +404,6 @@ function simplifyDouglasPeucker(pts: {x: number, y: number}[], epsilon: number):
   }
 }
 
-// ==========================================
-// МАТЕМАТИЧЕСКОЕ ЯДРО 29.0: УЛЬТРА-ЧИСТАЯ АНАЛИТИКА + ДВОЙНОЙ ГИСТЕРЕЗИС КЭННИ
-// Никакого "песка" на асфальте, никаких пустых "макаронин" вокруг прутьев!
-// ==========================================
 function buildMatrixFromImage(img: HTMLImageElement, useFastMode: boolean): MatrixBuffer {
   const baseRes = useFastMode ? 600 : 920;
   const aspect = img.width / Math.max(1, img.height);
@@ -421,31 +415,17 @@ function buildMatrixFromImage(img: HTMLImageElement, useFastMode: boolean): Matr
   off.width = w; off.height = h;
   const octx = off.getContext("2d");
   const total = w * h;
-  
-  const lum = new Float32Array(total);
-  const depthMap = new Float32Array(total);
-  const coherence = new Float32Array(total);
-  const subjectAlpha = new Float32Array(total);
-  const fdog = new Float32Array(total);
-  const nmsRidge = new Float32Array(total);
-  const edge = new Float32Array(total);
-  const scaleMap = new Float32Array(total);
-  const gx = new Float32Array(total);
-  const gy = new Float32Array(total);
-  const etfX = new Float32Array(total);
-  const etfY = new Float32Array(total);
-  const mask = new Float32Array(total);
-  const strokes: ContourStroke[] = [];
-  const silkLoom: SilkStrand[] = [];
+  const lum = new Float32Array(total), depthMap = new Float32Array(total), coherence = new Float32Array(total), subjectAlpha = new Float32Array(total), fdog = new Float32Array(total), nmsRidge = new Float32Array(total), edge = new Float32Array(total), scaleMap = new Float32Array(total), gx = new Float32Array(total), gy = new Float32Array(total), etfX = new Float32Array(total), etfY = new Float32Array(total), mask = new Float32Array(total);
+  const strokes: ContourStroke[] = [], silkLoom: SilkStrand[] = [];
 
-  if (!octx) return { w, h, rgba: new Uint8ClampedArray(0), cleanRgba: new Uint8ClampedArray(0), lum, smoothLum: lum, depthMap, coherence, subjectAlpha, fdog, nmsRidge, edge, scaleMap, gx, gy, etfX, etfY, mask, strokes, silkLoom, meanAnisotropy: 0.9, charCenterU: 0.5, charCenterV: 0.5, headU: 0.5, headV: 0.35, headRx: 0.2, headRy: 0.2 };
+  if (!octx) return { w, h, rgba: new Uint8ClampedArray(0), licRgba: new Uint8ClampedArray(0), lum, smoothLum: lum, depthMap, coherence, subjectAlpha, fdog, nmsRidge, edge, scaleMap, gx, gy, etfX, etfY, mask, strokes, silkLoom, meanAnisotropy: 0.9, charCenterU: 0.5, charCenterV: 0.5, headU: 0.5, headV: 0.35, headRx: 0.2, headRy: 0.2 };
 
   octx.fillStyle = "#020104"; octx.fillRect(0, 0, w, h);
   const scale = Math.min(w / img.width, h / img.height);
   octx.drawImage(img, (w - img.width * scale) * 0.5, (h - img.height * scale) * 0.5, img.width * scale, img.height * scale);
 
   const rawRgba = octx.getImageData(0, 0, w, h).data;
-  const cleanRgba = new Uint8ClampedArray(rawRgba.length);
+  const licRgba = new Uint8ClampedArray(rawRgba.length);
   const rawLArr = new Float32Array(total);
 
   let minL = 1.0, maxL = 0.0;
@@ -465,57 +445,20 @@ function buildMatrixFromImage(img: HTMLImageElement, useFastMode: boolean): Matr
       const wx = Math.abs(nx) > 0.96 ? Math.max(0, Math.cos(((Math.abs(nx) - 0.96) / 0.04) * (Math.PI * 0.5))) : 1.0;
       const i = y * w + x;
       mask[i] = wx * wy;
-      lum[i] = Math.pow(clip((rawLArr[i] - minL) / spanL), 0.85) * mask[i]; // Немного темнее для контраста
+      lum[i] = Math.pow(clip((rawLArr[i] - minL) / spanL), 0.78) * mask[i];
     }
   }
 
-  // 1. ЖЕСТКОЕ УБИЙСТВО ШУМА: Анизотропный медианный/Kuwahara проход ДО выделения краев!
-  // Это уберет "песок" на асфальте и рябь, оставив только реальные контуры (прутья, кот).
-  const qBounds: [number, number, number, number][] = [[-2, 0, -2, 0], [0, 2, -2, 0], [-2, 0, 0, 2], [0, 2, 0, 2]];
-  for (let y = 2; y < h - 2; y++) {
-    for (let x = 2; x < w - 2; x++) {
-      const idx = y * w + x;
-      let bestVar = 1e9;
-      let bestL = lum[idx];
-      let bestR = rawRgba[idx*4], bestG = rawRgba[idx*4+1], bestB = rawRgba[idx*4+2];
+  const gNarrow = gaussianBlurField(lum, w, h, 1), gMedium = gaussianBlurField(lum, w, h, 3), smoothLum = gaussianBlurField(lum, w, h, 10), domeLum = gaussianBlurField(lum, w, h, 26);
 
-      for (let q = 0; q < 4; q++) {
-        const [x0, x1, y0, y1] = qBounds[q];
-        let sumL = 0, sumL2 = 0, sumR = 0, sumG = 0, sumB = 0;
-        for (let ky = y0; ky <= y1; ky++) {
-          const row = (y + ky) * w;
-          for (let kx = x0; kx <= x1; kx++) {
-            const nIdx = row + (x + kx);
-            const lVal = lum[nIdx];
-            sumL += lVal; sumL2 += lVal * lVal;
-            const np = nIdx * 4;
-            sumR += rawRgba[np]; sumG += rawRgba[np+1]; sumB += rawRgba[np+2];
-          }
-        }
-        const meanL = sumL / 9.0;
-        const variance = sumL2 / 9.0 - meanL * meanL;
-        if (variance < bestVar) {
-          bestVar = variance; bestL = meanL;
-          bestR = sumR/9.0; bestG = sumG/9.0; bestB = sumB/9.0;
-        }
-      }
-      // Переписываем карту яркости ОЧИЩЕННЫМИ значениями!
-      lum[idx] = bestL;
-      const p = idx*4;
-      cleanRgba[p] = bestR; cleanRgba[p+1] = bestG; cleanRgba[p+2] = bestB; cleanRgba[p+3] = 255;
-    }
+  for (let i = 0; i < total; i++) {
+    lum[i] = clip((lum[i] * (1.0 + (1.0 - smoothLum[i]) * 0.28) + (lum[i] - gMedium[i]) * 0.45) * mask[i]);
   }
-
-  const gNarrow = gaussianBlurField(lum, w, h, 1);
-  const gMedium = gaussianBlurField(lum, w, h, 3);
-  const smoothLum = gaussianBlurField(lum, w, h, 12);
-  const domeLum = gaussianBlurField(lum, w, h, 28);
 
   const j11 = new Float32Array(total), j12 = new Float32Array(total), j22 = new Float32Array(total);
   const rawGradMag = new Float32Array(total), stegerRidge = new Float32Array(total);
   let globalMaxEdge = 1e-5, globalMaxRidge = 1e-5;
 
-  // Тензор строится по ОЧИЩЕННОЙ карте яркости (без шума!)
   for (let y = 1; y < h - 1; y++) {
     for (let x = 1; x < w - 1; x++) {
       const idx = y * w + x;
@@ -553,25 +496,23 @@ function buildMatrixFromImage(img: HTMLImageElement, useFastMode: boolean): Matr
 
   const meanAnisotropy = Number((anisotropySum / Math.max(1, anisotropyCount)).toFixed(3));
 
-  // ПОРОГ ГИСТЕРЕЗИСА: Жестко убиваем шум, оставляем только сильные структурные линии
   const localEnv = gaussianBlurField(rawGradMag, w, h, 5);
-  const absFloor = globalMaxEdge * 0.045; // Увеличен порог отсечения фонового мусора!
+  const absFloor = globalMaxEdge * 0.02;
 
   for (let i = 0; i < total; i++) {
-    // Векторная линия теперь обязана иметь высокую анизотропию (coherence), чтобы быть линией, а не точкой шума!
-    const combined = Math.max(rawGradMag[i] * 0.8, (stegerRidge[i] / globalMaxRidge) * globalMaxEdge * 0.7) * (0.2 + 0.8 * coherence[i]);
-    edge[i] = combined < absFloor ? 0.0 : clip((combined - absFloor * 0.5) / Math.max(globalMaxEdge * 0.15, localEnv[i] * 1.5 + globalMaxEdge * 0.05));
+    const combined = Math.max(rawGradMag[i] * 0.75, (stegerRidge[i] / globalMaxRidge) * globalMaxEdge * 0.65);
+    edge[i] = combined < absFloor ? 0.0 : clip((combined - absFloor * 0.6) / Math.max(globalMaxEdge * 0.12, localEnv[i] * 1.85 + globalMaxEdge * 0.05));
   }
 
-  const edgeDensity = gaussianBlurField(edge, w, h, 8);
+  const edgeDensity = gaussianBlurField(edge, w, h, 6);
   let massSum = 1e-5, massU = 0, massV = 0, headMassSum = 1e-5, headSumU = 0, headSumV = 0;
 
   for (let y = 0; y < h; y++) {
     const vNorm = y / h, ny = vNorm - 0.5;
     for (let x = 0; x < w; x++) {
       const uNorm = x / w, i = y * w + x;
-      const crowding = edgeDensity[i] * 3.5 + (stegerRidge[i] / globalMaxRidge) * coherence[i] * 5.0;
-      scaleMap[i] = clip(1.0 / (0.85 + crowding), 0.15, 1.4);
+      const crowding = edgeDensity[i] * 3.2 + (stegerRidge[i] / globalMaxRidge) * coherence[i] * 4.5;
+      scaleMap[i] = clip(1.0 / (0.85 + crowding), 0.18, 1.25);
       depthMap[i] = clip((Math.max(0.2, 1.0 - (Math.pow(uNorm - 0.5, 2) * 1.2 + ny * ny * 1.1)) * 0.35 + domeLum[i] * 0.42 + Math.max(domeLum[i] - 0.08, smoothLum[i]) * 0.23)) * mask[i];
       
       const mWeight = edge[i] * mask[i];
@@ -589,35 +530,26 @@ function buildMatrixFromImage(img: HTMLImageElement, useFastMode: boolean): Matr
   const headU = headMassSum > 1.0 ? clip(headSumU / headMassSum, 0.22, 0.78) : charCenterU;
   const headV = headMassSum > 1.0 ? clip(headSumV / headMassSum, 0.18, 0.46) : Math.max(0.24, charCenterV - 0.16);
 
-  let headVarU = 0, headVarV = 0;
-  if (headMassSum > 1.0) {
-    for (let y = Math.floor(h * 0.1); y < Math.floor(h * 0.6); y += 2) {
-      const vNorm = y / h;
-      for (let x = Math.floor(w * 0.15); x < Math.floor(w * 0.85); x += 2) {
-        const uNorm = x / w;
-        const du = uNorm - headU;
-        const dv = vNorm - headV;
-        if (du * du + dv * dv < 0.09) {
-          const i = y * w + x;
-          const wgt = edge[i];
-          headVarU += Math.abs(du) * wgt;
-          headVarV += Math.abs(dv) * wgt;
-        }
-      }
+  // LIC Flow Optimization
+  const tempRgba = new Uint8ClampedArray(rawRgba.length);
+  for (let y = 2; y < h - 2; y++) {
+    for (let x = 2; x < w - 2; x++) {
+      const idx = y * w + x, p = idx * 4;
+      const xP = Math.min(w - 1, Math.max(0, Math.round(x + etfX[idx] * 1.4))), yP = Math.min(h - 1, Math.max(0, Math.round(y + etfY[idx] * 1.4)));
+      const xM = Math.min(w - 1, Math.max(0, Math.round(x - etfX[idx] * 1.4))), yM = Math.min(h - 1, Math.max(0, Math.round(y - etfY[idx] * 1.4)));
+      tempRgba[p] = Math.round(rawRgba[p] * 0.5 + (rawRgba[(yP * w + xP) * 4] + rawRgba[(yM * w + xM) * 4]) * 0.25);
+      tempRgba[p+1] = Math.round(rawRgba[p+1] * 0.5 + (rawRgba[(yP * w + xP) * 4 + 1] + rawRgba[(yM * w + xM) * 4 + 1]) * 0.25);
+      tempRgba[p+2] = Math.round(rawRgba[p+2] * 0.5 + (rawRgba[(yP * w + xP) * 4 + 2] + rawRgba[(yM * w + xM) * 4 + 2]) * 0.25);
+      tempRgba[p+3] = 255;
     }
   }
-  const headRx = clip((headVarU / Math.max(1, headMassSum)) * 2.3, 0.12, 0.28);
-  const headRy = clip((headVarV / Math.max(1, headMassSum)) * 2.5, 0.15, 0.32);
 
-  // FDoG: Широкая интеграция вдоль ETF для чистых, неразрывных линий (избавляет от рваных краев)
+  for (let i = 0; i < total; i++) { licRgba[i * 4] = tempRgba[i * 4]; licRgba[i * 4 + 1] = tempRgba[i * 4 + 1]; licRgba[i * 4 + 2] = tempRgba[i * 4 + 2]; licRgba[i * 4 + 3] = 255; }
+
   const rawXDoG = new Float32Array(total);
   for (let i = 0; i < total; i++) {
-    const diffFine = lum[i] - gNarrow[i];
-    const diffCoarse = gNarrow[i] - gMedium[i];
-    // Жестко отсекаем шум: XDoG работает только там, где есть высокая когерентность (настоящие линии)
-    const pSharp = 12.0 + 24.0 * coherence[i]; 
-    const dVal = lum[i] + (diffFine * 0.7 + diffCoarse * 0.3) * pSharp;
-    rawXDoG[i] = clip(dVal, 0.0, 1.0);
+    const dVal = lum[i] + (lum[i] - gNarrow[i]) * 0.68 * (18.0 + 16.0 * coherence[i]);
+    rawXDoG[i] = dVal >= 0.28 ? clip(0.65 + (dVal - 0.28) * 0.5, 0.0, 1.0) : clip(0.65 + 0.65 * Math.tanh(8.5 * (dVal - 0.28)), 0.0, 1.0);
   }
 
   for (let y = 4; y < h - 4; y++) {
@@ -625,7 +557,7 @@ function buildMatrixFromImage(img: HTMLImageElement, useFastMode: boolean): Matr
       const i = y * w + x;
       let acc = rawXDoG[i] * 0.38;
       for (let step = 1; step <= 2; step++) {
-        const dist = step * scaleMap[i] * 1.2;
+        const dist = step * scaleMap[i] * 1.15;
         const xp = Math.min(w - 1, Math.max(0, Math.round(x + etfX[i] * dist))), yp = Math.min(h - 1, Math.max(0, Math.round(y + etfY[i] * dist)));
         acc += rawXDoG[yp * w + xp] * (step === 1 ? 0.2 : 0.11);
       }
@@ -633,17 +565,26 @@ function buildMatrixFromImage(img: HTMLImageElement, useFastMode: boolean): Matr
     }
   }
 
-  // 1-PIXEL RIDGE DETECTION (Супер-строгий NMS для бритвенных линий)
+  const trueRidge = new Float32Array(total);
+  const subOffsetX = new Float32Array(total), subOffsetY = new Float32Array(total);
+
   for (let y = 2; y < h - 2; y++) {
     for (let x = 2; x < w - 2; x++) {
       const i = y * w + x;
-      const e0 = edge[i];
-      if (e0 < 0.05 || mask[i] < 0.05) continue; // Высокий порог гистерезиса!
+      if (mask[i] < 0.05) continue;
+      const r0 = (stegerRidge[i] / globalMaxRidge) * 0.72 + edge[i] * 0.28;
+      if (r0 < 0.036) continue;
+
       const nx = Math.round(gx[i]), ny = Math.round(gy[i]);
       if (nx === 0 && ny === 0) continue;
-      // Проверка по нормали: пиксель должен быть СТРОГИМ МАКСИМУМОМ
-      if (e0 >= edge[(y - ny) * w + x - nx] && e0 >= edge[(y + ny) * w + x + nx]) {
-        nmsRidge[i] = e0;
+      const rPrev = (stegerRidge[(y - ny) * w + (x - nx)] / globalMaxRidge) * 0.72 + edge[(y - ny) * w + (x - nx)] * 0.28;
+      const rNext = (stegerRidge[(y + ny) * w + (x + nx)] / globalMaxRidge) * 0.72 + edge[(y + ny) * w + (x + nx)] * 0.28;
+
+      if (r0 >= rPrev && r0 >= rNext) {
+        trueRidge[i] = clip(r0 * 1.45);
+        const denom = 2.0 * (rPrev - 2.0 * r0 + rNext);
+        const offset = Math.abs(denom) > 1e-4 ? clip((rPrev - rNext) / denom, -0.45, 0.45) : 0.0;
+        subOffsetX[i] = gx[i] * offset; subOffsetY[i] = gy[i] * offset;
       }
     }
   }
@@ -652,13 +593,9 @@ function buildMatrixFromImage(img: HTMLImageElement, useFastMode: boolean): Matr
   for (let y = 3; y < h - 3; y++) {
     for (let x = 3; x < w - 3; x++) {
       const i = y * w + x;
-      if (nmsRidge[i] < 0.05 || mask[i] < 0.05) continue;
-      
-      const uNorm = x / w, vNorm = y / h;
-      const inHeadBox = Math.hypot((uNorm - headU) / headRx, (vNorm - headV) / headRy) < 1.25;
-      
-      const tier: 0 | 1 | 2 | 4 = inHeadBox || (scaleMap[i] < 0.45 && nmsRidge[i] > 0.15) ? 0 : 2;
-      ridgeSeeds.push({ idx: i, score: nmsRidge[i] * (tier === 0 ? 1.5 : 1.0), tier });
+      if (trueRidge[i] < 0.05 || mask[i] < 0.05) continue;
+      const tier: 0 | 1 | 2 | 4 = scaleMap[i] < 0.52 && trueRidge[i] > 0.14 ? 0 : 2;
+      ridgeSeeds.push({ idx: i, score: trueRidge[i] * (tier === 0 ? 1.45 : 1.0), tier });
     }
   }
   ridgeSeeds.sort((a, b) => b.score - a.score);
@@ -666,32 +603,32 @@ function buildMatrixFromImage(img: HTMLImageElement, useFastMode: boolean): Matr
   const DIRS_8: [number, number][] = [[1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1], [0, -1], [1, -1]];
   const visited = new Uint8Array(total);
 
-  const traceExactPixelChain = (startIdx: number, dirSign: number, maxLen: number) => {
+  const traceTrueRidgeChain = (startIdx: number, dirSign: number, maxLen: number) => {
     const chain: { x: number; y: number }[] = [];
     let currIdx = startIdx, cx = currIdx % w, cy = Math.floor(currIdx / w);
     let prevDx = etfX[currIdx] * dirSign, prevDy = etfY[currIdx] * dirSign;
 
     for (let step = 0; step < maxLen; step++) {
       visited[currIdx] = 1;
-      chain.push({ x: cx + 0.5, y: cy + 0.5 });
+      chain.push({ x: cx + 0.5 + subOffsetX[currIdx], y: cy + 0.5 + subOffsetY[currIdx] });
       let bestNextIdx = -1, bestScore = -1.0, bestDx = 0, bestDy = 0;
 
       for (let d = 0; d < 8; d++) {
         const nx = cx + DIRS_8[d][0], ny = cy + DIRS_8[d][1];
         if (nx < 2 || nx >= w - 2 || ny < 2 || ny >= h - 2) continue;
         const nIdx = ny * w + nx;
-        if (visited[nIdx] || nmsRidge[nIdx] <= 0.04) continue;
+        if (visited[nIdx] || trueRidge[nIdx] <= 0.04) continue;
         const dLen = Math.hypot(DIRS_8[d][0], DIRS_8[d][1]);
         const ndx = DIRS_8[d][0] / dLen, ndy = DIRS_8[d][1] / dLen;
         const align = ndx * prevDx + ndy * prevDy;
-        if (align > 0.3) { // Увеличен порог коллинеарности: линии не будут закручиваться в спирали на шуме!
-          const score = align * 0.7 + nmsRidge[nIdx] * 0.3;
+        if (align > 0.2) {
+          const score = align * 0.65 + trueRidge[nIdx] * 0.35;
           if (score > bestScore) { bestScore = score; bestNextIdx = nIdx; bestDx = ndx; bestDy = ndy; }
         }
       }
       if (bestNextIdx === -1) break;
       currIdx = bestNextIdx; cx = currIdx % w; cy = Math.floor(currIdx / w);
-      prevDx = prevDx * 0.4 + bestDx * 0.6; prevDy = prevDy * 0.4 + bestDy * 0.6;
+      prevDx = prevDx * 0.35 + bestDx * 0.65; prevDy = prevDy * 0.35 + bestDy * 0.65;
       const norm = Math.hypot(prevDx, prevDy) + 1e-6; prevDx /= norm; prevDy /= norm;
     }
     return chain;
@@ -709,10 +646,12 @@ function buildMatrixFromImage(img: HTMLImageElement, useFastMode: boolean): Matr
       uArr[i] = curr[i].x / w; vArr[i] = curr[i].y / h;
       uSum += uArr[i]; vSum += vArr[i];
       const pxIdx = Math.min(h - 1, Math.max(0, Math.floor(curr[i].y))) * w + Math.min(w - 1, Math.max(0, Math.floor(curr[i].x)));
-      eSum += nmsRidge[pxIdx]; lSum += lum[pxIdx]; cohSum += coherence[pxIdx];
+      eSum += trueRidge[pxIdx]; lSum += lum[pxIdx]; cohSum += coherence[pxIdx];
       const p4 = pxIdx * 4;
-      rSum += cleanRgba[p4]; gSum += cleanRgba[p4 + 1]; bSum += cleanRgba[p4 + 2];
+      rSum += licRgba[p4]; gSum += licRgba[p4 + 1]; bSum += licRgba[p4 + 2];
     }
+    
+    // ДОБАВИЛ СВОЙСТВО speed ДЛЯ РЕШЕНИЯ TYPESCRIPT ОШИБКИ И СОВМЕСТИМОСТИ
     strokes.push({
       u: uArr, v: vArr, nx: new Float32Array(n), ny: new Float32Array(n), z: new Float32Array(n), nPts: n, tier,
       r: Math.round(rSum / n), g: Math.round(gSum / n), b: Math.round(bSum / n),
@@ -722,7 +661,7 @@ function buildMatrixFromImage(img: HTMLImageElement, useFastMode: boolean): Matr
     });
   };
 
-  const maxRidgeStrokes = useFastMode ? 4000 : 7000;
+  const maxRidgeStrokes = useFastMode ? 4800 : 8200;
   for (let i = 0; i < ridgeSeeds.length && strokes.length < maxRidgeStrokes; i++) {
     const seed = ridgeSeeds[i];
     if (visited[seed.idx]) continue;
@@ -734,20 +673,14 @@ function buildMatrixFromImage(img: HTMLImageElement, useFastMode: boolean): Matr
     visited[(sy + ny) * w + (sx + nx)] = 1;
     visited[(sy - ny) * w + (sx - nx)] = 1;
 
-    const back = traceExactPixelChain(seed.idx, -1, 85).reverse();
-    const fwd = traceExactPixelChain(seed.idx, 1, 85);
+    const back = traceTrueRidgeChain(seed.idx, -1, 95).reverse();
+    const fwd = traceTrueRidgeChain(seed.idx, 1, 95);
     const rawPts = [...back, ...(fwd.length > 1 ? fwd.slice(1) : [])];
-    if (rawPts.length < 5) continue; // Убрали короткие мусорные штрихи!
+    if (rawPts.length < 4) continue;
     packCornerLockedStroke(rawPts, seed.tier);
   }
 
-  strokes.sort((a, b) => {
-    const da = Math.hypot(a.centerU - charCenterU, a.centerV - charCenterV);
-    const db = Math.hypot(b.centerU - charCenterU, b.centerV - charCenterV);
-    return (da - db) * 0.45 + (b.importance - a.importance) * 0.55;
-  });
-
-  return { w, h, rgba: rawRgba, licRgba: cleanRgba, lum, smoothLum, depthMap, coherence, subjectAlpha: new Float32Array(total), fdog, nmsRidge, edge, scaleMap, gx, gy, etfX, etfY, mask, strokes, silkLoom, meanAnisotropy: 0.96, charCenterU, charCenterV, headU, headV, headRx: 0.2, headRy: 0.2 };
+  return { w, h, rgba: rawRgba, licRgba, lum, smoothLum, depthMap, coherence, subjectAlpha: new Float32Array(total), fdog: rawXDoG, nmsRidge: trueRidge, edge, scaleMap, gx, gy, etfX, etfY, mask, strokes, silkLoom, meanAnisotropy: 0.96, charCenterU, charCenterV, headU, headV, headRx: 0.2, headRy: 0.2 };
 }
 
 export default function BarrettEngine({ query, onSecureArtifact }: Props) {
@@ -775,8 +708,8 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
     edition: "SHINE_ON",
     posterFrame: true,
     strokeWeight: 0.55,
-    tonalVolumeDepth: 0.85,
-    cleanlinessGate: 0.28,
+    tonalVolumeDepth: 0.84,
+    cleanlinessGate: 0.24,
     contrastAndGlow: 0.82,
     shadowHex: "#18122b", midtoneHex: "#a855f7", highlightHex: "#fde047",
   });
@@ -784,7 +717,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
   const [isRecording, setIsRecording] = useState(false);
   const [isExportingGif, setIsExportingGif] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
-  const [fieldStatus, setFieldStatus] = useState<string>("INITIALIZING BARRETT 29.0 ULTRA-CLEAN CORE...");
+  const [fieldStatus, setFieldStatus] = useState<string>("INITIALIZING BARRETT 27.0 THE WALL...");
   const [candidateUrls, setCandidateUrls] = useState<string[]>([]);
   const [candidateIdx, setCandidateIdx] = useState<number>(0);
 
@@ -822,7 +755,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
   }, [animPromptInput, updateArt]);
 
   const loadMatrixFromUrl = useCallback((rawUrl: string, idx: number, total: number) => {
-    setFieldStatus("SOLVING NMS HYSTERESIS EDGES [" + String(idx + 1) + "/" + String(total) + "]...");
+    setFieldStatus("SOLVING NMS EDGES & XDoG CHIAROSCURO [" + String(idx + 1) + "/" + String(total) + "]...");
     const img = new Image();
     img.crossOrigin = "anonymous";
     img.onload = () => {
@@ -830,7 +763,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
       stateRef.current.matrix = buf;
       stateRef.current.traceProgress = stateRef.current.art.behavior === "PROGRESSIVE_PEN_DRAW" ? 0 : 1.0;
       stateRef.current.needsBaseRebuild = true;
-      setFieldStatus("LOCKED // " + String(buf.strokes.length) + " ULTRA-CLEAN VECTORS");
+      setFieldStatus("LOCKED // " + String(buf.strokes.length) + " EXACT VECTORS & LIC SHADING");
     };
     img.src = rawUrl.startsWith("data:") ? rawUrl : "/api/mutate?proxy=" + encodeURIComponent(rawUrl);
   }, []);
@@ -855,9 +788,6 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
     stateRef.current.needsBaseRebuild = true;
   }, [tensor, artConfig, promptCfg, topology]);
 
-  // ==========================================
-  // РЕНДЕР: ИДЕАЛЬНАЯ ЧИСТОТА И 100% СТАТИКА (NO JELLY)
-  // ==========================================
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -900,6 +830,10 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
           ctx.stroke();
         }
       }
+      for(let i=0; i<300; i++) {
+        ctx.fillStyle = `rgba(0,0,0,${Math.random() * 0.05})`;
+        ctx.fillRect(Math.random()*w, Math.random()*h, Math.random()*15, Math.random()*50);
+      }
     };
 
     const rebuildXDoGMasterPlateAndCache = (m: MatrixBuffer, art: ArtStudioConfig) => {
@@ -917,8 +851,6 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
           const shadow = m.lum[i] < 0.35 ? 0 : 255;
           plDst[p] = shadow; plDst[p+1] = shadow; plDst[p+2] = shadow; plDst[p+3] = 255 - shadow;
         } else {
-          // ИСПОЛЬЗУЕМ FDoG ДЛЯ ЧИСТОЙ ШТРИХОВКИ!
-          // Темные области остаются 100% прозрачными, чтобы был виден кастомный фон!
           const lightBody = m.lum[i] * (0.28 + 0.72 * xd);
           const alpha = smoothstep(art.cleanlinessGate * 0.42, 0.78, lightBody) * m.mask[i];
           const [colR, colG, colB] = resolveEditionColor(art, m.licRgba[p], m.licRgba[p+1], m.licRgba[p+2], m.lum[i], tr, 0.5, false, true);
@@ -1025,7 +957,6 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
 
           ctx.beginPath();
           for (let k = 0; k <= fullIdx; k++) {
-            // КООРДИНАТЫ 100% СТАТИЧНЫ! Никаких синусоид и желе!
             const [wu, wv] = applyScarfeWarp(st.u[k], st.v[k]);
             const curX = ox + wu * drawW;
             const curY = oy + wv * drawH;
@@ -1041,7 +972,6 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
           ctx.lineWidth = Math.max(0.2, lineW);
           ctx.stroke();
 
-          // ОПТИЧЕСКОЕ СКОЛЬЖЕНИЕ СВЕТА ВДОЛЬ СТАТИЧНЫХ ЛИНИЙ
           if (art.behavior === "OPTICAL_LIGHT_GLIDE" && prCfg.lightGlideSpeed > 0.05 && st.tier === 1 && fullIdx >= 10 && !isScarfe) {
             const span = Math.max(3, Math.floor(st.nPts * 0.22));
             const headK = Math.floor(((s.time * prCfg.lightGlideSpeed + st.phase) % 1.4) * st.nPts);
@@ -1069,6 +999,106 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
     animId = requestAnimationFrame(render);
     return () => cancelAnimationFrame(animId);
   }, [query]);
+
+  const handleDownloadSnapshot = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const dataUrl = canvas.toDataURL("image/png", 1.0);
+    const a = document.createElement("a");
+    a.href = dataUrl;
+    a.download = "barrett-poster-" + String(Date.now()) + ".png";
+    a.click();
+  };
+
+  const handleExportAnimatedGif = () => {
+    const srcCanvas = canvasRef.current;
+    if (!srcCanvas || isExportingGif) return;
+    setIsExportingGif(true);
+
+    const gifW = 420;
+    const gifH = Math.round((srcCanvas.height / Math.max(1, srcCanvas.width)) * gifW);
+    const recCanvas = document.createElement("canvas");
+    recCanvas.width = gifW;
+    recCanvas.height = gifH;
+    const rCtx = recCanvas.getContext("2d");
+
+    if (!rCtx) {
+      setIsExportingGif(false);
+      return;
+    }
+
+    const frames: ImageData[] = [];
+    const totalFrames = 32;
+    let captured = 0;
+
+    const captureStep = () => {
+      stateRef.current.time += 0.045;
+      rCtx.drawImage(srcCanvas, 0, 0, gifW, gifH);
+      frames.push(rCtx.getImageData(0, 0, gifW, gifH));
+      captured++;
+
+      if (captured < totalFrames) {
+        setTimeout(captureStep, 45);
+      } else {
+        try {
+          const blob = encodeAnimatedGIF89a(frames, gifW, gifH, 5);
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = "barrett-artifact-" + String(Date.now()) + ".gif";
+          a.click();
+          URL.revokeObjectURL(url);
+        } catch (err) {
+          console.error("GIF encoding error:", err);
+        }
+        setIsExportingGif(false);
+      }
+    };
+
+    captureStep();
+  };
+
+  const handleRecordWebm = () => {
+    const canvas = canvasRef.current as (HTMLCanvasElement & { captureStream?: (fps?: number) => MediaStream }) | null;
+    if (!canvas || !canvas.captureStream || isRecording) return;
+    try {
+      const stream = canvas.captureStream(60);
+      const recorder = new MediaRecorder(stream, {
+        mimeType: MediaRecorder.isTypeSupported("video/webm;codecs=vp9")
+          ? "video/webm;codecs=vp9"
+          : "video/webm",
+      });
+      const chunks: BlobPart[] = [];
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) chunks.push(e.data);
+      };
+      recorder.onstop = () => {
+        const blob = new Blob(chunks, { type: "video/webm" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "barrett-manifold-" + String(Date.now()) + ".webm";
+        a.click();
+        URL.revokeObjectURL(url);
+        setIsRecording(false);
+      };
+      setIsRecording(true);
+      recorder.start();
+      setTimeout(() => {
+        if (recorder.state === "recording") recorder.stop();
+      }, 5000);
+    } catch (e) {
+      console.error("WebM capture failed:", e);
+      setIsRecording(false);
+    }
+  };
+
+  const handleSecureToArchive = () => {
+    const canvas = canvasRef.current;
+    if (!canvas || !onSecureArtifact) return;
+    const dataUrl = canvas.toDataURL("image/jpeg", 0.94);
+    onSecureArtifact(dataUrl, "[BARRETT] " + (query || "CRAZY DIAMOND"));
+  };
 
   return (
     <div className="w-full max-w-[1600px] mx-auto mb-16 grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
@@ -1153,7 +1183,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
 
              <div className="flex flex-col gap-0.5">
                <div className="flex justify-between text-neutral-400">
-                 <span>Tonal Chiaroscuro Volume (XDoG)</span>
+                 <span>Tonal Chiaroscuro Volume (LIC)</span>
                  <span className="text-[#a855f7]">{Math.round(artConfig.tonalVolumeDepth * 100)}%</span>
                </div>
                <input type="range" min="0.0" max="0.98" step="0.02" value={artConfig.tonalVolumeDepth} onChange={(e) => updateArt("tonalVolumeDepth", parseFloat(e.target.value))} className="w-full accent-white cursor-pointer h-1 bg-white/10 rounded-lg" />
@@ -1175,6 +1205,17 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
                <input type="range" min="0.1" max="1.0" step="0.02" value={artConfig.contrastAndGlow} onChange={(e) => updateArt("contrastAndGlow", parseFloat(e.target.value))} className="w-full accent-white cursor-pointer h-1 bg-white/10 rounded-lg" />
              </div>
           </div>
+        </div>
+
+        <div className="flex flex-col gap-2 pt-2.5 border-t border-white/10">
+          <div className="grid grid-cols-2 gap-2">
+            <button type="button" onClick={handleDownloadSnapshot} className="btn-elegant !py-2 justify-center text-[9px]">Download PNG</button>
+            <button type="button" disabled={isExportingGif} onClick={handleExportAnimatedGif} className="btn-elegant !py-2 justify-center border-[#10b981]/60 text-[#10b981] text-[9px]">{isExportingGif ? "Encoding GIF..." : "Export Animated GIF"}</button>
+          </div>
+          <button type="button" disabled={isRecording} onClick={handleRecordWebm} className="btn-elegant w-full !py-2 justify-center border-[#a855f7]/50 text-[#a855f7]">{isRecording ? "Recording 60FPS Loop (5s)..." : "Export 5s WebM Video Loop"}</button>
+          {onSecureArtifact && (
+            <button type="button" onClick={handleSecureToArchive} style={{ backgroundColor: "#ffffff", color: "#000000" }} className="btn-elegant w-full !py-2 justify-center font-bold">Secure to Saved Resonance</button>
+          )}
         </div>
       </div>
     </div>

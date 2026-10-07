@@ -5,6 +5,11 @@ import React, { useEffect, useRef, useState, useCallback } from "react";
 type ToolType = "PAN" | "PEN" | "ERASER" | "LINE" | "RECTANGLE" | "ELLIPSE" | "PICKER";
 type FilterType = "NONE" | "GRAYSCALE" | "SEPIA" | "INVERT" | "BLUR";
 
+interface Props {
+  query?: string;
+  onSecureArtifact?: (dataUrl: string, title: string) => void | Promise<void>;
+}
+
 interface ViewportState {
   offsetX: number;
   offsetY: number;
@@ -21,7 +26,7 @@ interface EditorConfig {
   activeFilter: FilterType;
 }
 
-// --- ИКОНКИ (Встроенные SVG для независимости от библиотек) ---
+// --- ИКОНКИ (Встроенные SVG) ---
 const Icons = {
   Pan: () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M5 9l-3 3 3 3M9 5l3-3 3 3M19 9l3 3-3 3M9 19l3 3 3-3M2 12h20M12 2v20"/></svg>,
   Pen: () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/><path d="M2 2l7.58 7.58"/></svg>,
@@ -35,7 +40,9 @@ const Icons = {
   Upload: () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>,
 };
 
-export default function OmniGraphicEditor() {
+function clip(v: number, min = 0.0, max = 1.0): number { return Math.max(min, Math.min(max, v)); }
+
+export default function BarrettEngine({ query, onSecureArtifact }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -66,7 +73,7 @@ export default function OmniGraphicEditor() {
   const isPanning = useRef(false);
   const startPos = useRef({ x: 0, y: 0 });
   const lastPos = useRef({ x: 0, y: 0 });
-  const snapshot = useRef<ImageData | null>(null); // Для превью фигур в реальном времени
+  const snapshot = useRef<ImageData | null>(null);
 
   // 1. ИНИЦИАЛИЗАЦИЯ ХОЛСТА И ЦЕНТРИРОВАНИЕ
   useEffect(() => {
@@ -74,22 +81,18 @@ export default function OmniGraphicEditor() {
     const container = containerRef.current;
     if (!canvas || !container) return;
     
-    // Устанавливаем физический размер холста (разрешение)
     canvas.width = config.canvasWidth;
     canvas.height = config.canvasHeight;
     
     const ctx = canvas.getContext("2d", { willReadFrequently: true });
     if (!ctx) return;
     
-    // Заливаем прозрачным (черным) фоном по умолчанию
     ctx.fillStyle = "#000000";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     
-    // Центрируем камеру
     const cx = (container.clientWidth - config.canvasWidth) / 2;
     const cy = (container.clientHeight - config.canvasHeight) / 2;
     
-    // Подстраиваем масштаб, чтобы холст помещался в окно
     const scale = Math.min(
       (container.clientWidth - 100) / config.canvasWidth,
       (container.clientHeight - 100) / config.canvasHeight,
@@ -97,12 +100,9 @@ export default function OmniGraphicEditor() {
     );
 
     setViewport({ offsetX: cx, offsetY: cy, scale });
-    
-    // Сохраняем чистое состояние в историю
     saveHistoryState();
   }, [config.canvasWidth, config.canvasHeight]);
 
-  // Утилита: перевод экранных координат мыши в локальные координаты холста (с учетом зума и панорамирования)
   const getCanvasCoordinates = (clientX: number, clientY: number) => {
     const canvas = canvasRef.current;
     if (!canvas) return { x: 0, y: 0 };
@@ -113,13 +113,12 @@ export default function OmniGraphicEditor() {
     };
   };
 
-  // 2. УПРАВЛЕНИЕ ИСТОРИЕЙ (Стэк ImageData)
+  // 2. УПРАВЛЕНИЕ ИСТОРИЕЙ
   const saveHistoryState = () => {
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext("2d", { willReadFrequently: true });
     if (!canvas || !ctx) return;
 
-    // Обрезаем ветку Redo, если сделали новое действие после Undo
     if (historyIndex.current < historyStack.current.length - 1) {
       historyStack.current = historyStack.current.slice(0, historyIndex.current + 1);
     }
@@ -127,7 +126,6 @@ export default function OmniGraphicEditor() {
     const currentFrame = ctx.getImageData(0, 0, canvas.width, canvas.height);
     historyStack.current.push(currentFrame);
     
-    // Ограничиваем историю 50 шагами для экономии памяти
     if (historyStack.current.length > 50) {
       historyStack.current.shift();
     } else {
@@ -162,7 +160,6 @@ export default function OmniGraphicEditor() {
     setCanRedo(historyIndex.current < historyStack.current.length - 1);
   };
 
-  // Хоткеи для отмены (Ctrl+Z, Ctrl+Y)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
@@ -179,7 +176,6 @@ export default function OmniGraphicEditor() {
 
   // 3. МЫШЬ И РИСОВАНИЕ
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    // Средняя кнопка мыши (колесико) всегда вызывает панорамирование
     if (e.button === 1 || tool === "PAN" || e.altKey || e.shiftKey) {
       isPanning.current = true;
       startPos.current = { x: e.clientX - viewport.offsetX, y: e.clientY - viewport.offsetY };
@@ -196,14 +192,12 @@ export default function OmniGraphicEditor() {
     startPos.current = pos;
     lastPos.current = pos;
 
-    // Сохраняем слепок холста для превью фигур
     snapshot.current = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
     ctx.lineWidth = config.lineWidth;
     
-    // Настройка кисти или ластика
     if (tool === "ERASER") {
       ctx.globalCompositeOperation = "destination-out";
       ctx.strokeStyle = "rgba(0,0,0,1)";
@@ -239,7 +233,6 @@ export default function OmniGraphicEditor() {
 
     const pos = getCanvasCoordinates(e.clientX, e.clientY);
 
-    // Логика для карандаша / ластика
     if (tool === "PEN" || tool === "ERASER") {
       ctx.beginPath();
       ctx.moveTo(lastPos.current.x, lastPos.current.y);
@@ -247,7 +240,6 @@ export default function OmniGraphicEditor() {
       ctx.stroke();
       lastPos.current = pos;
     } 
-    // Логика для геометрических фигур (восстанавливаем слепок и рисуем поверх)
     else if (snapshot.current) {
       ctx.putImageData(snapshot.current, 0, 0);
       ctx.beginPath();
@@ -288,14 +280,14 @@ export default function OmniGraphicEditor() {
       isDrawing.current = false;
       const ctx = canvasRef.current?.getContext("2d");
       if (ctx) {
-        ctx.globalCompositeOperation = "source-over"; // Сброс ластика
+        ctx.globalCompositeOperation = "source-over";
         ctx.globalAlpha = 1.0;
-        saveHistoryState(); // Сохраняем финальный мазок/фигуру
+        saveHistoryState();
       }
     }
   };
 
-  // 4. МАСШТАБИРОВАНИЕ КОЛЕСИКОМ МЫШИ (Зум в точку курсора)
+  // 4. МАСШТАБИРОВАНИЕ
   const handleWheel = (e: React.WheelEvent<HTMLDivElement>) => {
     e.preventDefault();
     const zoomSensitivity = 0.001;
@@ -304,7 +296,6 @@ export default function OmniGraphicEditor() {
     setViewport(prev => {
       let newScale = clip(prev.scale * (1 + delta), 0.1, 10.0);
       
-      // Вычисляем смещение, чтобы зум происходил относительно курсора
       const rect = containerRef.current?.getBoundingClientRect();
       if (!rect) return prev;
       
@@ -318,13 +309,12 @@ export default function OmniGraphicEditor() {
     });
   };
 
-  // 5. ИНСТРУМЕНТЫ И ФИЛЬТРЫ
+  // 5. ИНСТРУМЕНТЫ, ФИЛЬТРЫ И ЭКСПОРТ
   const applyFilter = (filterType: FilterType) => {
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext("2d", { willReadFrequently: true });
     if (!canvas || !ctx) return;
 
-    // Трюк с временным холстом для применения CSS-фильтров прямо в пиксели
     const tempCanvas = document.createElement("canvas");
     tempCanvas.width = canvas.width;
     tempCanvas.height = canvas.height;
@@ -332,7 +322,6 @@ export default function OmniGraphicEditor() {
     if (!tempCtx) return;
 
     tempCtx.drawImage(canvas, 0, 0);
-
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     
     switch(filterType) {
@@ -344,7 +333,7 @@ export default function OmniGraphicEditor() {
     }
 
     ctx.drawImage(tempCanvas, 0, 0);
-    ctx.filter = "none"; // Сброс фильтра для будущих кистей
+    ctx.filter = "none";
     saveHistoryState();
     setConfig(prev => ({ ...prev, activeFilter: filterType }));
   };
@@ -370,14 +359,12 @@ export default function OmniGraphicEditor() {
         const ctx = canvas?.getContext("2d", { willReadFrequently: true });
         if (!canvas || !ctx) return;
         
-        // Подгоняем холст под размер картинки
         canvas.width = img.width;
         canvas.height = img.height;
         setConfig(prev => ({ ...prev, canvasWidth: img.width, canvasHeight: img.height }));
         
         ctx.drawImage(img, 0, 0);
         
-        // Пересчет позиции (центрирование)
         const container = containerRef.current;
         if (container) {
            const scale = Math.min((container.clientWidth - 100) / img.width, (container.clientHeight - 100) / img.height, 1);
@@ -387,7 +374,6 @@ export default function OmniGraphicEditor() {
              scale
            });
         }
-
         saveHistoryState();
       };
       img.src = event.target?.result as string;
@@ -405,11 +391,18 @@ export default function OmniGraphicEditor() {
     link.click();
   };
 
-  // --- ИНТЕРФЕЙС ---
+  const handleSecureToArchive = () => {
+    const canvas = canvasRef.current;
+    if (!canvas || !onSecureArtifact) return;
+    const dataUrl = canvas.toDataURL("image/png");
+    const safeTitle = query ? query : "Custom Graphic Art";
+    onSecureArtifact(dataUrl, `[OMNI] ${safeTitle}`);
+  };
+
   return (
-    <div className="flex flex-col h-screen bg-[#0a0a0c] text-neutral-300 font-sans text-sm overflow-hidden select-none">
+    <div className="flex flex-col h-screen max-h-[85vh] bg-[#0a0a0c] text-neutral-300 font-sans text-sm overflow-hidden select-none border border-white/10 rounded-2xl">
       
-      {/* HEADER (Топбар) */}
+      {/* HEADER */}
       <header className="h-14 bg-[#141417] border-b border-white/5 flex items-center justify-between px-4 z-10 shrink-0 shadow-md">
         <div className="flex items-center gap-4">
           <div className="font-bold text-white tracking-wider flex items-center gap-2">
@@ -454,7 +447,7 @@ export default function OmniGraphicEditor() {
 
       <div className="flex flex-1 overflow-hidden">
         
-        {/* LEFT SIDEBAR (Инструменты) */}
+        {/* LEFT SIDEBAR */}
         <aside className="w-16 bg-[#141417] border-r border-white/5 flex flex-col items-center py-4 gap-2 z-10 shrink-0">
           {(
             [
@@ -482,7 +475,6 @@ export default function OmniGraphicEditor() {
           
           <div className="w-8 h-px bg-white/10 my-2"></div>
           
-          {/* Палитра цветов */}
           <div className="relative group w-8 h-8 rounded-full border-2 border-white/20 overflow-hidden cursor-pointer shadow-inner">
             <input 
               type="color" 
@@ -493,11 +485,10 @@ export default function OmniGraphicEditor() {
           </div>
         </aside>
 
-        {/* СЕРЕДИНА: РАБОЧАЯ ОБЛАСТЬ CANVAS */}
+        {/* WORKSPACE */}
         <main 
           ref={containerRef}
           className="flex-1 bg-[#1a1a1f] relative overflow-hidden"
-          // Шахматный фон для прозрачности рисуется через CSS паттерн
           style={{
             backgroundImage: `linear-gradient(45deg, #222 25%, transparent 25%), linear-gradient(-45deg, #222 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #222 75%), linear-gradient(-45deg, transparent 75%, #222 75%)`,
             backgroundSize: `20px 20px`,
@@ -520,17 +511,16 @@ export default function OmniGraphicEditor() {
           >
             <canvas
               ref={canvasRef}
-              className="block w-full h-full pointer-events-none" // События ловит контейнер main
+              className="block w-full h-full pointer-events-none"
             />
           </div>
         </main>
 
-        {/* RIGHT SIDEBAR (Свойства и Фильтры) */}
+        {/* RIGHT SIDEBAR */}
         <aside className="w-64 bg-[#141417] border-l border-white/5 flex flex-col z-10 shrink-0 overflow-y-auto">
           
           <div className="p-4 border-b border-white/5">
             <h3 className="text-xs font-bold text-white uppercase tracking-wider mb-4">Properties</h3>
-            
             <div className="space-y-4">
               <div>
                 <div className="flex justify-between text-xs mb-2">
@@ -583,6 +573,14 @@ export default function OmniGraphicEditor() {
           </div>
 
           <div className="p-4 mt-auto">
+            {onSecureArtifact && (
+              <button 
+                onClick={handleSecureToArchive}
+                className="w-full mb-3 py-2.5 rounded-lg bg-white text-black hover:bg-neutral-200 text-xs font-bold transition-colors shadow-sm"
+              >
+                Secure to Saved Resonance
+              </button>
+            )}
             <button 
               onClick={clearCanvas}
               className="w-full py-2.5 rounded-lg border border-red-500/30 text-red-400 hover:bg-red-500/10 text-xs font-medium transition-colors"

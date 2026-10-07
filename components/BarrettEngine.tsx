@@ -28,7 +28,7 @@ interface CanvasLayer {
   stroke?: string;
   strokeWidth?: number;
   cornerRadius?: number;
-  sides?: number; // Для полигонов и звезд
+  sides?: number; 
   
   // Effects
   shadowColor?: string; shadowBlur?: number; shadowOffsetX?: number; shadowOffsetY?: number;
@@ -36,7 +36,9 @@ interface CanvasLayer {
 
   // Image Specifics
   imageObj?: HTMLImageElement;
+  originalImageObj?: HTMLImageElement; 
   originalImageData?: ImageData; 
+  bgTolerance?: number; 
   brightness?: number; contrast?: number; saturation?: number; hue?: number; sepia?: number; grayscale?: number; invert?: number;
   
   // Path Specifics
@@ -77,6 +79,8 @@ const Icons = {
   AlignLeft: () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="21" y1="6" x2="3" y2="6"/><line x1="15" y1="12" x2="3" y2="12"/><line x1="17" y1="18" x2="3" y2="18"/></svg>,
   AlignCenter: () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="21" y1="6" x2="3" y2="6"/><line x1="19" y1="12" x2="5" y2="12"/><line x1="17" y1="18" x2="7" y2="18"/></svg>,
   AlignRight: () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="21" y1="6" x2="3" y2="6"/><line x1="21" y1="12" x2="9" y2="12"/><line x1="21" y1="18" x2="7" y2="18"/></svg>,
+  Up: () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="18 15 12 9 6 15"/></svg>,
+  Down: () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 9 12 15 18 9"/></svg>,
 };
 
 const FONTS = [
@@ -156,7 +160,11 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
       newLayers.forEach(nl => {
         if (nl.type === "IMAGE") {
           const old = prevLayers.find(pl => pl.id === nl.id);
-          if (old && old.imageObj) { nl.imageObj = old.imageObj; nl.originalImageData = old.originalImageData; }
+          if (old && old.imageObj) { 
+            nl.imageObj = old.imageObj; 
+            nl.originalImageObj = old.originalImageObj;
+            nl.originalImageData = old.originalImageData; 
+          }
         }
       });
       state.layers = newLayers;
@@ -174,7 +182,11 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
       newLayers.forEach(nl => {
         if (nl.type === "IMAGE") {
           const old = prevLayers.find(pl => pl.id === nl.id);
-          if (old && old.imageObj) { nl.imageObj = old.imageObj; nl.originalImageData = old.originalImageData; }
+          if (old && old.imageObj) { 
+            nl.imageObj = old.imageObj; 
+            nl.originalImageObj = old.originalImageObj;
+            nl.originalImageData = old.originalImageData; 
+          }
         }
       });
       state.layers = newLayers;
@@ -211,41 +223,41 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
   // ==========================================
   // MAGIC ERASER (CHROMA KEY / BACKGROUND REMOVAL)
   // ==========================================
-  const applyMagicEraser = (layer: CanvasLayer, targetColorHex: string, tolerance: number) => {
-    if (!layer.originalImageData) return;
+  const applyChromaKey = (layer: CanvasLayer, tolerance: number) => {
+    if (!layer.originalImageObj) return;
     
+    if (tolerance <= 0) {
+      layer.imageObj = layer.originalImageObj;
+      syncUI();
+      return;
+    }
+
     const cvs = document.createElement('canvas');
-    cvs.width = layer.width; 
-    cvs.height = layer.height;
+    cvs.width = layer.originalImageObj.width; 
+    cvs.height = layer.originalImageObj.height;
     const ctx = cvs.getContext('2d')!;
+    ctx.drawImage(layer.originalImageObj, 0, 0);
     
-    // Восстанавливаем оригинальные пиксели перед новым вырезанием
-    ctx.putImageData(layer.originalImageData, 0, 0);
+    const imgData = ctx.getImageData(0, 0, cvs.width, cvs.height);
+    const data = imgData.data;
     
-    if (tolerance > 0) {
-      const imgData = ctx.getImageData(0, 0, cvs.width, cvs.height);
-      const data = imgData.data;
+    // Берем цвет пикселя в левом верхнем углу за фон
+    const bgR = data[0], bgG = data[1], bgB = data[2];
+    
+    for (let i = 0; i < data.length; i += 4) {
+      const dr = data[i] - bgR;
+      const dg = data[i + 1] - bgG;
+      const db = data[i + 2] - bgB;
+      const distance = Math.sqrt(dr * dr + dg * dg + db * db);
       
-      const hex = targetColorHex.replace('#', '');
-      const bgR = parseInt(hex.substring(0, 2), 16);
-      const bgG = parseInt(hex.substring(2, 4), 16);
-      const bgB = parseInt(hex.substring(4, 6), 16);
-      
-      for (let i = 0; i < data.length; i += 4) {
-        const dr = data[i] - bgR;
-        const dg = data[i + 1] - bgG;
-        const db = data[i + 2] - bgB;
-        const distance = Math.sqrt(dr * dr + dg * dg + db * db);
-        
-        if (distance < tolerance) {
-          data[i + 3] = 0; 
-        } else if (distance < tolerance + 20) {
-          data[i + 3] = ((distance - tolerance) / 20) * 255;
-        }
+      if (distance < tolerance) {
+        data[i + 3] = 0; 
+      } else if (distance < tolerance + 15) {
+        data[i + 3] = ((distance - tolerance) / 15) * 255;
       }
-      ctx.putImageData(imgData, 0, 0);
     }
     
+    ctx.putImageData(imgData, 0, 0);
     const newImg = new Image();
     newImg.onload = () => {
       layer.imageObj = newImg;
@@ -284,7 +296,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
       ctx.translate(state.viewport.x, state.viewport.y);
       ctx.scale(state.viewport.scale, state.viewport.scale);
 
-      // Artboard
+      // Artboard shadow
       ctx.shadowColor = "rgba(0,0,0,0.5)";
       ctx.shadowBlur = 40;
       ctx.fillStyle = canvasBgColor;
@@ -336,6 +348,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
         ctx.lineCap = "round";
         ctx.lineJoin = "round";
 
+        // ОТРИСОВКА ФИГУР 
         if (layer.type === "RECTANGLE") {
           ctx.beginPath();
           if (layer.cornerRadius && (ctx as any).roundRect) {
@@ -415,7 +428,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
           ctx.drawImage(layer.imageObj, layer.x, layer.y, layer.width, layer.height);
         }
         else if (layer.type === "TEXT" && layer.text) {
-          ctx.font = `${layer.fontWeight || "normal"} ${layer.fontSize}px ${layer.fontFamily || "Inter"}`;
+          ctx.font = `${layer.fontWeight || "normal"} ${layer.fontSize}px ${layer.fontFamily || "Inter, sans-serif"}`;
           ctx.fillStyle = layer.fill || "#ffffff";
           ctx.textBaseline = "top";
           ctx.textAlign = layer.textAlign || "left";
@@ -444,7 +457,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
 
         ctx.restore();
 
-        // 5. Отрисовка Bounding Box (Выделение + Rotation Handle)
+        // 5. Отрисовка Bounding Box (Выделение)
         if (state.selectedId === layer.id && !layer.locked) {
           ctx.save();
           ctx.translate(cx, cy);
@@ -528,7 +541,6 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
         if (layer && !layer.locked && layer.visible) {
           const hSize = 12 / state.viewport.scale;
           
-          // Простая эвристика вращения (верхний маркер) - без учета текущего угла для простоты старта
           const rotHX = layer.x + layer.width/2;
           const rotHY = layer.y - 25 / state.viewport.scale;
           
@@ -740,7 +752,6 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
           imgW *= ratio; imgH *= ratio;
         }
 
-        // Сохраняем ImageData для магии вырезания фона
         const cvs = document.createElement('canvas');
         cvs.width = img.width; cvs.height = img.height;
         const ctx = cvs.getContext('2d')!;
@@ -791,6 +802,9 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
     const layer = engine.current.layers.find(l => l.id === engine.current.selectedId);
     if (layer) {
       Object.assign(layer, updates);
+      if (layer.type === "IMAGE" && updates.bgTolerance !== undefined) {
+        applyChromaKey(layer, updates.bgTolerance);
+      }
       syncUI();
     }
   };
@@ -865,8 +879,8 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
       else if (layer.type === "ELLIPSE") { ctx.beginPath(); ctx.ellipse(layer.x + layer.width/2, layer.y + layer.height/2, Math.abs(layer.width/2), Math.abs(layer.height/2), 0, 0, Math.PI * 2); if (layer.fill && layer.fill !== "transparent") ctx.fill(); if (layer.strokeWidth) ctx.stroke(); }
       else if (layer.type === "POLYGON") { ctx.beginPath(); const sides = layer.sides || 3; const r = Math.min(Math.abs(layer.width), Math.abs(layer.height)) / 2; const centerX = layer.x + layer.width/2; const centerY = layer.y + layer.height/2; for (let i = 0; i < sides; i++) { const a = (Math.PI * 2 * i) / sides - Math.PI / 2; if (i === 0) ctx.moveTo(centerX + r * Math.cos(a), centerY + r * Math.sin(a)); else ctx.lineTo(centerX + r * Math.cos(a), centerY + r * Math.sin(a)); } ctx.closePath(); if (layer.fill && layer.fill !== "transparent") ctx.fill(); if (layer.strokeWidth) ctx.stroke(); }
       else if (layer.type === "STAR") { ctx.beginPath(); const points = layer.sides || 5; const outerR = Math.min(Math.abs(layer.width), Math.abs(layer.height)) / 2; const innerR = outerR * 0.4; const centerX = layer.x + layer.width/2; const centerY = layer.y + layer.height/2; for (let i = 0; i < points * 2; i++) { const r = i % 2 === 0 ? outerR : innerR; const a = (Math.PI * i) / points - Math.PI / 2; if (i === 0) ctx.moveTo(centerX + r * Math.cos(a), centerY + r * Math.sin(a)); else ctx.lineTo(centerX + r * Math.cos(a), centerY + r * Math.sin(a)); } ctx.closePath(); if (layer.fill && layer.fill !== "transparent") ctx.fill(); if (layer.strokeWidth) ctx.stroke(); }
-      else if (layer.type === "ARROW") { ctx.beginPath(); const hw = layer.strokeWidth || 4; const headL = Math.max(15, hw * 3); const headW = Math.max(15, hw * 3); const p1 = {x: layer.x, y: layer.y + layer.height/2}; const p2 = {x: layer.x + layer.width, y: layer.y + layer.height/2}; const angle = Math.atan2(p2.y - p1.y, p2.x - p1.x); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke(); ctx.fillStyle = ctx.strokeStyle; ctx.beginPath(); ctx.moveTo(p2.x, p2.y); ctx.lineTo(p2.x - headL * Math.cos(angle - Math.PI/6), p2.y - headW * Math.sin(angle - Math.PI/6)); ctx.lineTo(p2.x - headL * Math.cos(angle + Math.PI/6), p2.y - headW * Math.sin(angle + Math.PI/6)); ctx.closePath(); ctx.fill(); }
       else if (layer.type === "LINE") { ctx.beginPath(); ctx.moveTo(layer.x, layer.y); ctx.lineTo(layer.x + layer.width, layer.y + layer.height); if (layer.strokeWidth) ctx.stroke(); }
+      else if (layer.type === "ARROW") { ctx.beginPath(); const hw = layer.strokeWidth || 4; const headL = Math.max(15, hw * 3); const headW = Math.max(15, hw * 3); const p1 = {x: layer.x, y: layer.y + layer.height/2}; const p2 = {x: layer.x + layer.width, y: layer.y + layer.height/2}; const angle = Math.atan2(p2.y - p1.y, p2.x - p1.x); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke(); ctx.fillStyle = ctx.strokeStyle; ctx.beginPath(); ctx.moveTo(p2.x, p2.y); ctx.lineTo(p2.x - headL * Math.cos(angle - Math.PI/6), p2.y - headW * Math.sin(angle - Math.PI/6)); ctx.lineTo(p2.x - headL * Math.cos(angle + Math.PI/6), p2.y - headW * Math.sin(angle + Math.PI/6)); ctx.closePath(); ctx.fill(); }
       else if (layer.type === "IMAGE" && layer.imageObj) { ctx.drawImage(layer.imageObj, layer.x, layer.y, layer.width, layer.height); }
       else if (layer.type === "TEXT" && layer.text) { ctx.font = `${layer.fontWeight || "normal"} ${layer.fontSize}px ${layer.fontFamily || "Inter"}`; ctx.fillStyle = layer.fill || "#ffffff"; ctx.textBaseline = "top"; ctx.textAlign = layer.textAlign || "left"; const textLines = layer.text.split('\n'); let tX = layer.x; if (layer.textAlign === "center") tX = layer.x + layer.width/2; if (layer.textAlign === "right") tX = layer.x + layer.width; textLines.forEach((line, i) => { ctx.fillText(line, tX, layer.y + i * (layer.fontSize || 24) * 1.2); }); }
       else if (layer.type === "PATH" && layer.points) { ctx.beginPath(); ctx.moveTo(layer.x + layer.points[0].x, layer.y + layer.points[0].y); for (let i = 1; i < layer.points.length; i++) ctx.lineTo(layer.x + layer.points[i].x, layer.y + layer.points[i].y); if (layer.strokeWidth) ctx.stroke(); }
@@ -926,9 +940,9 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
       ctx.restore();
     });
 
-    const dataUrl = canvas.toDataURL("image/png");
+    const dataUrl = canvas.toDataURL("image/png", 0.95);
     if (onSecureArtifact) {
-      onSecureArtifact(dataUrl, `[OMNI PRO] Graphic Art`);
+      onSecureArtifact(dataUrl, `[OMNI PRO] Professional Art`);
     }
   };
 
@@ -1168,7 +1182,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
                   </div>
 
                   {activeLayer.type !== "IMAGE" && (
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-3 mt-3">
                       <div className="relative w-6 h-6 rounded border border-white/20 overflow-hidden shrink-0 shadow-inner">
                         <input type="color" value={activeLayer.fill === "transparent" ? "#000000" : activeLayer.fill} onChange={e => { updateSelectedLayer({fill: e.target.value}); commitLayerUpdate(); }} className="absolute -top-2 -left-2 w-10 h-10 cursor-pointer" />
                       </div>
@@ -1178,7 +1192,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
                   )}
 
                   {activeLayer.type !== "IMAGE" && activeLayer.type !== "TEXT" && (
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-3 mt-2">
                       <div className="relative w-6 h-6 rounded border border-white/20 overflow-hidden shrink-0 shadow-inner">
                         <input type="color" value={activeLayer.stroke === "transparent" ? "#000000" : activeLayer.stroke} onChange={e => { updateSelectedLayer({stroke: e.target.value}); commitLayerUpdate(); }} className="absolute -top-2 -left-2 w-10 h-10 cursor-pointer" />
                       </div>
@@ -1278,7 +1292,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
           {onSecureArtifact && (
             <div className="p-4 border-t border-black/40 bg-[#1E1E1E] mt-auto">
               <button 
-                onClick={exportCanvas}
+                onClick={handleSecureToArchive}
                 className="w-full py-3 rounded-lg bg-white text-black hover:bg-neutral-200 text-[11px] uppercase tracking-wider font-bold transition-colors shadow-lg"
               >
                 Secure to Resonance

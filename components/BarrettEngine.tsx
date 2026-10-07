@@ -32,14 +32,14 @@ interface CanvasLayer {
   shadowColor?: string; shadowBlur?: number; shadowOffsetX?: number; shadowOffsetY?: number;
   blur?: number;
 
-  // Изображения и искажения (Liquify)
-  src?: string; // Для сохранения в localStorage
+  src?: string; 
   imageObj?: HTMLImageElement;
   originalImageObj?: HTMLImageElement; 
   originalImageData?: ImageData; 
   bgTolerance?: number; 
+  autoBgRemoved?: boolean;
   brightness?: number; contrast?: number; saturation?: number; hue?: number; sepia?: number; invert?: number;
-  twirl?: number; bulge?: number; // ИСКАЖЕНИЯ (Завихрения и Растягивания)
+  twirl?: number; bulge?: number; 
   
   points?: VectorPoint[];
   
@@ -93,7 +93,7 @@ function clip(v: number, min = 0.0, max = 1.0): number { return Math.max(min, Ma
 function generateId() { return Math.random().toString(36).substr(2, 9); }
 
 // ==========================================
-// MAIN COMPONENT: OMNI STUDIO 4.0
+// MAIN COMPONENT: OMNI STUDIO 5.0
 // ==========================================
 export default function BarrettEngine({ query, onSecureArtifact }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -112,7 +112,6 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
   const [layersUI, setLayersUI] = useState<CanvasLayer[]>([]);
   const [selectedIdUI, setSelectedIdUI] = useState<string | null>(null);
   
-  // Состояние встроенного текстового редактора
   const [editingTextId, setEditingTextId] = useState<string | null>(null);
 
   // CORE ENGINE
@@ -145,7 +144,6 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
       state.historyStack = state.historyStack.slice(0, state.historyIndex + 1);
     }
     
-    // Подготавливаем слои к сохранению (очищаем тяжелые DOM объекты, оставляя base64 src)
     const serializableLayers = state.layers.map(l => {
       const copy = { ...l };
       delete copy.imageObj;
@@ -159,11 +157,9 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
     if (state.historyStack.length > 40) state.historyStack.shift();
     else state.historyIndex++;
     
-    // Сохраняем в localStorage для защиты от вылетов
-    try { localStorage.setItem("omni-studio-save", jsonState); } catch (e) {}
+    try { localStorage.setItem("omni-studio-save-5", jsonState); } catch (e) {}
   }, [canvasBgColor]);
 
-  // ВОССТАНОВЛЕНИЕ СОСТОЯНИЯ
   const loadStateFromJson = useCallback((jsonStr: string) => {
     try {
       const parsed = JSON.parse(jsonStr);
@@ -173,16 +169,15 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
       
       const newLayers: CanvasLayer[] = parsed.layers || [];
       
-      // Восстанавливаем картинки из base64 (src)
       newLayers.forEach(nl => {
         if (nl.type === "IMAGE" && nl.src) {
           const img = new Image();
           img.onload = () => { 
             nl.imageObj = img; nl.originalImageObj = img;
-            // Пересоздаем originalImageData для Liquify/Eraser
             const cvs = document.createElement('canvas'); cvs.width = img.width; cvs.height = img.height;
             const ctx = cvs.getContext('2d');
             if (ctx) { ctx.drawImage(img, 0, 0); nl.originalImageData = ctx.getImageData(0, 0, img.width, img.height); }
+            if (nl.bgTolerance || nl.twirl || nl.bulge || nl.autoBgRemoved) processImagePixels(nl);
             syncUI(); 
           };
           img.src = nl.src;
@@ -211,14 +206,12 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
     }
   }, [loadStateFromJson]);
 
-  // ИНИЦИАЛИЗАЦИЯ (Auto-Center & LocalStorage rehydration)
   useEffect(() => {
     if (!containerRef.current) return;
     const cw = containerRef.current.clientWidth;
     const ch = containerRef.current.clientHeight;
     
-    // Загрузка из localStorage
-    const savedState = localStorage.getItem("omni-studio-save");
+    const savedState = localStorage.getItem("omni-studio-save-5");
     if (savedState) {
       loadStateFromJson(savedState);
       engine.current.historyStack = [savedState];
@@ -227,7 +220,6 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
       saveHistory(); 
     }
 
-    // Идеальная центровка холста
     const scale = Math.min((cw - 60) / engine.current.canvasWidth, (ch - 60) / engine.current.canvasHeight, 1);
     engine.current.viewport = {
       x: (cw - engine.current.canvasWidth * scale) / 2,
@@ -236,10 +228,9 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
     };
   }, [saveHistory, loadStateFromJson]);
 
-  // Хоткеи
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (editingTextId) return; // Блокируем хоткеи при вводе текста
+      if (editingTextId) return;
       if (document.activeElement?.tagName === "INPUT" || document.activeElement?.tagName === "TEXTAREA") return;
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); if (e.shiftKey) handleRedo(); else handleUndo(); }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); handleRedo(); }
@@ -253,8 +244,6 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
   // ==========================================
   // АЛГОРИТМЫ ОБРАБОТКИ ИЗОБРАЖЕНИЙ
   // ==========================================
-  
-  // 1. Magic Eraser (Chroma Key) + Liquify (Warping) Processor
   const processImagePixels = (layer: CanvasLayer) => {
     if (!layer.originalImageData) return;
     
@@ -264,7 +253,6 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
     cvs.width = w; cvs.height = h;
     const ctx = cvs.getContext('2d')!;
     
-    // Восстанавливаем оригинал
     ctx.putImageData(layer.originalImageData, 0, 0);
     let imgData = ctx.getImageData(0, 0, w, h);
     let data = imgData.data;
@@ -278,7 +266,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
       const cx = w / 2; const cy = h / 2;
       const radius = Math.min(w, h) / 2;
       const twirlAngle = (layer.twirl || 0) * Math.PI / 180;
-      const bulge = layer.bulge || 0; // -1 to 1
+      const bulge = layer.bulge || 0; 
 
       for (let y = 0; y < h; y++) {
         for (let x = 0; x < w; x++) {
@@ -287,10 +275,8 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
           let a = Math.atan2(dy, dx);
 
           if (r < radius) {
-            // Twirl
             const twirlFactor = (radius - r) / radius;
             a += twirlAngle * twirlFactor;
-            // Bulge / Pinch
             if (bulge !== 0) {
               let rn = r / radius;
               rn = Math.pow(rn, Math.exp(-bulge * 2)); 
@@ -313,9 +299,14 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
     }
 
     // 2. MAGIC ERASER (Удаление фона)
-    if (layer.bgTolerance && layer.bgTolerance > 0) {
-      const bgR = data[0], bgG = data[1], bgB = data[2]; // Берем верхний левый пиксель как фон
-      const tol = layer.bgTolerance;
+    if (layer.autoBgRemoved || (layer.bgTolerance && layer.bgTolerance > 0)) {
+      // Ищем доминирующий цвет фона по углам
+      const corners = [0, (w - 1) * 4, (h - 1) * w * 4, ((h - 1) * w + w - 1) * 4];
+      let rSum = 0, gSum = 0, bSum = 0;
+      corners.forEach(idx => { rSum+=data[idx]; gSum+=data[idx+1]; bSum+=data[idx+2]; });
+      const bgR = rSum/4, bgG = gSum/4, bgB = bSum/4;
+
+      const tol = layer.autoBgRemoved ? 45 : (layer.bgTolerance || 0);
       for (let i = 0; i < data.length; i += 4) {
         const dr = data[i] - bgR; const dg = data[i + 1] - bgG; const db = data[i + 2] - bgB;
         const distance = Math.sqrt(dr * dr + dg * dg + db * db);
@@ -328,6 +319,17 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
     const newImg = new Image();
     newImg.onload = () => { layer.imageObj = newImg; syncUI(); };
     newImg.src = cvs.toDataURL("image/png");
+  };
+
+  const handleAutoBgRemove = () => {
+    if (!engine.current.selectedId) return;
+    const layer = engine.current.layers.find(l => l.id === engine.current.selectedId);
+    if (layer && layer.type === "IMAGE") {
+      layer.autoBgRemoved = true;
+      layer.bgTolerance = 45;
+      processImagePixels(layer);
+      saveHistory();
+    }
   };
 
   // ==========================================
@@ -358,7 +360,6 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
       ctx.translate(state.viewport.x, state.viewport.y);
       ctx.scale(state.viewport.scale, state.viewport.scale);
 
-      // Artboard shadow
       ctx.shadowColor = "rgba(0,0,0,0.5)"; ctx.shadowBlur = 40; ctx.shadowOffsetY = 10;
       ctx.fillStyle = canvasBgColor;
       ctx.fillRect(0, 0, state.canvasWidth, state.canvasHeight);
@@ -434,7 +435,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
         else if (layer.type === "IMAGE" && layer.imageObj) {
           ctx.drawImage(layer.imageObj, layer.x, layer.y, layer.width, layer.height);
         }
-        else if (layer.type === "TEXT" && layer.text) {
+        else if (layer.type === "TEXT" && layer.text && editingTextId !== layer.id) {
           ctx.font = `${layer.fontWeight || "normal"} ${layer.fontSize}px ${layer.fontFamily || "Inter, sans-serif"}`;
           ctx.fillStyle = layer.fill || "#ffffff"; ctx.textBaseline = "top"; ctx.textAlign = layer.textAlign || "left";
           const textLines = layer.text.split('\n');
@@ -449,7 +450,6 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
 
         ctx.restore();
 
-        // Отрисовка Bounding Box (Выделение)
         if (state.selectedId === layer.id && !layer.locked && !editingTextId) {
           ctx.save();
           ctx.translate(cx, cy); ctx.rotate((layer.rotation * Math.PI) / 180); ctx.translate(-cx, -cy);
@@ -461,7 +461,6 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
           const drawHandle = (hx: number, hy: number) => { ctx.beginPath(); ctx.arc(hx, hy, hSize/2, 0, Math.PI*2); ctx.fill(); ctx.stroke(); };
           drawHandle(layer.x, layer.y); drawHandle(layer.x + layer.width, layer.y); drawHandle(layer.x, layer.y + layer.height); drawHandle(layer.x + layer.width, layer.y + layer.height); 
           
-          // Rotation handle
           ctx.beginPath(); ctx.moveTo(cx, layer.y); ctx.lineTo(cx, layer.y - 25 / state.viewport.scale); ctx.stroke();
           drawHandle(cx, layer.y - 25 / state.viewport.scale);
           ctx.restore();
@@ -490,7 +489,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
   };
 
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (editingTextId) return; // Игнор кликов, если мы вводим текст
+    if (editingTextId) return; 
     
     const state = engine.current;
     if (e.button === 1 || activeCategory === "PAN" || e.altKey || e.shiftKey) {
@@ -511,7 +510,6 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
           const hSize = 12 / state.viewport.scale;
           const cx = layer.x + layer.width/2;
           
-          // Rotation check
           if (Math.hypot(pos.x - cx, pos.y - (layer.y - 25 / state.viewport.scale)) < hSize) {
             state.isRotatingObject = true; return;
           }
@@ -548,7 +546,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
       state.liveLayer = {
         id: "live", name: activeCategory === "ERASER" ? "Eraser Path" : "Vector Path", type: "PATH",
         x: pos.x, y: pos.y, width: 0, height: 0, rotation: 0, opacity: 100, visible: true, locked: false, 
-        blendMode: activeCategory === "ERASER" ? "destination-out" : "source-over", // СЕКРЕТ ЛАСТИКА!
+        blendMode: activeCategory === "ERASER" ? "destination-out" : "source-over", 
         stroke: activeCategory === "ERASER" ? "#000000" : currentStrokeColor, strokeWidth: currentStrokeWidth * (activeCategory === "ERASER" ? 4 : 1),
         points: [{ x: 0, y: 0 }] 
       };
@@ -707,9 +705,15 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
         const ctx = cvs.getContext('2d')!; ctx.drawImage(img, 0, 0);
         const originalData = ctx.getImageData(0, 0, img.width, img.height);
 
+        // СПАВН РОВНО В ЦЕНТРЕ ТЕКУЩЕЙ КАМЕРЫ (А НЕ В ЖОПЕ МИРА)
+        const cw = containerRef.current?.clientWidth || state.canvasWidth;
+        const ch = containerRef.current?.clientHeight || state.canvasHeight;
+        const vX = (cw / 2 - state.viewport.x) / state.viewport.scale;
+        const vY = (ch / 2 - state.viewport.y) / state.viewport.scale;
+
         const newImage: CanvasLayer = {
           id: generateId(), name: file.name, type: "IMAGE",
-          x: (state.canvasWidth - imgW) / 2, y: (state.canvasHeight - imgH) / 2, 
+          x: vX - imgW / 2, y: vY - imgH / 2, 
           width: imgW, height: imgH, rotation: 0, opacity: 100, visible: true, locked: false, blendMode: "source-over",
           imageObj: img, originalImageObj: img, originalImageData: originalData, src: src,
           bgTolerance: 0, brightness: 100, contrast: 100, saturation: 100, hue: 0, sepia: 0, invert: 0, twirl: 0, bulge: 0
@@ -746,9 +750,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
     const layer = engine.current.layers.find(l => l.id === engine.current.selectedId);
     if (layer) {
       Object.assign(layer, updates);
-      
-      // Искажения или удаление фона требуют пересчета пикселей
-      if (layer.type === "IMAGE" && (updates.bgTolerance !== undefined || updates.twirl !== undefined || updates.bulge !== undefined)) {
+      if (layer.type === "IMAGE" && (updates.bgTolerance !== undefined || updates.twirl !== undefined || updates.bulge !== undefined || updates.autoBgRemoved !== undefined)) {
         processImagePixels(layer);
       } else {
         syncUI();
@@ -866,7 +868,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
 
     const dataUrl = canvas.toDataURL("image/png", 0.95);
     if (onSecureArtifact) {
-      onSecureArtifact(dataUrl, `[OMNI PRO 4.0] Export`);
+      onSecureArtifact(dataUrl, `[OMNI PRO] Export`);
     }
   };
 
@@ -891,7 +893,6 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
         onChange={(e) => {
           layer.text = e.target.value;
           
-          // Динамический пересчет размеров
           const canvas = document.createElement("canvas");
           const ctx = canvas.getContext("2d");
           if (ctx) {
@@ -910,7 +911,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
         }}
         style={{
           position: "absolute",
-          left: textX - 4, // Паддинги
+          left: textX - 4, 
           top: textY - 4,
           minWidth: Math.max(100, layer.width * scale + 20),
           height: Math.max(50, layer.height * scale + 20),
@@ -944,7 +945,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
         <div className="flex items-center gap-4">
           <div className="font-bold text-white tracking-wider flex items-center gap-2 text-xs">
             <div className="w-2.5 h-2.5 rounded-sm bg-[#0D99FF]"></div>
-            OMNI STUDIO 4.0
+            OMNI STUDIO 5.0
           </div>
           
           <div className="h-4 w-px bg-white/10 mx-1"></div>
@@ -983,7 +984,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
 
       <div className="flex flex-1 overflow-hidden relative">
         
-        {/* LEFT SIDEBAR: LAYERS */}
+        {/* LEFT SIDEBAR: LAYERS (FIGMA STYLE) */}
         <aside className="w-64 bg-[#2C2C2C] border-r border-black/40 flex flex-col z-10 shrink-0 shadow-[4px_0_15px_rgba(0,0,0,0.2)]">
           <div className="flex justify-between items-center p-3 border-b border-white/5 shrink-0">
              <h3 className="text-[11px] font-bold text-white uppercase tracking-wider">Layers</h3>
@@ -1021,11 +1022,10 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
           </div>
         </aside>
 
-        {/* MAIN WORKSPACE */}
+        {/* WORKSPACE CANVAS */}
         <main 
           ref={containerRef}
           className="flex-1 relative overflow-hidden bg-[#1E1E1E]"
-          // Блокировка системных скроллов для правильной работы Canvas
           style={{ touchAction: "none", overscrollBehavior: "none" }}
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
@@ -1036,17 +1036,14 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
         >
           <canvas ref={canvasRef} className="absolute top-0 left-0 w-full h-full pointer-events-none" />
           
-          {/* Инлайн текстовый редактор */}
           {renderInlineTextEditor()}
           
-          {/* FLOATING BOTTOM TOOLBAR */}
+          {/* FLOATING BOTTOM TOOLBAR (FIGMA STYLE) */}
           <div className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-[#2C2C2C] border border-black/50 p-1.5 rounded-xl shadow-[0_10px_30px_rgba(0,0,0,0.5)] flex items-center gap-1 z-20 pointer-events-auto">
             <button onClick={() => { setActiveCategory("SELECT"); engine.current.selectedId = null; syncUI(); }} className={`w-9 h-9 rounded-lg flex items-center justify-center transition-all ${activeCategory === "SELECT" ? "bg-[#0D99FF]/20 text-[#0D99FF]" : "text-neutral-400 hover:bg-white/10 hover:text-white"}`} title="Select (V)"><Icons.Select /></button>
             <button onClick={() => { setActiveCategory("PAN"); syncUI(); }} className={`w-9 h-9 rounded-lg flex items-center justify-center transition-all ${activeCategory === "PAN" ? "bg-[#0D99FF]/20 text-[#0D99FF]" : "text-neutral-400 hover:bg-white/10 hover:text-white"}`} title="Pan Tool (Space)"><Icons.Pan /></button>
-            
             <div className="w-px h-6 bg-white/10 mx-1"></div>
-            
-            <button onClick={() => { setActiveCategory("PEN"); engine.current.selectedId = null; syncUI(); }} className={`w-9 h-9 rounded-lg flex items-center justify-center transition-all ${activeCategory === "PEN" ? "bg-[#0D99FF]/20 text-[#0D99FF]" : "text-neutral-400 hover:bg-white/10 hover:text-white"}`} title="Pen Brush"><Icons.Pen /></button>
+            <button onClick={() => { setActiveCategory("PEN"); engine.current.selectedId = null; syncUI(); }} className={`w-9 h-9 rounded-lg flex items-center justify-center transition-all ${activeCategory === "PEN" ? "bg-[#0D99FF]/20 text-[#0D99FF]" : "text-neutral-400 hover:bg-white/10 hover:text-white"}`} title="Pen Tool (P)"><Icons.Pen /></button>
             <button onClick={() => { setActiveCategory("ERASER"); engine.current.selectedId = null; syncUI(); }} className={`w-9 h-9 rounded-lg flex items-center justify-center transition-all ${activeCategory === "ERASER" ? "bg-red-500/20 text-red-500" : "text-neutral-400 hover:bg-white/10 hover:text-white"}`} title="Eraser (Destroys Pixels)"><Icons.Eraser /></button>
             <button onClick={() => { setActiveCategory("TEXT"); engine.current.selectedId = null; syncUI(); }} className={`w-9 h-9 rounded-lg flex items-center justify-center transition-all ${activeCategory === "TEXT" ? "bg-[#0D99FF]/20 text-[#0D99FF]" : "text-neutral-400 hover:bg-white/10 hover:text-white"}`} title="Text Tool (T)"><Icons.Text /></button>
             
@@ -1065,19 +1062,6 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
 
             <div className="w-px h-6 bg-white/10 mx-1"></div>
             
-            {/* COLOR PICKERS */}
-            <div className="flex gap-2 mx-1 items-center">
-              <div className="relative w-6 h-6 rounded-full border border-white/20 overflow-hidden shadow-inner cursor-pointer" title="Fill Color">
-                <input type="color" value={currentColor} onChange={e => setCurrentColor(e.target.value)} className="absolute -top-2 -left-2 w-10 h-10 cursor-pointer" />
-              </div>
-              <div className="relative w-6 h-6 rounded-full border border-white/20 overflow-hidden shadow-inner cursor-pointer" title="Stroke Color">
-                <input type="color" value={currentStrokeColor} onChange={e => setCurrentStrokeColor(e.target.value)} className="absolute -top-2 -left-2 w-10 h-10 cursor-pointer" />
-              </div>
-              <input type="number" min="0" max="100" value={currentStrokeWidth} onChange={e => setCurrentStrokeWidth(Number(e.target.value))} className="w-10 bg-black/30 border border-white/10 rounded text-center text-xs text-white p-1 ml-1 hover:bg-black/50 outline-none" title="Stroke Width" />
-            </div>
-
-            <div className="w-px h-6 bg-white/10 mx-1"></div>
-
             <div className="flex gap-1 ml-1 mr-2">
               <button onClick={handleUndo} title="Undo (Ctrl+Z)" className="p-1.5 hover:bg-white/10 rounded-lg text-neutral-400 hover:text-white transition-colors"><Icons.Undo /></button>
               <button onClick={handleRedo} title="Redo (Ctrl+Y)" className="p-1.5 hover:bg-white/10 rounded-lg text-neutral-400 hover:text-white transition-colors"><Icons.Redo /></button>
@@ -1086,9 +1070,9 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
         </main>
 
         {/* RIGHT SIDEBAR (Properties) */}
-        <aside className="w-[280px] bg-[#2C2C2C] border-l border-black/40 flex flex-col z-10 shrink-0 overflow-y-auto shadow-[-4px_0_15px_rgba(0,0,0,0.2)]">
+        <aside className="w-[280px] bg-[#2C2C2C] border-l border-black/40 flex flex-col z-10 shrink-0 shadow-[-4px_0_15px_rgba(0,0,0,0.2)]">
           
-          <div className="p-4 min-h-[300px]">
+          <div className="flex-1 overflow-y-auto p-4">
             <div className="flex justify-between items-center mb-5 border-b border-white/5 pb-3">
               <h3 className="text-[11px] font-bold text-white uppercase tracking-wider">Properties</h3>
               {activeLayer && (
@@ -1169,7 +1153,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
                       <button onClick={() => { updateSelectedLayer({textAlign: "right"}); commitLayerUpdate(); }} className={`flex-1 flex justify-center py-1.5 rounded ${activeLayer.textAlign === "right" ? "bg-white/10 text-white shadow-sm" : "text-neutral-500 hover:text-white"}`}><Icons.AlignRight /></button>
                     </div>
 
-                    <div className="text-[10px] text-blue-400 mt-2 text-center bg-blue-500/10 py-1 rounded">Double click on canvas to edit text</div>
+                    <div className="text-[10px] text-[#0D99FF] mt-2 text-center bg-[#0D99FF]/10 py-1.5 rounded border border-[#0D99FF]/20">Double click on canvas to edit text</div>
                   </div>
                 )}
 
@@ -1177,20 +1161,19 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
                 <div className="space-y-4 border-t border-white/10 pt-4">
                   
                   <div className="flex items-center justify-between">
-                    <span className="text-xs text-neutral-400 font-medium">Blend</span>
+                    <span className="text-xs text-neutral-400 font-medium">Blend Mode</span>
                     <select value={activeLayer.blendMode || "source-over"} onChange={e => { updateSelectedLayer({blendMode: e.target.value as BlendMode}); commitLayerUpdate(); }} className="bg-[#1E1E1E] border border-white/10 rounded px-2 py-1.5 text-xs text-white outline-none w-32 hover:border-white/30 focus:border-[#0D99FF] cursor-pointer">
                       <option value="source-over">Normal</option>
                       <option value="multiply">Multiply</option>
                       <option value="screen">Screen</option>
                       <option value="overlay">Overlay</option>
                       <option value="color-dodge">Color Dodge</option>
-                      {/* У ластика всегда destination-out */}
-                      <option value="destination-out">Eraser Mode</option> 
+                      {activeLayer.type === "PATH" && <option value="destination-out">Eraser Mode</option>}
                     </select>
                   </div>
 
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="text-xs text-neutral-400 font-medium">Opacity</span>
+                  <div className="flex items-center justify-between gap-3 pt-1">
+                    <span className="text-xs text-neutral-400 font-medium">Layer Opacity</span>
                     <input type="range" min="0" max="100" value={activeLayer.opacity} onChange={e => updateSelectedLayer({opacity: Number(e.target.value)})} onMouseUp={commitLayerUpdate} className="flex-1 accent-[#0D99FF] h-1 bg-white/10 rounded-lg appearance-none cursor-pointer" />
                     <span className="text-xs w-8 text-right font-mono text-white">{activeLayer.opacity}%</span>
                   </div>
@@ -1223,25 +1206,31 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
                   {activeLayer.type === "IMAGE" && (
                     <div className="space-y-4 bg-[#1E1E1E] p-3.5 rounded-xl border border-white/5 shadow-inner">
                       
-                      <div className="flex items-center justify-between mb-3 border-b border-white/5 pb-3">
-                        <span className="text-[11px] text-[#0D99FF] font-bold flex items-center gap-1.5"><Icons.Magic /> Magic Eraser</span>
+                      <div className="flex items-center justify-between mb-2 border-b border-white/5 pb-3">
+                        <span className="text-[11px] text-[#0D99FF] font-bold flex items-center gap-1.5"><Icons.Magic /> Auto AI Cutout</span>
                         <div className="flex items-center gap-2">
-                           <input type="range" min="0" max="255" value={activeLayer.bgTolerance || 0} onChange={e => updateSelectedLayer({bgTolerance: Number(e.target.value)})} className="w-20 accent-[#0D99FF] h-1 bg-white/10 rounded-lg appearance-none cursor-pointer" title="Tolerance" />
-                           <button onClick={() => updateSelectedLayer({bgTolerance: 0})} className="text-[9px] bg-white/10 hover:bg-white/20 px-1.5 py-0.5 rounded text-white">Reset</button>
+                           <button onClick={handleAutoBgRemove} className="text-[10px] bg-[#0D99FF] hover:bg-blue-500 px-2 py-1 rounded text-white font-bold transition-colors">REMOVE BG</button>
                         </div>
                       </div>
 
-                      {/* ИСКАЖЕНИЯ ПИКСЕЛЕЙ (LIQUIFY) */}
-                      <div className="space-y-2 border-b border-white/5 pb-3">
-                        <div className="text-[10px] text-blue-400 font-bold flex items-center gap-1.5 mb-2"><Icons.Warp /> Liquify / Distort</div>
-                        <div className="flex justify-between text-[10px] text-neutral-400"><span>Twirl (Swirls)</span><span className="font-mono">{activeLayer.twirl || 0}°</span></div>
-                        <input type="range" min="-360" max="360" value={activeLayer.twirl || 0} onChange={e => updateSelectedLayer({twirl: Number(e.target.value)})} onMouseUp={commitLayerUpdate} className="w-full accent-blue-500 h-1 bg-white/10 rounded-lg appearance-none cursor-pointer" />
-                        
-                        <div className="flex justify-between text-[10px] text-neutral-400 mt-2"><span>Pinch / Bulge (Stretch)</span><span className="font-mono">{activeLayer.bulge || 0}</span></div>
-                        <input type="range" min="-1" max="1" step="0.05" value={activeLayer.bulge || 0} onChange={e => updateSelectedLayer({bulge: Number(e.target.value)})} onMouseUp={commitLayerUpdate} className="w-full accent-blue-500 h-1 bg-white/10 rounded-lg appearance-none cursor-pointer" />
+                      <div className="flex items-center justify-between mb-3 border-b border-white/5 pb-3">
+                        <span className="text-[10px] text-neutral-400 flex items-center gap-1.5">Manual Eraser</span>
+                        <div className="flex items-center gap-2">
+                           <input type="range" min="0" max="255" value={activeLayer.bgTolerance || 0} onChange={e => { updateSelectedLayer({bgTolerance: Number(e.target.value), autoBgRemoved: false}); }} onMouseUp={commitLayerUpdate} className="w-20 accent-[#0D99FF] h-1 bg-white/10 rounded-lg appearance-none cursor-pointer" title="Tolerance" />
+                           <button onClick={() => { updateSelectedLayer({bgTolerance: 0, autoBgRemoved: false}); commitLayerUpdate(); }} className="text-[9px] bg-white/10 hover:bg-white/20 px-1.5 py-0.5 rounded text-white">Reset</button>
+                        </div>
                       </div>
 
-                      <div className="space-y-1.5">
+                      <div className="space-y-2 border-b border-white/5 pb-3">
+                        <div className="text-[10px] text-purple-400 font-bold flex items-center gap-1.5 mb-2"><Icons.Warp /> Liquify / Distort</div>
+                        <div className="flex justify-between text-[10px] text-neutral-400"><span>Twirl (Swirls)</span><span className="font-mono">{activeLayer.twirl || 0}°</span></div>
+                        <input type="range" min="-360" max="360" value={activeLayer.twirl || 0} onChange={e => updateSelectedLayer({twirl: Number(e.target.value)})} onMouseUp={commitLayerUpdate} className="w-full accent-purple-500 h-1 bg-white/10 rounded-lg appearance-none cursor-pointer" />
+                        
+                        <div className="flex justify-between text-[10px] text-neutral-400 mt-2"><span>Pinch / Bulge</span><span className="font-mono">{activeLayer.bulge || 0}</span></div>
+                        <input type="range" min="-1" max="1" step="0.05" value={activeLayer.bulge || 0} onChange={e => updateSelectedLayer({bulge: Number(e.target.value)})} onMouseUp={commitLayerUpdate} className="w-full accent-purple-500 h-1 bg-white/10 rounded-lg appearance-none cursor-pointer" />
+                      </div>
+
+                      <div className="space-y-1.5 pt-1">
                         <div className="flex justify-between text-[10px] text-neutral-400"><span>Brightness</span><span className="font-mono">{activeLayer.brightness || 100}%</span></div>
                         <input type="range" min="0" max="200" value={activeLayer.brightness || 100} onChange={e => updateSelectedLayer({brightness: Number(e.target.value)})} onMouseUp={commitLayerUpdate} className="w-full accent-white h-1 bg-white/10 rounded-lg appearance-none cursor-pointer" />
                       </div>
@@ -1294,10 +1283,11 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
             )}
           </div>
           
+          {/* SECURE BUTTON FIXED AT BOTTOM */}
           {onSecureArtifact && (
-            <div className="p-4 border-t border-black/40 bg-[#1E1E1E] mt-auto">
+            <div className="p-4 border-t border-black/40 bg-[#1E1E1E] shrink-0 mt-auto">
               <button 
-                onClick={() => onSecureArtifact(canvasRef.current?.toDataURL() || "", "OMNI PROJECT")}
+                onClick={handleSecureToArchive}
                 className="w-full py-3 rounded-lg bg-white text-black hover:bg-neutral-200 text-[11px] uppercase tracking-wider font-bold transition-colors shadow-lg"
               >
                 Secure to Resonance

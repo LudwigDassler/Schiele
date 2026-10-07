@@ -6,6 +6,11 @@ import React, { useEffect, useRef, useState, useCallback } from "react";
 // ==========================================
 type ToolType = "SELECT" | "PAN" | "PEN" | "RECTANGLE" | "ELLIPSE" | "TEXT";
 
+interface Props {
+  query?: string;
+  onSecureArtifact?: (dataUrl: string, title: string) => void | Promise<void>;
+}
+
 interface ViewportState {
   x: number;
   y: number;
@@ -49,13 +54,6 @@ interface CanvasLayer {
   fontFamily?: string;
 }
 
-interface EditorState {
-  layers: CanvasLayer[];
-  selectedId: string | null;
-  canvasWidth: number;
-  canvasHeight: number;
-}
-
 // ==========================================
 // ИКОНКИ UI
 // ==========================================
@@ -75,14 +73,21 @@ const Icons = {
   Down: () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 9 12 15 18 9"/></svg>,
 };
 
+// ==========================================
+// УТИЛИТЫ (Включая пропавший clip)
+// ==========================================
+function clip(v: number, min = 0.0, max = 1.0): number {
+  return Math.max(min, Math.min(max, v));
+}
+
 function generateId() {
   return Math.random().toString(36).substr(2, 9);
 }
 
 // ==========================================
-// MAIN COMPONENT
+// MAIN COMPONENT: ВЕКТОРНЫЙ РЕДАКТОР (OMNI)
 // ==========================================
-export default function OmniGraphicEditor({ query, onSecureArtifact }: { query?: string, onSecureArtifact?: (d: string, t: string) => void }) {
+export default function BarrettEngine({ query, onSecureArtifact }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -92,12 +97,12 @@ export default function OmniGraphicEditor({ query, onSecureArtifact }: { query?:
   const [currentColor, setCurrentColor] = useState<string>("#a855f7");
   const [currentStroke, setCurrentStroke] = useState<number>(4);
 
-  // Реактивное состояние для панелей (Синхронизируется с рефом)
+  // Реактивное состояние для панелей 
   const [layersUI, setLayersUI] = useState<CanvasLayer[]>([]);
   const [selectedIdUI, setSelectedIdUI] = useState<string | null>(null);
 
   // ==========================================
-  // CORE ENGINE STATE (Используем Ref для 60FPS без ререндеров React)
+  // CORE ENGINE STATE (Ref для 60FPS)
   // ==========================================
   const engine = useRef({
     layers: [] as CanvasLayer[],
@@ -116,20 +121,18 @@ export default function OmniGraphicEditor({ query, onSecureArtifact }: { query?:
     lastX: 0,
     lastY: 0,
     
-    // Временный слой для активного рисования (не в массиве слоев, чтобы не мутировать стейт постоянно)
     liveLayer: null as CanvasLayer | null,
     
     canvasWidth: 1080,
     canvasHeight: 1080,
   });
 
-  // Синхронизация Core State -> React UI
   const syncUI = useCallback(() => {
     setLayersUI([...engine.current.layers]);
     setSelectedIdUI(engine.current.selectedId);
   }, []);
 
-  // Инициализация камеры (центрирование холста)
+  // Инициализация камеры
   useEffect(() => {
     if (!containerRef.current) return;
     const cw = containerRef.current.clientWidth;
@@ -156,7 +159,6 @@ export default function OmniGraphicEditor({ query, onSecureArtifact }: { query?:
     const render = () => {
       const state = engine.current;
       
-      // Адаптация размера canvas под CSS пиксели окна
       if (containerRef.current) {
         const dpr = window.devicePixelRatio || 1;
         const rect = containerRef.current.getBoundingClientRect();
@@ -176,8 +178,7 @@ export default function OmniGraphicEditor({ query, onSecureArtifact }: { query?:
       ctx.translate(state.viewport.x, state.viewport.y);
       ctx.scale(state.viewport.scale, state.viewport.scale);
 
-      // 3. Отрисовка рабочей области (Artboard)
-      // Рисуем паттерн шахматки для прозрачности
+      // 3. Шахматный паттерн для прозрачности
       const s = 20;
       for(let i=0; i<state.canvasWidth/s; i++) {
         for(let j=0; j<state.canvasHeight/s; j++) {
@@ -201,7 +202,6 @@ export default function OmniGraphicEditor({ query, onSecureArtifact }: { query?:
         ctx.save();
         ctx.globalAlpha = layer.opacity / 100;
         
-        // Трансформации слоя
         ctx.translate(layer.x + layer.width / 2, layer.y + layer.height / 2);
         ctx.rotate((layer.rotation * Math.PI) / 180);
         ctx.translate(-(layer.x + layer.width / 2), -(layer.y + layer.height / 2));
@@ -244,19 +244,16 @@ export default function OmniGraphicEditor({ query, onSecureArtifact }: { query?:
 
         ctx.restore();
 
-        // 5. Отрисовка Bounding Box выделения поверх активного слоя
+        // 5. Отрисовка Bounding Box выделения
         if (state.selectedId === layer.id && !layer.locked) {
           ctx.save();
-          // Отрисовка синей рамки выделения
-          ctx.strokeStyle = "#3b82f6"; // Blue-500
+          ctx.strokeStyle = "#3b82f6";
           ctx.lineWidth = 1.5 / state.viewport.scale;
           ctx.setLineDash([4 / state.viewport.scale, 4 / state.viewport.scale]);
           
-          // Простая рамка (в идеале нужно учитывать rotate, но для стабильности делаем AABB)
           ctx.strokeRect(layer.x, layer.y, layer.width, layer.height);
           
           ctx.setLineDash([]);
-          // Отрисовка ручек (Handles)
           const hSize = 8 / state.viewport.scale;
           ctx.fillStyle = "#ffffff";
           ctx.strokeStyle = "#3b82f6";
@@ -267,10 +264,10 @@ export default function OmniGraphicEditor({ query, onSecureArtifact }: { query?:
             ctx.strokeRect(hx - hSize/2, hy - hSize/2, hSize, hSize);
           };
 
-          drawHandle(layer.x, layer.y); // TL
-          drawHandle(layer.x + layer.width, layer.y); // TR
-          drawHandle(layer.x, layer.y + layer.height); // BL
-          drawHandle(layer.x + layer.width, layer.y + layer.height); // BR
+          drawHandle(layer.x, layer.y); 
+          drawHandle(layer.x + layer.width, layer.y); 
+          drawHandle(layer.x, layer.y + layer.height); 
+          drawHandle(layer.x + layer.width, layer.y + layer.height); 
           
           ctx.restore();
         }
@@ -300,7 +297,6 @@ export default function OmniGraphicEditor({ query, onSecureArtifact }: { query?:
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     const state = engine.current;
     
-    // Pan (Пробел + Клик или Средняя кнопка)
     if (e.button === 1 || activeTool === "PAN") {
       state.isPanning = true;
       state.startX = e.clientX - state.viewport.x;
@@ -315,7 +311,6 @@ export default function OmniGraphicEditor({ query, onSecureArtifact }: { query?:
     state.lastY = pos.y;
 
     if (activeTool === "SELECT") {
-      // 1. Проверяем клик по ручкам изменения размера (Resize Handles)
       if (state.selectedId) {
         const layer = state.layers.find(l => l.id === state.selectedId);
         if (layer && !layer.locked && layer.visible) {
@@ -337,13 +332,11 @@ export default function OmniGraphicEditor({ query, onSecureArtifact }: { query?:
         }
       }
 
-      // 2. Проверяем клик по объекту (Selection) с конца (верхние слои первыми)
       let hitId: string | null = null;
       for (let i = state.layers.length - 1; i >= 0; i--) {
         const l = state.layers[i];
         if (!l.visible || l.locked) continue;
         
-        // AABB Hit Test
         if (pos.x >= l.x && pos.x <= l.x + l.width && pos.y >= l.y && pos.y <= l.y + l.height) {
           hitId = l.id;
           break;
@@ -358,16 +351,15 @@ export default function OmniGraphicEditor({ query, onSecureArtifact }: { query?:
       return;
     }
 
-    // Инициализация создания новой фигуры/линии
     state.isDrawing = true;
-    state.selectedId = null; // Сбрасываем выделение при рисовании
+    state.selectedId = null;
 
     if (activeTool === "PEN") {
       state.liveLayer = {
         id: "live", name: "Drawing", type: "PATH",
         x: pos.x, y: pos.y, width: 0, height: 0, rotation: 0, opacity: 100, visible: true, locked: false,
         stroke: currentColor, strokeWidth: currentStroke,
-        points: [{ x: 0, y: 0 }] // Точки относительны layer.x, layer.y
+        points: [{ x: 0, y: 0 }] 
       };
     } else if (activeTool === "TEXT") {
       const newText: CanvasLayer = {
@@ -393,7 +385,6 @@ export default function OmniGraphicEditor({ query, onSecureArtifact }: { query?:
   const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
     const state = engine.current;
 
-    // Pan
     if (state.isPanning) {
       state.viewport.x = e.clientX - state.startX;
       state.viewport.y = e.clientY - state.startY;
@@ -404,7 +395,6 @@ export default function OmniGraphicEditor({ query, onSecureArtifact }: { query?:
     const dx = pos.x - state.lastX;
     const dy = pos.y - state.lastY;
 
-    // Drag Object
     if (state.isDraggingObject && state.selectedId) {
       const layer = state.layers.find(l => l.id === state.selectedId);
       if (layer) {
@@ -416,7 +406,6 @@ export default function OmniGraphicEditor({ query, onSecureArtifact }: { query?:
       return;
     }
 
-    // Resize Object
     if (state.isResizingObject && state.selectedId && state.resizeHandle) {
       const layer = state.layers.find(l => l.id === state.selectedId);
       if (layer) {
@@ -430,12 +419,9 @@ export default function OmniGraphicEditor({ query, onSecureArtifact }: { query?:
       return;
     }
 
-    // Draw Live Figure
     if (state.isDrawing && state.liveLayer) {
       if (activeTool === "PEN" && state.liveLayer.points) {
         state.liveLayer.points.push({ x: pos.x - state.liveLayer.x, y: pos.y - state.liveLayer.y });
-        
-        // Расширяем Bounding Box пути на лету
         state.liveLayer.width = Math.max(state.liveLayer.width, pos.x - state.liveLayer.x);
         state.liveLayer.height = Math.max(state.liveLayer.height, pos.y - state.liveLayer.y);
       } else {
@@ -453,10 +439,8 @@ export default function OmniGraphicEditor({ query, onSecureArtifact }: { query?:
     if (state.isResizingObject) { state.isResizingObject = false; state.resizeHandle = null; syncUI(); return; }
 
     if (state.isDrawing && state.liveLayer) {
-      // Сохраняем фигуру в массив
       const newLayer = { ...state.liveLayer, id: generateId(), name: `${activeTool} Layer` };
       
-      // Нормализация ширины и высоты (чтобы не было отрицательных)
       if (newLayer.type === "RECT" || newLayer.type === "ELLIPSE") {
         if (newLayer.width < 0) { newLayer.x += newLayer.width; newLayer.width = Math.abs(newLayer.width); }
         if (newLayer.height < 0) { newLayer.y += newLayer.height; newLayer.height = Math.abs(newLayer.height); }
@@ -466,7 +450,6 @@ export default function OmniGraphicEditor({ query, onSecureArtifact }: { query?:
       state.liveLayer = null;
       state.isDrawing = false;
       
-      // Авто-переключение на Select после создания фигуры
       if (activeTool !== "PEN") {
         setActiveTool("SELECT");
         state.selectedId = newLayer.id;
@@ -475,12 +458,14 @@ export default function OmniGraphicEditor({ query, onSecureArtifact }: { query?:
     }
   };
 
+  // МАСШТАБИРОВАНИЕ
   const handleWheel = (e: React.WheelEvent) => {
     e.preventDefault();
     const state = engine.current;
     const zoomSensitivity = 0.002;
     const delta = -e.deltaY * zoomSensitivity;
     
+    // Безопасное ограничение масштаба
     const newScale = clip(state.viewport.scale * (1 + delta), 0.1, 10.0);
     
     if (containerRef.current) {
@@ -548,7 +533,6 @@ export default function OmniGraphicEditor({ query, onSecureArtifact }: { query?:
     syncUI();
   };
 
-  // Экспорт
   const exportCanvas = () => {
     const canvas = document.createElement("canvas");
     canvas.width = engine.current.canvasWidth;
@@ -556,7 +540,6 @@ export default function OmniGraphicEditor({ query, onSecureArtifact }: { query?:
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    // Временный рендер без фона и сеток
     engine.current.layers.forEach(layer => {
       if (!layer.visible) return;
       ctx.save();
@@ -583,6 +566,39 @@ export default function OmniGraphicEditor({ query, onSecureArtifact }: { query?:
     link.download = `omni-vector-export-${Date.now()}.png`;
     link.href = dataUrl;
     link.click();
+  };
+
+  const handleSecureToArchive = () => {
+    const canvas = document.createElement("canvas");
+    canvas.width = engine.current.canvasWidth;
+    canvas.height = engine.current.canvasHeight;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    
+    engine.current.layers.forEach(layer => {
+      if (!layer.visible) return;
+      ctx.save();
+      ctx.globalAlpha = layer.opacity / 100;
+      ctx.translate(layer.x + layer.width / 2, layer.y + layer.height / 2);
+      ctx.rotate((layer.rotation * Math.PI) / 180);
+      ctx.translate(-(layer.x + layer.width / 2), -(layer.y + layer.height / 2));
+      ctx.fillStyle = layer.fill || "transparent";
+      ctx.strokeStyle = layer.stroke || "transparent";
+      ctx.lineWidth = layer.strokeWidth || 0;
+      ctx.lineCap = "round"; ctx.lineJoin = "round";
+
+      if (layer.type === "RECT") { ctx.beginPath(); ctx.rect(layer.x, layer.y, layer.width, layer.height); if (layer.fill) ctx.fill(); if (layer.strokeWidth) ctx.stroke(); } 
+      else if (layer.type === "ELLIPSE") { ctx.beginPath(); ctx.ellipse(layer.x + layer.width/2, layer.y + layer.height/2, Math.abs(layer.width/2), Math.abs(layer.height/2), 0, 0, Math.PI * 2); if (layer.fill) ctx.fill(); if (layer.strokeWidth) ctx.stroke(); }
+      else if (layer.type === "IMAGE" && layer.imageObj) { ctx.drawImage(layer.imageObj, layer.x, layer.y, layer.width, layer.height); }
+      else if (layer.type === "TEXT" && layer.text) { ctx.font = `${layer.fontSize}px ${layer.fontFamily || "Inter"}`; ctx.fillStyle = layer.fill || "#ffffff"; ctx.textBaseline = "top"; ctx.fillText(layer.text, layer.x, layer.y); }
+      else if (layer.type === "PATH" && layer.points) { ctx.beginPath(); ctx.moveTo(layer.x + layer.points[0].x, layer.y + layer.points[0].y); for (let i = 1; i < layer.points.length; i++) ctx.lineTo(layer.x + layer.points[i].x, layer.y + layer.points[i].y); if (layer.strokeWidth) ctx.stroke(); }
+      ctx.restore();
+    });
+
+    const dataUrl = canvas.toDataURL("image/png");
+    if (onSecureArtifact) {
+      onSecureArtifact(dataUrl, `[OMNI VECTOR] ${query || "Art"}`);
+    }
   };
 
   const activeLayer = layersUI.find(l => l.id === selectedIdUI);
@@ -770,6 +786,18 @@ export default function OmniGraphicEditor({ query, onSecureArtifact }: { query?:
               ))}
               {layersUI.length === 0 && <div className="text-xs text-neutral-500 text-center py-4">Canvas is empty</div>}
             </div>
+            
+            {/* Кнопка сохранения в Resonance */}
+            {onSecureArtifact && (
+              <div className="p-4 mt-auto">
+                <button 
+                  onClick={handleSecureToArchive}
+                  className="w-full py-2.5 rounded-lg bg-white text-black hover:bg-neutral-200 text-xs font-bold transition-colors shadow-sm"
+                >
+                  Secure to Saved Resonance
+                </button>
+              </div>
+            )}
           </div>
           
         </aside>

@@ -2,12 +2,12 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
 
 // ==========================================
-// TYPES & INTERFACES (ВЕКТОРНАЯ АРХИТЕКТУРА)
+// TYPES & INTERFACES
 // ==========================================
 type ToolCategory = "SELECT" | "PAN" | "PEN" | "SHAPE" | "TEXT";
-type ShapeType = "RECTANGLE" | "ELLIPSE" | "TRIANGLE" | "STAR" | "ARROW" | "LINE";
+type ShapeType = "RECTANGLE" | "ELLIPSE" | "POLYGON" | "STAR" | "ARROW" | "LINE";
 type LayerType = "IMAGE" | "PATH" | "TEXT" | ShapeType;
-type BlendMode = "source-over" | "multiply" | "screen" | "overlay" | "darken" | "lighten" | "color-dodge" | "color-burn" | "difference" | "exclusion";
+type BlendMode = "source-over" | "multiply" | "screen" | "overlay" | "darken" | "lighten" | "color-dodge" | "color-burn" | "difference" | "exclusion" | "hue" | "saturation" | "color" | "luminosity";
 
 interface VectorPoint { x: number; y: number; }
 
@@ -28,6 +28,7 @@ interface CanvasLayer {
   stroke?: string;
   strokeWidth?: number;
   cornerRadius?: number;
+  sides?: number; // Для полигонов и звезд
   
   // Effects
   shadowColor?: string; shadowBlur?: number; shadowOffsetX?: number; shadowOffsetY?: number;
@@ -35,9 +36,8 @@ interface CanvasLayer {
 
   // Image Specifics
   imageObj?: HTMLImageElement;
-  originalImageObj?: HTMLImageElement; // Для восстановления после удаления фона
-  bgTolerance?: number; // Настройка удаления фона
-  brightness?: number; contrast?: number; saturation?: number; hue?: number; sepia?: number;
+  originalImageData?: ImageData; 
+  brightness?: number; contrast?: number; saturation?: number; hue?: number; sepia?: number; grayscale?: number; invert?: number;
   
   // Path Specifics
   points?: VectorPoint[];
@@ -59,11 +59,11 @@ interface Props {
 // ИКОНКИ (UI)
 // ==========================================
 const Icons = {
-  Select: () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/><path d="M13 13l6 6"/></svg>,
-  Pan: () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M5 9l-3 3 3 3M9 5l3-3 3 3M19 9l3 3-3 3M9 19l3 3 3-3M2 12h20M12 2v20"/></svg>,
-  Pen: () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/></svg>,
-  Shape: () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><path d="M3 9h18M9 21V9"/></svg>,
-  Text: () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="4" x2="12" y2="20"/></svg>,
+  Select: () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/><path d="M13 13l6 6"/></svg>,
+  Pan: () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M5 9l-3 3 3 3M9 5l3-3 3 3M19 9l3 3-3 3M9 19l3 3 3-3M2 12h20M12 2v20"/></svg>,
+  Pen: () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/></svg>,
+  Shape: () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><path d="M3 9h18M9 21V9"/></svg>,
+  Text: () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="4" x2="12" y2="20"/></svg>,
   Image: () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>,
   Magic: () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M2.5 21.5l14-14M17 3l4 4M21 11.5v-2M15 5.5h-2M3 13.5v-2M9 7.5h-2M19 19.5v-2M13 21.5h-2"/></svg>,
   Eye: () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>,
@@ -72,16 +72,23 @@ const Icons = {
   Unlock: () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/></svg>,
   Trash: () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>,
   Duplicate: () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>,
-  Up: () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="18 15 12 9 6 15"/></svg>,
-  Down: () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 9 12 15 18 9"/></svg>,
+  Undo: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 00-9-9 9 9 0 00-6 2.3L3 13"/></svg>,
+  Redo: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 7v6h-6"/><path d="M3 17a9 9 0 019-9 9 9 0 016 2.3l3 2.7"/></svg>,
   AlignLeft: () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="21" y1="6" x2="3" y2="6"/><line x1="15" y1="12" x2="3" y2="12"/><line x1="17" y1="18" x2="3" y2="18"/></svg>,
   AlignCenter: () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="21" y1="6" x2="3" y2="6"/><line x1="19" y1="12" x2="5" y2="12"/><line x1="17" y1="18" x2="7" y2="18"/></svg>,
   AlignRight: () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="21" y1="6" x2="3" y2="6"/><line x1="21" y1="12" x2="9" y2="12"/><line x1="21" y1="18" x2="7" y2="18"/></svg>,
-  Undo: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 00-9-9 9 9 0 00-6 2.3L3 13"/></svg>,
-  Redo: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 7v6h-6"/><path d="M3 17a9 9 0 019-9 9 9 0 016 2.3l3 2.7"/></svg>,
 };
 
-const FONTS = ["Inter", "Roboto", "Montserrat", "Open Sans", "Playfair Display", "Oswald", "Courier New", "Comic Sans MS", "Pacifico", "Impact"];
+const FONTS = [
+  "Inter", "Roboto", "Montserrat", "Open Sans", "Poppins", "Lato",
+  "Playfair Display", "Merriweather", "Georgia", 
+  "Courier New", "Monaco", "Pacifico", "Impact", "Comic Sans MS"
+];
+
+const BLEND_MODES = [
+  "source-over", "multiply", "screen", "overlay", "darken", "lighten", 
+  "color-dodge", "color-burn", "difference", "exclusion", "hue", "saturation", "color", "luminosity"
+];
 
 function clip(v: number, min = 0.0, max = 1.0): number { return Math.max(min, Math.min(max, v)); }
 function generateId() { return Math.random().toString(36).substr(2, 9); }
@@ -98,7 +105,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
   const [activeCategory, setActiveCategory] = useState<ToolCategory>("SELECT");
   const [activeShape, setActiveShape] = useState<ShapeType>("RECTANGLE");
   
-  const [currentColor, setCurrentColor] = useState<string>("#e5e5e5");
+  const [currentColor, setCurrentColor] = useState<string>("#D9D9D9");
   const [currentStrokeColor, setCurrentStrokeColor] = useState<string>("#0D99FF");
   const [currentStrokeWidth, setCurrentStrokeWidth] = useState<number>(3);
   const [canvasBgColor, setCanvasBgColor] = useState<string>("#1E1E1E"); 
@@ -106,9 +113,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
   const [layersUI, setLayersUI] = useState<CanvasLayer[]>([]);
   const [selectedIdUI, setSelectedIdUI] = useState<string | null>(null);
 
-  // ==========================================
-  // CORE ENGINE STATE (Используем Ref для 60FPS без ререндеров React)
-  // ==========================================
+  // CORE ENGINE
   const engine = useRef({
     layers: [] as CanvasLayer[],
     selectedId: null as string | null,
@@ -119,14 +124,14 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
     isDrawing: false,
     isDraggingObject: false,
     isResizingObject: false,
-    resizeHandle: null as string | null, // 'tl', 'tr', 'bl', 'br'
+    isRotatingObject: false,
+    resizeHandle: null as string | null, 
     startX: 0, startY: 0, lastX: 0, lastY: 0,
     liveLayer: null as CanvasLayer | null,
     historyStack: [] as string[], 
     historyIndex: -1,
   });
 
-  // Синхронизация Core State -> React UI
   const syncUI = useCallback(() => {
     setLayersUI([...engine.current.layers]);
     setSelectedIdUI(engine.current.selectedId);
@@ -138,7 +143,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
       state.historyStack = state.historyStack.slice(0, state.historyIndex + 1);
     }
     state.historyStack.push(JSON.stringify(state.layers));
-    if (state.historyStack.length > 30) state.historyStack.shift();
+    if (state.historyStack.length > 40) state.historyStack.shift();
     else state.historyIndex++;
   }, []);
 
@@ -151,7 +156,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
       newLayers.forEach(nl => {
         if (nl.type === "IMAGE") {
           const old = prevLayers.find(pl => pl.id === nl.id);
-          if (old && old.imageObj) { nl.imageObj = old.imageObj; nl.originalImageObj = old.originalImageObj; }
+          if (old && old.imageObj) { nl.imageObj = old.imageObj; nl.originalImageData = old.originalImageData; }
         }
       });
       state.layers = newLayers;
@@ -169,7 +174,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
       newLayers.forEach(nl => {
         if (nl.type === "IMAGE") {
           const old = prevLayers.find(pl => pl.id === nl.id);
-          if (old && old.imageObj) { nl.imageObj = old.imageObj; nl.originalImageObj = old.originalImageObj; }
+          if (old && old.imageObj) { nl.imageObj = old.imageObj; nl.originalImageData = old.originalImageData; }
         }
       });
       state.layers = newLayers;
@@ -178,7 +183,6 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
     }
   }, [syncUI]);
 
-  // Хоткеи
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (document.activeElement?.tagName === "INPUT" || document.activeElement?.tagName === "TEXTAREA") return;
@@ -205,41 +209,43 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
   }, [saveHistory]);
 
   // ==========================================
-  // MAGIC ERASER (BACKGROUND REMOVAL)
+  // MAGIC ERASER (CHROMA KEY / BACKGROUND REMOVAL)
   // ==========================================
-  const applyChromaKey = (layer: CanvasLayer, tolerance: number) => {
-    if (!layer.originalImageObj) return;
-    if (tolerance <= 0) {
-      layer.imageObj = layer.originalImageObj;
-      syncUI();
-      return;
-    }
-
+  const applyMagicEraser = (layer: CanvasLayer, targetColorHex: string, tolerance: number) => {
+    if (!layer.originalImageData) return;
+    
     const cvs = document.createElement('canvas');
-    cvs.width = layer.originalImageObj.width; 
-    cvs.height = layer.originalImageObj.height;
+    cvs.width = layer.width; 
+    cvs.height = layer.height;
     const ctx = cvs.getContext('2d')!;
-    ctx.drawImage(layer.originalImageObj, 0, 0);
-    const imgData = ctx.getImageData(0, 0, cvs.width, cvs.height);
-    const data = imgData.data;
     
-    // Берем цвет пикселя в левом верхнем углу за фон
-    const bgR = data[0], bgG = data[1], bgB = data[2];
+    // Восстанавливаем оригинальные пиксели перед новым вырезанием
+    ctx.putImageData(layer.originalImageData, 0, 0);
     
-    for (let i = 0; i < data.length; i += 4) {
-      const dr = data[i] - bgR;
-      const dg = data[i + 1] - bgG;
-      const db = data[i + 2] - bgB;
-      const distance = Math.sqrt(dr * dr + dg * dg + db * db);
+    if (tolerance > 0) {
+      const imgData = ctx.getImageData(0, 0, cvs.width, cvs.height);
+      const data = imgData.data;
       
-      if (distance < tolerance) {
-        data[i + 3] = 0; 
-      } else if (distance < tolerance + 15) {
-        data[i + 3] = ((distance - tolerance) / 15) * 255;
+      const hex = targetColorHex.replace('#', '');
+      const bgR = parseInt(hex.substring(0, 2), 16);
+      const bgG = parseInt(hex.substring(2, 4), 16);
+      const bgB = parseInt(hex.substring(4, 6), 16);
+      
+      for (let i = 0; i < data.length; i += 4) {
+        const dr = data[i] - bgR;
+        const dg = data[i + 1] - bgG;
+        const db = data[i + 2] - bgB;
+        const distance = Math.sqrt(dr * dr + dg * dg + db * db);
+        
+        if (distance < tolerance) {
+          data[i + 3] = 0; 
+        } else if (distance < tolerance + 20) {
+          data[i + 3] = ((distance - tolerance) / 20) * 255;
+        }
       }
+      ctx.putImageData(imgData, 0, 0);
     }
     
-    ctx.putImageData(imgData, 0, 0);
     const newImg = new Image();
     newImg.onload = () => {
       layer.imageObj = newImg;
@@ -271,18 +277,16 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
         ctx.scale(dpr, dpr);
       }
 
-      ctx.fillStyle = "#2C2C2C"; // Figma-like workspace dark background
+      ctx.fillStyle = "#141414"; // Темный фон за пределами холста
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
       ctx.save();
       ctx.translate(state.viewport.x, state.viewport.y);
       ctx.scale(state.viewport.scale, state.viewport.scale);
 
-      // Artboard shadow
-      ctx.shadowColor = "rgba(0,0,0,0.3)";
-      ctx.shadowBlur = 20;
-      ctx.shadowOffsetX = 0;
-      ctx.shadowOffsetY = 10;
+      // Artboard
+      ctx.shadowColor = "rgba(0,0,0,0.5)";
+      ctx.shadowBlur = 40;
       ctx.fillStyle = canvasBgColor;
       ctx.fillRect(0, 0, state.canvasWidth, state.canvasHeight);
       ctx.shadowColor = "transparent";
@@ -318,6 +322,8 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
           if (layer.saturation !== undefined && layer.saturation !== 100) filterStr += `saturate(${layer.saturation}%) `;
           if (layer.hue && layer.hue !== 0) filterStr += `hue-rotate(${layer.hue}deg) `;
           if (layer.sepia && layer.sepia > 0) filterStr += `sepia(${layer.sepia}%) `;
+          if (layer.grayscale && layer.grayscale > 0) filterStr += `grayscale(${layer.grayscale}%) `;
+          if (layer.invert && layer.invert > 0) filterStr += `invert(${layer.invert}%) `;
           if (layer.blur && layer.blur > 0) filterStr += `blur(${layer.blur}px) `;
           if (filterStr) ctx.filter = filterStr.trim();
         } else if (layer.blur && layer.blur > 0) {
@@ -330,7 +336,6 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
         ctx.lineCap = "round";
         ctx.lineJoin = "round";
 
-        // ОТРИСОВКА ФИГУР
         if (layer.type === "RECTANGLE") {
           ctx.beginPath();
           if (layer.cornerRadius && (ctx as any).roundRect) {
@@ -347,24 +352,31 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
           if (layer.fill && layer.fill !== "transparent") ctx.fill();
           if (layer.strokeWidth) ctx.stroke();
         }
-        else if (layer.type === "TRIANGLE") {
+        else if (layer.type === "POLYGON") {
           ctx.beginPath();
-          ctx.moveTo(layer.x + layer.width/2, layer.y);
-          ctx.lineTo(layer.x + layer.width, layer.y + layer.height);
-          ctx.lineTo(layer.x, layer.y + layer.height);
+          const sides = layer.sides || 3;
+          const r = Math.min(Math.abs(layer.width), Math.abs(layer.height)) / 2;
+          const centerX = layer.x + layer.width/2;
+          const centerY = layer.y + layer.height/2;
+          for (let i = 0; i < sides; i++) {
+            const a = (Math.PI * 2 * i) / sides - Math.PI / 2;
+            if (i === 0) ctx.moveTo(centerX + r * Math.cos(a), centerY + r * Math.sin(a));
+            else ctx.lineTo(centerX + r * Math.cos(a), centerY + r * Math.sin(a));
+          }
           ctx.closePath();
           if (layer.fill && layer.fill !== "transparent") ctx.fill();
           if (layer.strokeWidth) ctx.stroke();
         }
         else if (layer.type === "STAR") {
           ctx.beginPath();
-          const outerR = Math.min(layer.width, layer.height) / 2;
+          const points = layer.sides || 5;
+          const outerR = Math.min(Math.abs(layer.width), Math.abs(layer.height)) / 2;
           const innerR = outerR * 0.4;
           const centerX = layer.x + layer.width/2;
           const centerY = layer.y + layer.height/2;
-          for (let i = 0; i < 10; i++) {
+          for (let i = 0; i < points * 2; i++) {
             const r = i % 2 === 0 ? outerR : innerR;
-            const a = (Math.PI * 2 * i) / 10 - Math.PI / 2;
+            const a = (Math.PI * i) / points - Math.PI / 2;
             if (i === 0) ctx.moveTo(centerX + r * Math.cos(a), centerY + r * Math.sin(a));
             else ctx.lineTo(centerX + r * Math.cos(a), centerY + r * Math.sin(a));
           }
@@ -377,8 +389,8 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
           const hw = layer.strokeWidth || 4;
           const headL = Math.max(15, hw * 3);
           const headW = Math.max(15, hw * 3);
-          const p1 = {x: layer.x, y: layer.y};
-          const p2 = {x: layer.x + layer.width, y: layer.y + layer.height};
+          const p1 = {x: layer.x, y: layer.y + layer.height/2};
+          const p2 = {x: layer.x + layer.width, y: layer.y + layer.height/2};
           const angle = Math.atan2(p2.y - p1.y, p2.x - p1.x);
           
           ctx.moveTo(p1.x, p1.y);
@@ -403,7 +415,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
           ctx.drawImage(layer.imageObj, layer.x, layer.y, layer.width, layer.height);
         }
         else if (layer.type === "TEXT" && layer.text) {
-          ctx.font = `${layer.fontWeight || "normal"} ${layer.fontSize}px ${layer.fontFamily || "Inter, sans-serif"}`;
+          ctx.font = `${layer.fontWeight || "normal"} ${layer.fontSize}px ${layer.fontFamily || "Inter"}`;
           ctx.fillStyle = layer.fill || "#ffffff";
           ctx.textBaseline = "top";
           ctx.textAlign = layer.textAlign || "left";
@@ -432,7 +444,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
 
         ctx.restore();
 
-        // 5. Отрисовка Bounding Box (Выделение) в стиле Figma
+        // 5. Отрисовка Bounding Box (Выделение + Rotation Handle)
         if (state.selectedId === layer.id && !layer.locked) {
           ctx.save();
           ctx.translate(cx, cy);
@@ -460,6 +472,13 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
           drawHandle(layer.x + layer.width, layer.y); 
           drawHandle(layer.x, layer.y + layer.height); 
           drawHandle(layer.x + layer.width, layer.y + layer.height); 
+          
+          // Rotation handle
+          ctx.beginPath();
+          ctx.moveTo(layer.x + layer.width/2, layer.y);
+          ctx.lineTo(layer.x + layer.width/2, layer.y - 25 / state.viewport.scale);
+          ctx.stroke();
+          drawHandle(layer.x + layer.width/2, layer.y - 25 / state.viewport.scale);
           
           ctx.restore();
         }
@@ -507,7 +526,17 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
       if (state.selectedId) {
         const layer = state.layers.find(l => l.id === state.selectedId);
         if (layer && !layer.locked && layer.visible) {
-          const hSize = 10 / state.viewport.scale;
+          const hSize = 12 / state.viewport.scale;
+          
+          // Простая эвристика вращения (верхний маркер) - без учета текущего угла для простоты старта
+          const rotHX = layer.x + layer.width/2;
+          const rotHY = layer.y - 25 / state.viewport.scale;
+          
+          if (Math.hypot(pos.x - rotHX, pos.y - rotHY) < hSize) {
+            state.isRotatingObject = true;
+            return;
+          }
+
           const handles = [
             { id: "tl", x: layer.x, y: layer.y },
             { id: "tr", x: layer.x + layer.width, y: layer.y },
@@ -574,7 +603,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
       state.liveLayer = {
         id: "live", name: activeShape, type: activeShape,
         x: pos.x, y: pos.y, width: 0, height: 0, rotation: 0, opacity: 100, visible: true, locked: false, blendMode: "source-over",
-        stroke: currentStrokeWidth > 0 ? currentStrokeColor : "transparent", strokeWidth: currentStrokeWidth, fill: currentColor, cornerRadius: 0
+        stroke: currentStrokeWidth > 0 ? currentStrokeColor : "transparent", strokeWidth: currentStrokeWidth, fill: currentColor, cornerRadius: 0, sides: activeShape === "STAR" ? 5 : 3
       };
       if (activeShape === "LINE" || activeShape === "ARROW") state.liveLayer.fill = "transparent";
     }
@@ -593,6 +622,17 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
     const pos = getCanvasPos(e);
     const dx = pos.x - state.lastX;
     const dy = pos.y - state.lastY;
+
+    if (state.isRotatingObject && state.selectedId) {
+      const layer = state.layers.find(l => l.id === state.selectedId);
+      if (layer) {
+        const cx = layer.x + layer.width / 2;
+        const cy = layer.y + layer.height / 2;
+        const angle = Math.atan2(pos.y - cy, pos.x - cx);
+        layer.rotation = (angle * 180) / Math.PI + 90; 
+      }
+      return;
+    }
 
     if (state.isDraggingObject && state.selectedId) {
       const layer = state.layers.find(l => l.id === state.selectedId);
@@ -627,15 +667,14 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
     const state = engine.current;
     
     if (state.isPanning) { state.isPanning = false; document.body.style.cursor = "default"; return; }
-    if (state.isDraggingObject || state.isResizingObject) { 
-      state.isDraggingObject = false; state.isResizingObject = false; state.resizeHandle = null; 
+    if (state.isDraggingObject || state.isResizingObject || state.isRotatingObject) { 
+      state.isDraggingObject = false; state.isResizingObject = false; state.isRotatingObject = false; state.resizeHandle = null; 
       saveHistory(); syncUI(); return; 
     }
 
     if (state.isDrawing && state.liveLayer) {
       const newLayer = { ...state.liveLayer, id: generateId(), name: `${activeCategory === "SHAPE" ? activeShape : activeCategory}` };
       
-      // ИДЕАЛЬНЫЙ BOUNDING BOX ДЛЯ ПЕРА
       if (newLayer.type === "PATH" && newLayer.points && newLayer.points.length > 0) {
         let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
         newLayer.points.forEach(p => {
@@ -647,7 +686,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
         newLayer.width = Math.max(10, maxX - minX); newLayer.height = Math.max(10, maxY - minY);
         newLayer.points = newLayer.points.map(p => ({ x: p.x - minX, y: p.y - minY }));
       } 
-      else if (newLayer.type === "RECTANGLE" || newLayer.type === "ELLIPSE" || newLayer.type === "LINE" || newLayer.type === "ARROW" || newLayer.type === "TRIANGLE" || newLayer.type === "STAR") {
+      else if (newLayer.type !== "IMAGE" && newLayer.type !== "TEXT" && newLayer.type !== "PATH") {
         if (newLayer.width < 0) { newLayer.x += newLayer.width; newLayer.width = Math.abs(newLayer.width); }
         if (newLayer.height < 0) { newLayer.y += newLayer.height; newLayer.height = Math.abs(newLayer.height); }
         if (newLayer.width < 5 && newLayer.height < 5) { newLayer.width = 100; newLayer.height = 100; }
@@ -701,11 +740,19 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
           imgW *= ratio; imgH *= ratio;
         }
 
+        // Сохраняем ImageData для магии вырезания фона
+        const cvs = document.createElement('canvas');
+        cvs.width = img.width; cvs.height = img.height;
+        const ctx = cvs.getContext('2d')!;
+        ctx.drawImage(img, 0, 0);
+        const originalData = ctx.getImageData(0, 0, img.width, img.height);
+
         const newImage: CanvasLayer = {
           id: generateId(), name: file.name, type: "IMAGE",
           x: (state.canvasWidth - imgW) / 2, y: (state.canvasHeight - imgH) / 2, 
           width: imgW, height: imgH, rotation: 0, opacity: 100, visible: true, locked: false, blendMode: "source-over",
-          imageObj: img, originalImageObj: img, bgTolerance: 0, brightness: 100, contrast: 100, saturation: 100, hue: 0, sepia: 0
+          imageObj: img, originalImageObj: img, originalImageData: originalData,
+          bgTolerance: 0, brightness: 100, contrast: 100, saturation: 100, hue: 0, sepia: 0, grayscale: 0, invert: 0
         };
         state.layers.push(newImage);
         state.selectedId = newImage.id;
@@ -744,7 +791,6 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
     const layer = engine.current.layers.find(l => l.id === engine.current.selectedId);
     if (layer) {
       Object.assign(layer, updates);
-      if (layer.type === "IMAGE" && updates.bgTolerance !== undefined) applyChromaKey(layer, updates.bgTolerance);
       syncUI();
     }
   };
@@ -802,6 +848,8 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
         if (layer.saturation !== undefined && layer.saturation !== 100) filterStr += `saturate(${layer.saturation}%) `;
         if (layer.hue && layer.hue !== 0) filterStr += `hue-rotate(${layer.hue}deg) `;
         if (layer.sepia && layer.sepia > 0) filterStr += `sepia(${layer.sepia}%) `;
+        if (layer.grayscale && layer.grayscale > 0) filterStr += `grayscale(${layer.grayscale}%) `;
+        if (layer.invert && layer.invert > 0) filterStr += `invert(${layer.invert}%) `;
         if (layer.blur && layer.blur > 0) filterStr += `blur(${layer.blur}px) `;
         if (filterStr) ctx.filter = filterStr.trim();
       } else if (layer.blur && layer.blur > 0) {
@@ -815,10 +863,10 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
 
       if (layer.type === "RECTANGLE") { ctx.beginPath(); if (layer.cornerRadius && (ctx as any).roundRect) { (ctx as any).roundRect(layer.x, layer.y, layer.width, layer.height, layer.cornerRadius); } else { ctx.rect(layer.x, layer.y, layer.width, layer.height); } if (layer.fill && layer.fill !== "transparent") ctx.fill(); if (layer.strokeWidth) ctx.stroke(); } 
       else if (layer.type === "ELLIPSE") { ctx.beginPath(); ctx.ellipse(layer.x + layer.width/2, layer.y + layer.height/2, Math.abs(layer.width/2), Math.abs(layer.height/2), 0, 0, Math.PI * 2); if (layer.fill && layer.fill !== "transparent") ctx.fill(); if (layer.strokeWidth) ctx.stroke(); }
-      else if (layer.type === "TRIANGLE") { ctx.beginPath(); ctx.moveTo(layer.x + layer.width/2, layer.y); ctx.lineTo(layer.x + layer.width, layer.y + layer.height); ctx.lineTo(layer.x, layer.y + layer.height); ctx.closePath(); if (layer.fill && layer.fill !== "transparent") ctx.fill(); if (layer.strokeWidth) ctx.stroke(); }
-      else if (layer.type === "STAR") { ctx.beginPath(); const outerR = Math.min(layer.width, layer.height) / 2; const innerR = outerR * 0.4; const centerX = layer.x + layer.width/2; const centerY = layer.y + layer.height/2; for (let i = 0; i < 10; i++) { const r = i % 2 === 0 ? outerR : innerR; const a = (Math.PI * 2 * i) / 10 - Math.PI / 2; if (i === 0) ctx.moveTo(centerX + r * Math.cos(a), centerY + r * Math.sin(a)); else ctx.lineTo(centerX + r * Math.cos(a), centerY + r * Math.sin(a)); } ctx.closePath(); if (layer.fill && layer.fill !== "transparent") ctx.fill(); if (layer.strokeWidth) ctx.stroke(); }
+      else if (layer.type === "POLYGON") { ctx.beginPath(); const sides = layer.sides || 3; const r = Math.min(Math.abs(layer.width), Math.abs(layer.height)) / 2; const centerX = layer.x + layer.width/2; const centerY = layer.y + layer.height/2; for (let i = 0; i < sides; i++) { const a = (Math.PI * 2 * i) / sides - Math.PI / 2; if (i === 0) ctx.moveTo(centerX + r * Math.cos(a), centerY + r * Math.sin(a)); else ctx.lineTo(centerX + r * Math.cos(a), centerY + r * Math.sin(a)); } ctx.closePath(); if (layer.fill && layer.fill !== "transparent") ctx.fill(); if (layer.strokeWidth) ctx.stroke(); }
+      else if (layer.type === "STAR") { ctx.beginPath(); const points = layer.sides || 5; const outerR = Math.min(Math.abs(layer.width), Math.abs(layer.height)) / 2; const innerR = outerR * 0.4; const centerX = layer.x + layer.width/2; const centerY = layer.y + layer.height/2; for (let i = 0; i < points * 2; i++) { const r = i % 2 === 0 ? outerR : innerR; const a = (Math.PI * i) / points - Math.PI / 2; if (i === 0) ctx.moveTo(centerX + r * Math.cos(a), centerY + r * Math.sin(a)); else ctx.lineTo(centerX + r * Math.cos(a), centerY + r * Math.sin(a)); } ctx.closePath(); if (layer.fill && layer.fill !== "transparent") ctx.fill(); if (layer.strokeWidth) ctx.stroke(); }
+      else if (layer.type === "ARROW") { ctx.beginPath(); const hw = layer.strokeWidth || 4; const headL = Math.max(15, hw * 3); const headW = Math.max(15, hw * 3); const p1 = {x: layer.x, y: layer.y + layer.height/2}; const p2 = {x: layer.x + layer.width, y: layer.y + layer.height/2}; const angle = Math.atan2(p2.y - p1.y, p2.x - p1.x); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke(); ctx.fillStyle = ctx.strokeStyle; ctx.beginPath(); ctx.moveTo(p2.x, p2.y); ctx.lineTo(p2.x - headL * Math.cos(angle - Math.PI/6), p2.y - headW * Math.sin(angle - Math.PI/6)); ctx.lineTo(p2.x - headL * Math.cos(angle + Math.PI/6), p2.y - headW * Math.sin(angle + Math.PI/6)); ctx.closePath(); ctx.fill(); }
       else if (layer.type === "LINE") { ctx.beginPath(); ctx.moveTo(layer.x, layer.y); ctx.lineTo(layer.x + layer.width, layer.y + layer.height); if (layer.strokeWidth) ctx.stroke(); }
-      else if (layer.type === "ARROW") { ctx.beginPath(); const hw = layer.strokeWidth || 4; const headL = Math.max(15, hw * 3); const headW = Math.max(15, hw * 3); const p1 = {x: layer.x, y: layer.y}; const p2 = {x: layer.x + layer.width, y: layer.y + layer.height}; const angle = Math.atan2(p2.y - p1.y, p2.x - p1.x); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke(); ctx.fillStyle = ctx.strokeStyle; ctx.beginPath(); ctx.moveTo(p2.x, p2.y); ctx.lineTo(p2.x - headL * Math.cos(angle - Math.PI/6), p2.y - headW * Math.sin(angle - Math.PI/6)); ctx.lineTo(p2.x - headL * Math.cos(angle + Math.PI/6), p2.y - headW * Math.sin(angle + Math.PI/6)); ctx.closePath(); ctx.fill(); }
       else if (layer.type === "IMAGE" && layer.imageObj) { ctx.drawImage(layer.imageObj, layer.x, layer.y, layer.width, layer.height); }
       else if (layer.type === "TEXT" && layer.text) { ctx.font = `${layer.fontWeight || "normal"} ${layer.fontSize}px ${layer.fontFamily || "Inter"}`; ctx.fillStyle = layer.fill || "#ffffff"; ctx.textBaseline = "top"; ctx.textAlign = layer.textAlign || "left"; const textLines = layer.text.split('\n'); let tX = layer.x; if (layer.textAlign === "center") tX = layer.x + layer.width/2; if (layer.textAlign === "right") tX = layer.x + layer.width; textLines.forEach((line, i) => { ctx.fillText(line, tX, layer.y + i * (layer.fontSize || 24) * 1.2); }); }
       else if (layer.type === "PATH" && layer.points) { ctx.beginPath(); ctx.moveTo(layer.x + layer.points[0].x, layer.y + layer.points[0].y); for (let i = 1; i < layer.points.length; i++) ctx.lineTo(layer.x + layer.points[i].x, layer.y + layer.points[i].y); if (layer.strokeWidth) ctx.stroke(); }
@@ -857,6 +905,8 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
         if (layer.saturation !== undefined && layer.saturation !== 100) filterStr += `saturate(${layer.saturation}%) `;
         if (layer.hue && layer.hue !== 0) filterStr += `hue-rotate(${layer.hue}deg) `;
         if (layer.sepia && layer.sepia > 0) filterStr += `sepia(${layer.sepia}%) `;
+        if (layer.grayscale && layer.grayscale > 0) filterStr += `grayscale(${layer.grayscale}%) `;
+        if (layer.invert && layer.invert > 0) filterStr += `invert(${layer.invert}%) `;
         if (layer.blur && layer.blur > 0) filterStr += `blur(${layer.blur}px) `;
         if (filterStr) ctx.filter = filterStr.trim();
       } else if (layer.blur && layer.blur > 0) {
@@ -866,120 +916,108 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
 
       if (layer.type === "RECTANGLE") { ctx.beginPath(); if (layer.cornerRadius && (ctx as any).roundRect) { (ctx as any).roundRect(layer.x, layer.y, layer.width, layer.height, layer.cornerRadius); } else { ctx.rect(layer.x, layer.y, layer.width, layer.height); } if (layer.fill && layer.fill !== "transparent") ctx.fill(); if (layer.strokeWidth) ctx.stroke(); } 
       else if (layer.type === "ELLIPSE") { ctx.beginPath(); ctx.ellipse(layer.x + layer.width/2, layer.y + layer.height/2, Math.abs(layer.width/2), Math.abs(layer.height/2), 0, 0, Math.PI * 2); if (layer.fill && layer.fill !== "transparent") ctx.fill(); if (layer.strokeWidth) ctx.stroke(); }
-      else if (layer.type === "TRIANGLE") { ctx.beginPath(); ctx.moveTo(layer.x + layer.width/2, layer.y); ctx.lineTo(layer.x + layer.width, layer.y + layer.height); ctx.lineTo(layer.x, layer.y + layer.height); ctx.closePath(); if (layer.fill && layer.fill !== "transparent") ctx.fill(); if (layer.strokeWidth) ctx.stroke(); }
-      else if (layer.type === "STAR") { ctx.beginPath(); const outerR = Math.min(layer.width, layer.height) / 2; const innerR = outerR * 0.4; const centerX = layer.x + layer.width/2; const centerY = layer.y + layer.height/2; for (let i = 0; i < 10; i++) { const r = i % 2 === 0 ? outerR : innerR; const a = (Math.PI * 2 * i) / 10 - Math.PI / 2; if (i === 0) ctx.moveTo(centerX + r * Math.cos(a), centerY + r * Math.sin(a)); else ctx.lineTo(centerX + r * Math.cos(a), centerY + r * Math.sin(a)); } ctx.closePath(); if (layer.fill && layer.fill !== "transparent") ctx.fill(); if (layer.strokeWidth) ctx.stroke(); }
+      else if (layer.type === "POLYGON") { ctx.beginPath(); const sides = layer.sides || 3; const r = Math.min(Math.abs(layer.width), Math.abs(layer.height)) / 2; const centerX = layer.x + layer.width/2; const centerY = layer.y + layer.height/2; for (let i = 0; i < sides; i++) { const a = (Math.PI * 2 * i) / sides - Math.PI / 2; if (i === 0) ctx.moveTo(centerX + r * Math.cos(a), centerY + r * Math.sin(a)); else ctx.lineTo(centerX + r * Math.cos(a), centerY + r * Math.sin(a)); } ctx.closePath(); if (layer.fill && layer.fill !== "transparent") ctx.fill(); if (layer.strokeWidth) ctx.stroke(); }
+      else if (layer.type === "STAR") { ctx.beginPath(); const points = layer.sides || 5; const outerR = Math.min(Math.abs(layer.width), Math.abs(layer.height)) / 2; const innerR = outerR * 0.4; const centerX = layer.x + layer.width/2; const centerY = layer.y + layer.height/2; for (let i = 0; i < points * 2; i++) { const r = i % 2 === 0 ? outerR : innerR; const a = (Math.PI * i) / points - Math.PI / 2; if (i === 0) ctx.moveTo(centerX + r * Math.cos(a), centerY + r * Math.sin(a)); else ctx.lineTo(centerX + r * Math.cos(a), centerY + r * Math.sin(a)); } ctx.closePath(); if (layer.fill && layer.fill !== "transparent") ctx.fill(); if (layer.strokeWidth) ctx.stroke(); }
       else if (layer.type === "LINE") { ctx.beginPath(); ctx.moveTo(layer.x, layer.y); ctx.lineTo(layer.x + layer.width, layer.y + layer.height); if (layer.strokeWidth) ctx.stroke(); }
-      else if (layer.type === "ARROW") { ctx.beginPath(); const hw = layer.strokeWidth || 4; const headL = Math.max(15, hw * 3); const headW = Math.max(15, hw * 3); const p1 = {x: layer.x, y: layer.y}; const p2 = {x: layer.x + layer.width, y: layer.y + layer.height}; const angle = Math.atan2(p2.y - p1.y, p2.x - p1.x); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke(); ctx.fillStyle = ctx.strokeStyle; ctx.beginPath(); ctx.moveTo(p2.x, p2.y); ctx.lineTo(p2.x - headL * Math.cos(angle - Math.PI/6), p2.y - headW * Math.sin(angle - Math.PI/6)); ctx.lineTo(p2.x - headL * Math.cos(angle + Math.PI/6), p2.y - headW * Math.sin(angle + Math.PI/6)); ctx.closePath(); ctx.fill(); }
+      else if (layer.type === "ARROW") { ctx.beginPath(); const hw = layer.strokeWidth || 4; const headL = Math.max(15, hw * 3); const headW = Math.max(15, hw * 3); const p1 = {x: layer.x, y: layer.y + layer.height/2}; const p2 = {x: layer.x + layer.width, y: layer.y + layer.height/2}; const angle = Math.atan2(p2.y - p1.y, p2.x - p1.x); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke(); ctx.fillStyle = ctx.strokeStyle; ctx.beginPath(); ctx.moveTo(p2.x, p2.y); ctx.lineTo(p2.x - headL * Math.cos(angle - Math.PI/6), p2.y - headW * Math.sin(angle - Math.PI/6)); ctx.lineTo(p2.x - headL * Math.cos(angle + Math.PI/6), p2.y - headW * Math.sin(angle + Math.PI/6)); ctx.closePath(); ctx.fill(); }
       else if (layer.type === "IMAGE" && layer.imageObj) { ctx.drawImage(layer.imageObj, layer.x, layer.y, layer.width, layer.height); }
       else if (layer.type === "TEXT" && layer.text) { ctx.font = `${layer.fontWeight || "normal"} ${layer.fontSize}px ${layer.fontFamily || "Inter"}`; ctx.fillStyle = layer.fill || "#ffffff"; ctx.textBaseline = "top"; ctx.textAlign = layer.textAlign || "left"; const textLines = layer.text.split('\n'); let tX = layer.x; if (layer.textAlign === "center") tX = layer.x + layer.width/2; if (layer.textAlign === "right") tX = layer.x + layer.width; textLines.forEach((line, i) => { ctx.fillText(line, tX, layer.y + i * (layer.fontSize || 24) * 1.2); }); }
       else if (layer.type === "PATH" && layer.points) { ctx.beginPath(); ctx.moveTo(layer.x + layer.points[0].x, layer.y + layer.points[0].y); for (let i = 1; i < layer.points.length; i++) ctx.lineTo(layer.x + layer.points[i].x, layer.y + layer.points[i].y); if (layer.strokeWidth) ctx.stroke(); }
       ctx.restore();
     });
 
-    const dataUrl = canvas.toDataURL("image/png", 0.95);
+    const dataUrl = canvas.toDataURL("image/png");
     if (onSecureArtifact) {
-      onSecureArtifact(dataUrl, `[OMNI PRO] ${query || "Vector Art"}`);
+      onSecureArtifact(dataUrl, `[OMNI PRO] Graphic Art`);
     }
   };
 
   const activeLayer = layersUI.find(l => l.id === selectedIdUI);
 
   // ==========================================
-  // UI РЕНДЕР
+  // UI РЕНДЕР (FIGMA-LIKE)
   // ==========================================
   return (
     <div className="flex flex-col h-screen max-h-[85vh] bg-[#1E1E1E] text-neutral-300 font-sans text-sm overflow-hidden select-none border border-white/10 rounded-2xl">
       
-      {/* HEADER (Figma style) */}
-      <header className="h-12 bg-[#2C2C2C] border-b border-black/40 flex items-center justify-between px-4 z-10 shrink-0 shadow-md">
+      {/* HEADER */}
+      <header className="h-12 bg-[#2C2C2C] border-b border-black/40 flex items-center justify-between px-4 z-20 shrink-0 shadow-sm">
         <div className="flex items-center gap-4">
-          <div className="font-bold text-white tracking-wider flex items-center gap-2">
-            <div className="w-3 h-3 rounded-sm bg-[#0D99FF]"></div>
+          <div className="font-bold text-white tracking-wider flex items-center gap-2 text-xs">
+            <div className="w-2.5 h-2.5 rounded-sm bg-[#0D99FF]"></div>
             OMNI PRO
           </div>
           
-          <div className="h-5 w-px bg-white/10 mx-2"></div>
+          <div className="h-4 w-px bg-white/10 mx-1"></div>
 
-          {/* Инструменты холста */}
-          <div className="flex items-center gap-3 text-xs text-neutral-400">
+          <div className="flex items-center gap-3 text-[11px] text-neutral-400">
             <div className="flex items-center gap-1">
-              <span>W:</span>
-              <input type="number" value={engine.current.canvasWidth} onChange={e => { engine.current.canvasWidth = Number(e.target.value); syncUI(); }} className="w-14 bg-black/30 border border-white/10 rounded px-1 py-0.5 text-white text-center focus:border-[#0D99FF] outline-none hover:bg-black/50 transition-colors" />
+              <span>W</span>
+              <input type="number" value={engine.current.canvasWidth} onChange={e => { engine.current.canvasWidth = Number(e.target.value); syncUI(); }} className="w-12 bg-black/30 border border-white/10 rounded px-1 py-0.5 text-white text-center focus:border-[#0D99FF] outline-none hover:bg-black/50 transition-colors" />
             </div>
             <div className="flex items-center gap-1">
-              <span>H:</span>
-              <input type="number" value={engine.current.canvasHeight} onChange={e => { engine.current.canvasHeight = Number(e.target.value); syncUI(); }} className="w-14 bg-black/30 border border-white/10 rounded px-1 py-0.5 text-white text-center focus:border-[#0D99FF] outline-none hover:bg-black/50 transition-colors" />
+              <span>H</span>
+              <input type="number" value={engine.current.canvasHeight} onChange={e => { engine.current.canvasHeight = Number(e.target.value); syncUI(); }} className="w-12 bg-black/30 border border-white/10 rounded px-1 py-0.5 text-white text-center focus:border-[#0D99FF] outline-none hover:bg-black/50 transition-colors" />
             </div>
             
-            <div className="h-4 w-px bg-white/10 mx-1"></div>
-            
-            <div className="flex items-center gap-2" title="Canvas Background Color">
-              <span>Bg:</span>
-              <div className="relative w-5 h-5 rounded overflow-hidden border border-white/20">
-                <input type="color" value={canvasBgColor} onChange={e => setCanvasBgColor(e.target.value)} className="absolute -top-2 -left-2 w-10 h-10 cursor-pointer" />
+            <div className="flex items-center gap-2 ml-2" title="Canvas Background Color">
+              <span>Bg</span>
+              <div className="relative w-4 h-4 rounded overflow-hidden border border-white/20">
+                <input type="color" value={canvasBgColor} onChange={e => setCanvasBgColor(e.target.value)} className="absolute -top-2 -left-2 w-8 h-8 cursor-pointer" />
               </div>
             </div>
           </div>
         </div>
 
         <div className="flex items-center gap-3">
-          <div className="flex gap-1 mr-2">
-            <button onClick={handleUndo} title="Undo (Ctrl+Z)" className="p-1.5 hover:bg-white/10 rounded text-neutral-400 hover:text-white transition-colors"><Icons.Undo /></button>
-            <button onClick={handleRedo} title="Redo (Ctrl+Y)" className="p-1.5 hover:bg-white/10 rounded text-neutral-400 hover:text-white transition-colors"><Icons.Redo /></button>
-          </div>
           <span className="text-[10px] font-mono text-neutral-500 bg-black/30 px-2 py-1 rounded">{Math.round(engine.current.viewport.scale * 100)}%</span>
-          <div className="h-5 w-px bg-white/10 mx-1"></div>
+          <div className="h-4 w-px bg-white/10 mx-1"></div>
           <button onClick={() => fileInputRef.current?.click()} className="flex items-center gap-1.5 px-3 py-1.5 bg-white/5 hover:bg-white/10 rounded text-white transition-all text-xs font-medium border border-white/10">
-            <Icons.Image /> Import Image
+            <Icons.Image /> Import
           </button>
           <input type="file" ref={fileInputRef} onChange={handleImageImport} accept="image/*" className="hidden" />
-          <button onClick={exportCanvas} className="flex items-center gap-1.5 px-4 py-1.5 bg-[#0D99FF] hover:bg-blue-500 rounded text-white font-medium transition-all shadow-[0_0_15px_rgba(13,153,255,0.3)] text-xs">
+          <button onClick={exportCanvas} className="flex items-center gap-1.5 px-4 py-1.5 bg-[#0D99FF] hover:bg-blue-500 rounded text-white font-medium transition-all text-xs">
             Export PNG
           </button>
         </div>
       </header>
 
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-1 overflow-hidden relative">
         
-        {/* LEFT TOOLBAR */}
-        <aside className="w-14 bg-[#2C2C2C] border-r border-black/40 flex flex-col items-center py-3 gap-1 z-10 shrink-0">
-          <button onClick={() => { setActiveCategory("SELECT"); engine.current.selectedId = null; syncUI(); }} className={`w-9 h-9 rounded-lg flex items-center justify-center transition-all ${activeCategory === "SELECT" ? "bg-[#0D99FF]/20 text-[#0D99FF]" : "text-neutral-400 hover:bg-white/5 hover:text-white"}`} title="Select (V)"><Icons.Select /></button>
-          <button onClick={() => { setActiveCategory("PAN"); syncUI(); }} className={`w-9 h-9 rounded-lg flex items-center justify-center transition-all ${activeCategory === "PAN" ? "bg-[#0D99FF]/20 text-[#0D99FF]" : "text-neutral-400 hover:bg-white/5 hover:text-white"}`} title="Pan Tool (Space)"><Icons.Pan /></button>
-          
-          <div className="w-6 h-px bg-white/10 my-2"></div>
-          
-          <button onClick={() => { setActiveCategory("PEN"); engine.current.selectedId = null; syncUI(); }} className={`w-9 h-9 rounded-lg flex items-center justify-center transition-all ${activeCategory === "PEN" ? "bg-[#0D99FF]/20 text-[#0D99FF]" : "text-neutral-400 hover:bg-white/5 hover:text-white"}`} title="Pen Tool (P)"><Icons.Pen /></button>
-          <button onClick={() => { setActiveCategory("TEXT"); engine.current.selectedId = null; syncUI(); }} className={`w-9 h-9 rounded-lg flex items-center justify-center transition-all ${activeCategory === "TEXT" ? "bg-[#0D99FF]/20 text-[#0D99FF]" : "text-neutral-400 hover:bg-white/5 hover:text-white"}`} title="Text Tool (T)"><Icons.Text /></button>
-          
-          <div className="w-full relative group mt-1 flex justify-center">
-            <button onClick={() => { setActiveCategory("SHAPE"); engine.current.selectedId = null; syncUI(); }} className={`w-9 h-9 rounded-lg flex items-center justify-center transition-all ${activeCategory === "SHAPE" ? "bg-[#0D99FF]/20 text-[#0D99FF]" : "text-neutral-400 hover:bg-white/5 hover:text-white"}`} title="Shapes">
-              <Icons.Shape />
-            </button>
-            {/* Popover для фигур */}
-            <div className="absolute left-12 top-0 hidden group-hover:flex flex-col bg-[#2C2C2C] border border-black/40 rounded-lg p-1 shadow-xl z-50">
-              {(["RECTANGLE", "ELLIPSE", "TRIANGLE", "STAR", "ARROW", "LINE"] as ShapeType[]).map(shape => (
-                <button key={shape} onClick={() => { setActiveCategory("SHAPE"); setActiveShape(shape); engine.current.selectedId = null; syncUI(); }} className={`px-3 py-1.5 text-xs text-left hover:bg-[#0D99FF]/20 hover:text-[#0D99FF] rounded ${activeShape === shape ? "text-[#0D99FF]" : "text-neutral-300"}`}>
-                  {shape}
-                </button>
-              ))}
-            </div>
+        {/* LEFT SIDEBAR: LAYERS (FIGMA STYLE) */}
+        <aside className="w-64 bg-[#2C2C2C] border-r border-black/40 flex flex-col z-10 shrink-0 shadow-[4px_0_15px_rgba(0,0,0,0.2)]">
+          <div className="flex justify-between items-center p-3 border-b border-white/5 shrink-0">
+             <h3 className="text-[11px] font-bold text-white uppercase tracking-wider">Layers</h3>
+             <span className="text-[9px] text-neutral-500 bg-black/30 px-2 py-0.5 rounded">{layersUI.length}</span>
           </div>
           
-          <div className="w-6 h-px bg-white/10 my-3"></div>
-          
-          {/* Быстрые цвета */}
-          <div className="flex flex-col gap-2 w-full px-2">
-            <div className="text-[8px] text-neutral-500 text-center uppercase tracking-widest">Fill</div>
-            <div className="relative group w-7 h-7 rounded border border-white/20 overflow-hidden mx-auto cursor-pointer shadow-inner">
-              <input type="color" value={currentColor} onChange={e => setCurrentColor(e.target.value)} className="absolute -top-2 -left-2 w-12 h-12 cursor-pointer" />
-            </div>
-            
-            <div className="text-[8px] text-neutral-500 text-center uppercase tracking-widest mt-2">Stroke</div>
-            <div className="relative group w-7 h-7 rounded border border-white/20 overflow-hidden mx-auto cursor-pointer shadow-inner">
-              <input type="color" value={currentStrokeColor} onChange={e => setCurrentStrokeColor(e.target.value)} className="absolute -top-2 -left-2 w-12 h-12 cursor-pointer" />
-            </div>
-            
-            <input type="number" value={currentStrokeWidth} onChange={e => setCurrentStrokeWidth(Number(e.target.value))} className="w-8 mx-auto mt-1 bg-black/30 border border-white/10 rounded text-center text-xs text-white p-1 hover:bg-black/50" />
+          <div className="flex-1 overflow-y-auto p-2 space-y-0.5">
+            {[...layersUI].reverse().map(layer => (
+              <div 
+                key={layer.id} 
+                onClick={() => { engine.current.selectedId = layer.id; setActiveCategory("SELECT"); syncUI(); }}
+                className={`flex items-center gap-2 p-2 rounded cursor-pointer transition-all border text-xs ${selectedIdUI === layer.id ? "bg-[#0D99FF]/15 border-[#0D99FF]/30 text-white" : "border-transparent hover:bg-white/5 text-neutral-300"}`}
+              >
+                <div className="flex gap-1 shrink-0 text-neutral-500">
+                  <button onClick={(e) => { e.stopPropagation(); updateSelectedLayer({visible: !layer.visible}); commitLayerUpdate(); }} className="hover:text-white">
+                    {layer.visible ? <Icons.Eye /> : <Icons.EyeOff />}
+                  </button>
+                  <button onClick={(e) => { e.stopPropagation(); updateSelectedLayer({locked: !layer.locked}); commitLayerUpdate(); }} className="hover:text-white">
+                    {layer.locked ? <Icons.Lock /> : <Icons.Unlock />}
+                  </button>
+                </div>
+                
+                <span className="flex-1 truncate font-medium select-none ml-1">{layer.name}</span>
+                
+                {selectedIdUI === layer.id && (
+                  <div className="flex gap-0.5 shrink-0 text-neutral-400">
+                    <button onClick={(e) => { e.stopPropagation(); moveLayer(layer.id, "FRONT"); }} className="hover:text-white p-0.5 rounded hover:bg-white/10" title="Bring to Front"><Icons.Up /></button>
+                    <button onClick={(e) => { e.stopPropagation(); moveLayer(layer.id, "BACK"); }} className="hover:text-white p-0.5 rounded hover:bg-white/10" title="Send to Back"><Icons.Down /></button>
+                  </div>
+                )}
+              </div>
+            ))}
+            {layersUI.length === 0 && <div className="text-[11px] text-neutral-500 text-center py-8">Canvas is empty</div>}
           </div>
         </aside>
 
@@ -994,55 +1032,89 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
           onWheel={handleWheel}
         >
           <canvas ref={canvasRef} className="absolute top-0 left-0 w-full h-full pointer-events-none" />
+          
+          {/* FLOATING BOTTOM TOOLBAR (FIGMA STYLE) */}
+          <div className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-[#2C2C2C] border border-black/50 p-1.5 rounded-xl shadow-[0_10px_30px_rgba(0,0,0,0.5)] flex items-center gap-1 z-20 pointer-events-auto">
+            <button onClick={() => { setActiveCategory("SELECT"); engine.current.selectedId = null; syncUI(); }} className={`w-9 h-9 rounded-lg flex items-center justify-center transition-all ${activeCategory === "SELECT" ? "bg-[#0D99FF]/20 text-[#0D99FF]" : "text-neutral-400 hover:bg-white/10 hover:text-white"}`} title="Select (V)"><Icons.Select /></button>
+            <button onClick={() => { setActiveCategory("PAN"); syncUI(); }} className={`w-9 h-9 rounded-lg flex items-center justify-center transition-all ${activeCategory === "PAN" ? "bg-[#0D99FF]/20 text-[#0D99FF]" : "text-neutral-400 hover:bg-white/10 hover:text-white"}`} title="Pan Tool (Space)"><Icons.Pan /></button>
+            <div className="w-px h-6 bg-white/10 mx-1"></div>
+            <button onClick={() => { setActiveCategory("PEN"); engine.current.selectedId = null; syncUI(); }} className={`w-9 h-9 rounded-lg flex items-center justify-center transition-all ${activeCategory === "PEN" ? "bg-[#0D99FF]/20 text-[#0D99FF]" : "text-neutral-400 hover:bg-white/10 hover:text-white"}`} title="Pen Tool (P)"><Icons.Pen /></button>
+            <button onClick={() => { setActiveCategory("TEXT"); engine.current.selectedId = null; syncUI(); }} className={`w-9 h-9 rounded-lg flex items-center justify-center transition-all ${activeCategory === "TEXT" ? "bg-[#0D99FF]/20 text-[#0D99FF]" : "text-neutral-400 hover:bg-white/10 hover:text-white"}`} title="Text Tool (T)"><Icons.Text /></button>
+            
+            <div className="relative group">
+              <button onClick={() => { setActiveCategory("SHAPE"); engine.current.selectedId = null; syncUI(); }} className={`w-9 h-9 rounded-lg flex items-center justify-center transition-all ${activeCategory === "SHAPE" ? "bg-[#0D99FF]/20 text-[#0D99FF]" : "text-neutral-400 hover:bg-white/10 hover:text-white"}`} title="Shapes">
+                <Icons.Shape />
+              </button>
+              <div className="absolute bottom-12 left-1/2 -translate-x-1/2 hidden group-hover:flex flex-col bg-[#2C2C2C] border border-black/40 rounded-lg p-1.5 shadow-xl z-50 min-w-[120px]">
+                {(["RECTANGLE", "ELLIPSE", "POLYGON", "STAR", "ARROW", "LINE"] as ShapeType[]).map(shape => (
+                  <button key={shape} onClick={() => { setActiveCategory("SHAPE"); setActiveShape(shape); engine.current.selectedId = null; syncUI(); }} className={`px-3 py-2 text-[11px] font-medium text-left rounded transition-colors ${activeShape === shape ? "bg-[#0D99FF]/20 text-[#0D99FF]" : "text-neutral-300 hover:bg-white/10"}`}>
+                    {shape.charAt(0) + shape.slice(1).toLowerCase()}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="w-px h-6 bg-white/10 mx-1"></div>
+            
+            <div className="flex gap-1 ml-1 mr-2">
+              <button onClick={handleUndo} title="Undo (Ctrl+Z)" className="p-1.5 hover:bg-white/10 rounded-lg text-neutral-400 hover:text-white transition-colors"><Icons.Undo /></button>
+              <button onClick={handleRedo} title="Redo (Ctrl+Y)" className="p-1.5 hover:bg-white/10 rounded-lg text-neutral-400 hover:text-white transition-colors"><Icons.Redo /></button>
+            </div>
+          </div>
         </main>
 
-        {/* RIGHT SIDEBAR (Properties & Layers) */}
-        <aside className="w-72 bg-[#2C2C2C] border-l border-black/40 flex flex-col z-10 shrink-0 overflow-y-auto">
+        {/* RIGHT SIDEBAR (Properties) */}
+        <aside className="w-[280px] bg-[#2C2C2C] border-l border-black/40 flex flex-col z-10 shrink-0 overflow-y-auto shadow-[-4px_0_15px_rgba(0,0,0,0.2)]">
           
-          {/* ПРОПЕРТИ ПАНЕЛЬ АКТИВНОГО СЛОЯ */}
-          <div className="p-4 border-b border-black/40 min-h-[300px]">
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="text-[10px] font-bold text-white uppercase tracking-wider">Design</h3>
+          <div className="p-4 min-h-[300px]">
+            <div className="flex justify-between items-center mb-5 border-b border-white/5 pb-3">
+              <h3 className="text-[11px] font-bold text-white uppercase tracking-wider">Properties</h3>
               {activeLayer && (
                 <div className="flex gap-1">
-                  <button onClick={duplicateSelectedLayer} className="text-neutral-400 hover:text-white p-1" title="Duplicate (Ctrl+D)"><Icons.Duplicate /></button>
-                  <button onClick={deleteSelectedLayer} className="text-red-400 hover:text-red-300 bg-red-400/10 p-1 rounded" title="Delete (Del)"><Icons.Trash /></button>
+                  <button onClick={duplicateSelectedLayer} className="text-neutral-400 hover:text-white p-1 rounded hover:bg-white/10" title="Duplicate (Ctrl+D)"><Icons.Duplicate /></button>
+                  <button onClick={deleteSelectedLayer} className="text-red-400 hover:text-red-300 hover:bg-red-400/10 p-1 rounded transition-colors" title="Delete (Del)"><Icons.Trash /></button>
                 </div>
               )}
             </div>
             
             {activeLayer ? (
-              <div className="space-y-4">
+              <div className="space-y-5">
                 
                 {/* 1. LAYOUT */}
                 <div className="space-y-2">
                   <div className="grid grid-cols-2 gap-2">
-                    <div className="flex bg-[#1E1E1E] border border-white/10 rounded overflow-hidden hover:border-white/30 transition-colors">
-                      <span className="bg-transparent px-2 py-1 text-xs text-neutral-500">X</span>
-                      <input type="number" value={Math.round(activeLayer.x)} onChange={e => { updateSelectedLayer({x: Number(e.target.value)}); commitLayerUpdate(); }} className="w-full bg-transparent px-1 py-1 text-xs text-white outline-none" />
+                    <div className="flex bg-[#1E1E1E] border border-white/10 rounded overflow-hidden hover:border-white/30 transition-colors focus-within:border-[#0D99FF]">
+                      <span className="bg-transparent px-2 py-1.5 text-xs text-neutral-500 font-mono">X</span>
+                      <input type="number" value={Math.round(activeLayer.x)} onChange={e => { updateSelectedLayer({x: Number(e.target.value)}); commitLayerUpdate(); }} className="w-full bg-transparent px-1 py-1.5 text-xs text-white outline-none font-mono" />
                     </div>
-                    <div className="flex bg-[#1E1E1E] border border-white/10 rounded overflow-hidden hover:border-white/30 transition-colors">
-                      <span className="bg-transparent px-2 py-1 text-xs text-neutral-500">Y</span>
-                      <input type="number" value={Math.round(activeLayer.y)} onChange={e => { updateSelectedLayer({y: Number(e.target.value)}); commitLayerUpdate(); }} className="w-full bg-transparent px-1 py-1 text-xs text-white outline-none" />
+                    <div className="flex bg-[#1E1E1E] border border-white/10 rounded overflow-hidden hover:border-white/30 transition-colors focus-within:border-[#0D99FF]">
+                      <span className="bg-transparent px-2 py-1.5 text-xs text-neutral-500 font-mono">Y</span>
+                      <input type="number" value={Math.round(activeLayer.y)} onChange={e => { updateSelectedLayer({y: Number(e.target.value)}); commitLayerUpdate(); }} className="w-full bg-transparent px-1 py-1.5 text-xs text-white outline-none font-mono" />
                     </div>
-                    <div className="flex bg-[#1E1E1E] border border-white/10 rounded overflow-hidden hover:border-white/30 transition-colors">
-                      <span className="bg-transparent px-2 py-1 text-xs text-neutral-500">W</span>
-                      <input type="number" value={Math.round(activeLayer.width)} onChange={e => { updateSelectedLayer({width: Number(e.target.value)}); commitLayerUpdate(); }} className="w-full bg-transparent px-1 py-1 text-xs text-white outline-none" />
+                    <div className="flex bg-[#1E1E1E] border border-white/10 rounded overflow-hidden hover:border-white/30 transition-colors focus-within:border-[#0D99FF]">
+                      <span className="bg-transparent px-2 py-1.5 text-xs text-neutral-500 font-mono">W</span>
+                      <input type="number" value={Math.round(activeLayer.width)} onChange={e => { updateSelectedLayer({width: Number(e.target.value)}); commitLayerUpdate(); }} className="w-full bg-transparent px-1 py-1.5 text-xs text-white outline-none font-mono" />
                     </div>
-                    <div className="flex bg-[#1E1E1E] border border-white/10 rounded overflow-hidden hover:border-white/30 transition-colors">
-                      <span className="bg-transparent px-2 py-1 text-xs text-neutral-500">H</span>
-                      <input type="number" value={Math.round(activeLayer.height)} onChange={e => { updateSelectedLayer({height: Number(e.target.value)}); commitLayerUpdate(); }} className="w-full bg-transparent px-1 py-1 text-xs text-white outline-none" />
+                    <div className="flex bg-[#1E1E1E] border border-white/10 rounded overflow-hidden hover:border-white/30 transition-colors focus-within:border-[#0D99FF]">
+                      <span className="bg-transparent px-2 py-1.5 text-xs text-neutral-500 font-mono">H</span>
+                      <input type="number" value={Math.round(activeLayer.height)} onChange={e => { updateSelectedLayer({height: Number(e.target.value)}); commitLayerUpdate(); }} className="w-full bg-transparent px-1 py-1.5 text-xs text-white outline-none font-mono" />
                     </div>
                   </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="flex bg-[#1E1E1E] border border-white/10 rounded overflow-hidden hover:border-white/30 transition-colors">
-                      <span className="bg-transparent px-2 py-1 text-xs text-neutral-500">°</span>
-                      <input type="number" value={Math.round(activeLayer.rotation)} onChange={e => { updateSelectedLayer({rotation: Number(e.target.value)}); commitLayerUpdate(); }} className="w-full bg-transparent px-1 py-1 text-xs text-white outline-none" />
+                  <div className="grid grid-cols-2 gap-2 mt-2">
+                    <div className="flex bg-[#1E1E1E] border border-white/10 rounded overflow-hidden hover:border-white/30 transition-colors focus-within:border-[#0D99FF]" title="Rotation">
+                      <span className="bg-transparent px-2 py-1.5 text-xs text-neutral-500">°</span>
+                      <input type="number" value={Math.round(activeLayer.rotation)} onChange={e => { updateSelectedLayer({rotation: Number(e.target.value)}); commitLayerUpdate(); }} className="w-full bg-transparent px-1 py-1.5 text-xs text-white outline-none font-mono" />
                     </div>
                     {activeLayer.type === "RECTANGLE" && (
-                      <div className="flex bg-[#1E1E1E] border border-white/10 rounded overflow-hidden hover:border-white/30 transition-colors">
-                        <span className="bg-transparent px-2 py-1 text-xs text-neutral-500">R</span>
-                        <input type="number" value={activeLayer.cornerRadius || 0} onChange={e => { updateSelectedLayer({cornerRadius: Number(e.target.value)}); commitLayerUpdate(); }} className="w-full bg-transparent px-1 py-1 text-xs text-white outline-none" />
+                      <div className="flex bg-[#1E1E1E] border border-white/10 rounded overflow-hidden hover:border-white/30 transition-colors focus-within:border-[#0D99FF]" title="Corner Radius">
+                        <span className="bg-transparent px-2 py-1.5 text-xs text-neutral-500">R</span>
+                        <input type="number" value={activeLayer.cornerRadius || 0} onChange={e => { updateSelectedLayer({cornerRadius: Number(e.target.value)}); commitLayerUpdate(); }} className="w-full bg-transparent px-1 py-1.5 text-xs text-white outline-none font-mono" />
+                      </div>
+                    )}
+                    {(activeLayer.type === "POLYGON" || activeLayer.type === "STAR") && (
+                      <div className="flex bg-[#1E1E1E] border border-white/10 rounded overflow-hidden hover:border-white/30 transition-colors focus-within:border-[#0D99FF]" title="Sides / Points">
+                        <span className="bg-transparent px-2 py-1.5 text-xs text-neutral-500">Pts</span>
+                        <input type="number" min="3" max="20" value={activeLayer.sides || (activeLayer.type==="STAR"?5:3)} onChange={e => { updateSelectedLayer({sides: Number(e.target.value)}); commitLayerUpdate(); }} className="w-full bg-transparent px-1 py-1.5 text-xs text-white outline-none font-mono" />
                       </div>
                     )}
                   </div>
@@ -1050,181 +1122,169 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
 
                 {/* 2. TEXT PROPERTIES */}
                 {activeLayer.type === "TEXT" && (
-                  <div className="space-y-2 border-t border-white/10 pt-3">
-                    <div className="text-[10px] font-semibold text-neutral-500 uppercase">Text</div>
-                    <textarea value={activeLayer.text} onChange={e => { updateSelectedLayer({text: e.target.value}); commitLayerUpdate(); }} className="w-full bg-[#1E1E1E] border border-white/10 rounded p-2 text-xs text-white outline-none min-h-[60px] focus:border-[#0D99FF]" />
+                  <div className="space-y-3 border-t border-white/10 pt-4">
+                    <h4 className="text-[10px] font-bold text-neutral-500 uppercase tracking-wider">Typography</h4>
                     
-                    <select value={activeLayer.fontFamily} onChange={e => { updateSelectedLayer({fontFamily: e.target.value}); commitLayerUpdate(); }} className="w-full bg-[#1E1E1E] border border-white/10 rounded px-2 py-1.5 text-xs text-white outline-none hover:border-white/30">
+                    <select value={activeLayer.fontFamily} onChange={e => { updateSelectedLayer({fontFamily: e.target.value}); commitLayerUpdate(); }} className="w-full bg-[#1E1E1E] border border-white/10 rounded px-2 py-2 text-xs text-white outline-none hover:border-white/30 focus:border-[#0D99FF] cursor-pointer">
                       {FONTS.map(f => <option key={f} value={f}>{f}</option>)}
                     </select>
 
                     <div className="flex gap-2">
-                      <select value={activeLayer.fontWeight} onChange={e => { updateSelectedLayer({fontWeight: e.target.value}); commitLayerUpdate(); }} className="flex-1 bg-[#1E1E1E] border border-white/10 rounded px-2 py-1.5 text-xs text-white outline-none hover:border-white/30">
+                      <select value={activeLayer.fontWeight} onChange={e => { updateSelectedLayer({fontWeight: e.target.value}); commitLayerUpdate(); }} className="flex-1 bg-[#1E1E1E] border border-white/10 rounded px-2 py-1.5 text-xs text-white outline-none hover:border-white/30 focus:border-[#0D99FF] cursor-pointer">
+                        <option value="300">Light</option>
                         <option value="400">Regular</option>
+                        <option value="500">Medium</option>
                         <option value="600">Semi Bold</option>
-                        <option value="800">Extra Bold</option>
+                        <option value="700">Bold</option>
+                        <option value="900">Black</option>
                       </select>
-                      <input type="number" value={activeLayer.fontSize} onChange={e => { updateSelectedLayer({fontSize: Number(e.target.value)}); commitLayerUpdate(); }} placeholder="Size" className="w-16 bg-[#1E1E1E] border border-white/10 rounded px-2 py-1 text-xs text-white outline-none text-center hover:border-white/30" />
+                      <input type="number" value={activeLayer.fontSize} onChange={e => { updateSelectedLayer({fontSize: Number(e.target.value)}); commitLayerUpdate(); }} placeholder="Size" className="w-16 bg-[#1E1E1E] border border-white/10 rounded px-2 py-1.5 text-xs text-white outline-none text-center hover:border-white/30 focus:border-[#0D99FF]" />
                     </div>
 
-                    <div className="flex bg-[#1E1E1E] border border-white/10 rounded overflow-hidden">
-                      <button onClick={() => { updateSelectedLayer({textAlign: "left"}); commitLayerUpdate(); }} className={`flex-1 flex justify-center py-1.5 hover:bg-white/10 ${activeLayer.textAlign === "left" ? "bg-white/10 text-white" : "text-neutral-500"}`}><Icons.AlignLeft /></button>
-                      <button onClick={() => { updateSelectedLayer({textAlign: "center"}); commitLayerUpdate(); }} className={`flex-1 flex justify-center py-1.5 hover:bg-white/10 border-x border-white/10 ${activeLayer.textAlign === "center" ? "bg-white/10 text-white" : "text-neutral-500"}`}><Icons.AlignCenter /></button>
-                      <button onClick={() => { updateSelectedLayer({textAlign: "right"}); commitLayerUpdate(); }} className={`flex-1 flex justify-center py-1.5 hover:bg-white/10 ${activeLayer.textAlign === "right" ? "bg-white/10 text-white" : "text-neutral-500"}`}><Icons.AlignRight /></button>
+                    <div className="flex bg-[#1E1E1E] border border-white/10 rounded overflow-hidden p-0.5">
+                      <button onClick={() => { updateSelectedLayer({textAlign: "left"}); commitLayerUpdate(); }} className={`flex-1 flex justify-center py-1.5 rounded ${activeLayer.textAlign === "left" ? "bg-white/10 text-white shadow-sm" : "text-neutral-500 hover:text-white"}`}><Icons.AlignLeft /></button>
+                      <button onClick={() => { updateSelectedLayer({textAlign: "center"}); commitLayerUpdate(); }} className={`flex-1 flex justify-center py-1.5 rounded ${activeLayer.textAlign === "center" ? "bg-white/10 text-white shadow-sm" : "text-neutral-500 hover:text-white"}`}><Icons.AlignCenter /></button>
+                      <button onClick={() => { updateSelectedLayer({textAlign: "right"}); commitLayerUpdate(); }} className={`flex-1 flex justify-center py-1.5 rounded ${activeLayer.textAlign === "right" ? "bg-white/10 text-white shadow-sm" : "text-neutral-500 hover:text-white"}`}><Icons.AlignRight /></button>
                     </div>
+
+                    <textarea value={activeLayer.text} onChange={e => { updateSelectedLayer({text: e.target.value}); commitLayerUpdate(); }} className="w-full bg-[#1E1E1E] border border-white/10 rounded p-2 text-xs text-white outline-none min-h-[80px] focus:border-[#0D99FF] resize-y mt-2" placeholder="Text Content..." />
                   </div>
                 )}
 
                 {/* 3. APPEARANCE (Fill, Stroke, Blend) */}
-                <div className="space-y-2 border-t border-white/10 pt-3">
+                <div className="space-y-4 border-t border-white/10 pt-4">
                   
                   <div className="flex items-center justify-between">
-                    <span className="text-xs text-neutral-400 font-medium">Blend Mode</span>
-                    <select value={activeLayer.blendMode || "source-over"} onChange={e => { updateSelectedLayer({blendMode: e.target.value as BlendMode}); commitLayerUpdate(); }} className="bg-[#1E1E1E] border border-white/10 rounded px-2 py-1 text-xs text-white outline-none w-28 hover:border-white/30">
-                      <option value="source-over">Normal</option>
-                      <option value="multiply">Multiply</option>
-                      <option value="screen">Screen</option>
-                      <option value="overlay">Overlay</option>
-                      <option value="color-dodge">Color Dodge</option>
+                    <span className="text-xs text-neutral-400 font-medium">Blend</span>
+                    <select value={activeLayer.blendMode || "source-over"} onChange={e => { updateSelectedLayer({blendMode: e.target.value as BlendMode}); commitLayerUpdate(); }} className="bg-[#1E1E1E] border border-white/10 rounded px-2 py-1.5 text-xs text-white outline-none w-32 hover:border-white/30 focus:border-[#0D99FF] cursor-pointer">
+                      {BLEND_MODES.map(m => <option key={m} value={m}>{m.replace('-', ' ').replace(/\b\w/g, l => l.toUpperCase())}</option>)}
                     </select>
                   </div>
 
-                  <div className="flex items-center justify-between gap-3 pt-1">
-                    <span className="text-xs text-neutral-400 font-medium">Layer</span>
-                    <input type="range" min="0" max="100" value={activeLayer.opacity} onChange={e => updateSelectedLayer({opacity: Number(e.target.value)})} onMouseUp={commitLayerUpdate} className="flex-1 accent-[#0D99FF] h-1 bg-white/10 rounded-lg appearance-none" />
-                    <span className="text-xs w-8 text-right font-mono">{activeLayer.opacity}%</span>
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-xs text-neutral-400 font-medium">Opacity</span>
+                    <input type="range" min="0" max="100" value={activeLayer.opacity} onChange={e => updateSelectedLayer({opacity: Number(e.target.value)})} onMouseUp={commitLayerUpdate} className="flex-1 accent-[#0D99FF] h-1 bg-white/10 rounded-lg appearance-none cursor-pointer" />
+                    <span className="text-xs w-8 text-right font-mono text-white">{activeLayer.opacity}%</span>
                   </div>
 
                   {activeLayer.type !== "IMAGE" && (
-                    <div className="flex items-center gap-3 mt-3">
-                      <div className="relative w-5 h-5 rounded border border-white/20 overflow-hidden shrink-0">
+                    <div className="flex items-center gap-3">
+                      <div className="relative w-6 h-6 rounded border border-white/20 overflow-hidden shrink-0 shadow-inner">
                         <input type="color" value={activeLayer.fill === "transparent" ? "#000000" : activeLayer.fill} onChange={e => { updateSelectedLayer({fill: e.target.value}); commitLayerUpdate(); }} className="absolute -top-2 -left-2 w-10 h-10 cursor-pointer" />
                       </div>
                       <span className="text-xs text-neutral-300 font-medium flex-1">Fill</span>
-                      <button onClick={() => { updateSelectedLayer({fill: "transparent"}); commitLayerUpdate(); }} className="text-[10px] text-neutral-500 hover:text-white px-2 py-1 bg-white/5 rounded border border-white/10">Clear</button>
+                      <button onClick={() => { updateSelectedLayer({fill: "transparent"}); commitLayerUpdate(); }} className="text-[10px] font-bold text-neutral-500 hover:text-white px-2 py-1 bg-white/5 rounded border border-white/10 transition-colors">CLEAR</button>
                     </div>
                   )}
 
                   {activeLayer.type !== "IMAGE" && activeLayer.type !== "TEXT" && (
-                    <div className="flex items-center gap-3 mt-2">
-                      <div className="relative w-5 h-5 rounded border border-white/20 overflow-hidden shrink-0">
+                    <div className="flex items-center gap-3">
+                      <div className="relative w-6 h-6 rounded border border-white/20 overflow-hidden shrink-0 shadow-inner">
                         <input type="color" value={activeLayer.stroke === "transparent" ? "#000000" : activeLayer.stroke} onChange={e => { updateSelectedLayer({stroke: e.target.value}); commitLayerUpdate(); }} className="absolute -top-2 -left-2 w-10 h-10 cursor-pointer" />
                       </div>
                       <span className="text-xs text-neutral-300 font-medium">Stroke</span>
-                      <input type="number" value={activeLayer.strokeWidth || 0} onChange={e => { updateSelectedLayer({strokeWidth: Number(e.target.value)}); commitLayerUpdate(); }} className="w-12 bg-[#1E1E1E] border border-white/10 rounded px-1 py-1 text-xs text-white ml-auto text-center hover:border-white/30" />
+                      <input type="number" value={activeLayer.strokeWidth || 0} onChange={e => { updateSelectedLayer({strokeWidth: Number(e.target.value)}); commitLayerUpdate(); }} className="w-14 bg-[#1E1E1E] border border-white/10 rounded px-2 py-1.5 text-xs text-white ml-auto text-center hover:border-white/30 focus:border-[#0D99FF] outline-none" />
                     </div>
                   )}
                 </div>
 
                 {/* 4. EFFECTS & ADJUSTMENTS */}
-                <div className="space-y-3 border-t border-white/10 pt-3">
-                  <div className="text-[10px] font-semibold text-neutral-500 uppercase">Effects</div>
+                <div className="space-y-4 border-t border-white/10 pt-4">
+                  <h4 className="text-[10px] font-bold text-neutral-500 uppercase tracking-wider">Effects & Adjustments</h4>
                   
                   {activeLayer.type === "IMAGE" && (
-                    <div className="space-y-3 bg-[#1E1E1E] p-3 rounded-lg border border-white/5">
+                    <div className="space-y-4 bg-[#1E1E1E] p-3.5 rounded-xl border border-white/5 shadow-inner">
                       
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-[10px] text-blue-400 font-bold flex items-center gap-1"><Icons.Magic /> Magic Eraser</span>
-                        <input type="range" min="0" max="255" value={activeLayer.bgTolerance || 0} onChange={e => updateSelectedLayer({bgTolerance: Number(e.target.value)})} onMouseUp={commitLayerUpdate} className="w-24 accent-blue-500 h-1 bg-white/10 rounded-lg appearance-none" title="Tolerance" />
+                      <div className="flex items-center justify-between mb-3 border-b border-white/5 pb-3">
+                        <span className="text-[11px] text-[#0D99FF] font-bold flex items-center gap-1.5"><Icons.Magic /> Magic Eraser</span>
+                        <div className="flex items-center gap-2">
+                           <input type="range" min="0" max="255" value={activeLayer.bgTolerance || 0} onChange={e => updateSelectedLayer({bgTolerance: Number(e.target.value)})} className="w-20 accent-[#0D99FF] h-1 bg-white/10 rounded-lg appearance-none cursor-pointer" title="Tolerance" />
+                           <button onClick={() => updateSelectedLayer({bgTolerance: 0})} className="text-[9px] bg-white/10 hover:bg-white/20 px-1.5 py-0.5 rounded text-white">Reset</button>
+                        </div>
                       </div>
 
-                      <div className="space-y-1">
-                        <div className="flex justify-between text-[10px] text-neutral-400"><span>Brightness</span><span>{activeLayer.brightness || 100}%</span></div>
-                        <input type="range" min="0" max="200" value={activeLayer.brightness || 100} onChange={e => updateSelectedLayer({brightness: Number(e.target.value)})} onMouseUp={commitLayerUpdate} className="w-full accent-[#0D99FF] h-1 bg-white/10 rounded-lg appearance-none" />
+                      <div className="space-y-1.5">
+                        <div className="flex justify-between text-[10px] text-neutral-400"><span>Brightness</span><span className="font-mono">{activeLayer.brightness || 100}%</span></div>
+                        <input type="range" min="0" max="200" value={activeLayer.brightness || 100} onChange={e => updateSelectedLayer({brightness: Number(e.target.value)})} onMouseUp={commitLayerUpdate} className="w-full accent-white h-1 bg-white/10 rounded-lg appearance-none cursor-pointer" />
                       </div>
-                      <div className="space-y-1">
-                        <div className="flex justify-between text-[10px] text-neutral-400"><span>Contrast</span><span>{activeLayer.contrast || 100}%</span></div>
-                        <input type="range" min="0" max="200" value={activeLayer.contrast || 100} onChange={e => updateSelectedLayer({contrast: Number(e.target.value)})} onMouseUp={commitLayerUpdate} className="w-full accent-[#0D99FF] h-1 bg-white/10 rounded-lg appearance-none" />
+                      <div className="space-y-1.5">
+                        <div className="flex justify-between text-[10px] text-neutral-400"><span>Contrast</span><span className="font-mono">{activeLayer.contrast || 100}%</span></div>
+                        <input type="range" min="0" max="200" value={activeLayer.contrast || 100} onChange={e => updateSelectedLayer({contrast: Number(e.target.value)})} onMouseUp={commitLayerUpdate} className="w-full accent-white h-1 bg-white/10 rounded-lg appearance-none cursor-pointer" />
                       </div>
-                      <div className="space-y-1">
-                        <div className="flex justify-between text-[10px] text-neutral-400"><span>Saturation</span><span>{activeLayer.saturation || 100}%</span></div>
-                        <input type="range" min="0" max="200" value={activeLayer.saturation || 100} onChange={e => updateSelectedLayer({saturation: Number(e.target.value)})} onMouseUp={commitLayerUpdate} className="w-full accent-[#0D99FF] h-1 bg-white/10 rounded-lg appearance-none" />
+                      <div className="space-y-1.5">
+                        <div className="flex justify-between text-[10px] text-neutral-400"><span>Saturation</span><span className="font-mono">{activeLayer.saturation || 100}%</span></div>
+                        <input type="range" min="0" max="200" value={activeLayer.saturation || 100} onChange={e => updateSelectedLayer({saturation: Number(e.target.value)})} onMouseUp={commitLayerUpdate} className="w-full accent-white h-1 bg-white/10 rounded-lg appearance-none cursor-pointer" />
                       </div>
-                      <div className="space-y-1">
-                        <div className="flex justify-between text-[10px] text-neutral-400"><span>Hue / Sepia</span></div>
-                        <div className="flex gap-2">
-                           <input type="range" min="-180" max="180" value={activeLayer.hue || 0} onChange={e => updateSelectedLayer({hue: Number(e.target.value)})} onMouseUp={commitLayerUpdate} className="w-full accent-[#0D99FF] h-1 bg-gradient-to-r from-red-500 via-green-500 to-blue-500 rounded-lg appearance-none" title="Hue" />
-                           <input type="range" min="0" max="100" value={activeLayer.sepia || 0} onChange={e => updateSelectedLayer({sepia: Number(e.target.value)})} onMouseUp={commitLayerUpdate} className="w-full accent-[#0D99FF] h-1 bg-gradient-to-r from-transparent to-[#704214] rounded-lg appearance-none" title="Sepia" />
+                      
+                      <div className="grid grid-cols-2 gap-3 pt-2">
+                        <div className="space-y-1.5">
+                           <div className="text-[10px] text-neutral-400 text-center">Hue</div>
+                           <input type="range" min="-180" max="180" value={activeLayer.hue || 0} onChange={e => updateSelectedLayer({hue: Number(e.target.value)})} onMouseUp={commitLayerUpdate} className="w-full accent-white h-1.5 bg-gradient-to-r from-red-500 via-green-500 to-blue-500 rounded-lg appearance-none cursor-pointer" title="Hue" />
+                        </div>
+                        <div className="space-y-1.5">
+                           <div className="text-[10px] text-neutral-400 text-center">Sepia</div>
+                           <input type="range" min="0" max="100" value={activeLayer.sepia || 0} onChange={e => updateSelectedLayer({sepia: Number(e.target.value)})} onMouseUp={commitLayerUpdate} className="w-full accent-white h-1.5 bg-gradient-to-r from-transparent to-[#704214] rounded-lg appearance-none cursor-pointer" title="Sepia" />
+                        </div>
+                        <div className="space-y-1.5">
+                           <div className="text-[10px] text-neutral-400 text-center">Grayscale</div>
+                           <input type="range" min="0" max="100" value={activeLayer.grayscale || 0} onChange={e => updateSelectedLayer({grayscale: Number(e.target.value)})} onMouseUp={commitLayerUpdate} className="w-full accent-white h-1.5 bg-gradient-to-r from-transparent to-white rounded-lg appearance-none cursor-pointer" />
+                        </div>
+                        <div className="space-y-1.5">
+                           <div className="text-[10px] text-neutral-400 text-center">Invert</div>
+                           <input type="range" min="0" max="100" value={activeLayer.invert || 0} onChange={e => updateSelectedLayer({invert: Number(e.target.value)})} onMouseUp={commitLayerUpdate} className="w-full accent-white h-1.5 bg-gradient-to-r from-transparent to-blue-300 rounded-lg appearance-none cursor-pointer" />
                         </div>
                       </div>
                     </div>
                   )}
 
-                  <div className="bg-[#1E1E1E] p-3 rounded-lg border border-white/5 space-y-3">
+                  <div className="bg-[#1E1E1E] p-3.5 rounded-xl border border-white/5 space-y-4 shadow-inner">
                     <div className="flex items-center gap-3">
-                      <div className="relative w-5 h-5 rounded border border-white/20 overflow-hidden shrink-0">
+                      <div className="relative w-6 h-6 rounded border border-white/20 overflow-hidden shrink-0">
                         <input type="color" value={activeLayer.shadowColor || "#000000"} onChange={e => { updateSelectedLayer({shadowColor: e.target.value}); commitLayerUpdate(); }} className="absolute -top-2 -left-2 w-10 h-10 cursor-pointer" />
                       </div>
-                      <span className="text-xs text-neutral-300">Drop Shadow</span>
+                      <span className="text-xs text-neutral-300 font-medium">Drop Shadow</span>
                     </div>
                     <div className="grid grid-cols-3 gap-2">
-                      <input type="number" placeholder="Blur" value={activeLayer.shadowBlur || 0} onChange={e => { updateSelectedLayer({shadowBlur: Number(e.target.value)}); commitLayerUpdate(); }} className="w-full bg-[#0a0a0c] border border-white/10 rounded px-2 py-1 text-xs text-white outline-none" title="Blur" />
-                      <input type="number" placeholder="X" value={activeLayer.shadowOffsetX || 0} onChange={e => { updateSelectedLayer({shadowOffsetX: Number(e.target.value)}); commitLayerUpdate(); }} className="w-full bg-[#0a0a0c] border border-white/10 rounded px-2 py-1 text-xs text-white outline-none" title="Offset X" />
-                      <input type="number" placeholder="Y" value={activeLayer.shadowOffsetY || 0} onChange={e => { updateSelectedLayer({shadowOffsetY: Number(e.target.value)}); commitLayerUpdate(); }} className="w-full bg-[#0a0a0c] border border-white/10 rounded px-2 py-1 text-xs text-white outline-none" title="Offset Y" />
+                      <div className="text-center">
+                        <span className="text-[9px] text-neutral-500 mb-1 block">Blur</span>
+                        <input type="number" value={activeLayer.shadowBlur || 0} onChange={e => { updateSelectedLayer({shadowBlur: Number(e.target.value)}); commitLayerUpdate(); }} className="w-full bg-[#0a0a0c] border border-white/10 rounded px-2 py-1.5 text-xs text-white outline-none text-center focus:border-[#0D99FF]" />
+                      </div>
+                      <div className="text-center">
+                        <span className="text-[9px] text-neutral-500 mb-1 block">X</span>
+                        <input type="number" value={activeLayer.shadowOffsetX || 0} onChange={e => { updateSelectedLayer({shadowOffsetX: Number(e.target.value)}); commitLayerUpdate(); }} className="w-full bg-[#0a0a0c] border border-white/10 rounded px-2 py-1.5 text-xs text-white outline-none text-center focus:border-[#0D99FF]" />
+                      </div>
+                      <div className="text-center">
+                        <span className="text-[9px] text-neutral-500 mb-1 block">Y</span>
+                        <input type="number" value={activeLayer.shadowOffsetY || 0} onChange={e => { updateSelectedLayer({shadowOffsetY: Number(e.target.value)}); commitLayerUpdate(); }} className="w-full bg-[#0a0a0c] border border-white/10 rounded px-2 py-1.5 text-xs text-white outline-none text-center focus:border-[#0D99FF]" />
+                      </div>
                     </div>
 
-                    <div className="pt-2 border-t border-white/5">
-                      <div className="flex justify-between text-[10px] text-neutral-400 mb-1"><span>Gaussian Blur</span><span>{activeLayer.blur || 0}px</span></div>
-                      <input type="range" min="0" max="100" value={activeLayer.blur || 0} onChange={e => updateSelectedLayer({blur: Number(e.target.value)})} onMouseUp={commitLayerUpdate} className="w-full accent-[#0D99FF] h-1 bg-white/10 rounded-lg appearance-none" />
+                    <div className="pt-3 border-t border-white/5">
+                      <div className="flex justify-between text-[10px] text-neutral-400 mb-2"><span>Layer Blur</span><span className="font-mono">{activeLayer.blur || 0}px</span></div>
+                      <input type="range" min="0" max="100" value={activeLayer.blur || 0} onChange={e => updateSelectedLayer({blur: Number(e.target.value)})} onMouseUp={commitLayerUpdate} className="w-full accent-[#0D99FF] h-1 bg-white/10 rounded-lg appearance-none cursor-pointer" />
                     </div>
                   </div>
                 </div>
                 
               </div>
             ) : (
-              <div className="flex flex-col items-center justify-center h-[200px] text-neutral-600 space-y-3">
+              <div className="flex flex-col items-center justify-center h-[300px] text-neutral-600 space-y-3 opacity-50">
                 <Icons.Select />
-                <span className="text-xs">Select a layer to view properties</span>
-              </div>
-            )}
-          </div>
-
-          {/* ПАНЕЛЬ СЛОЕВ */}
-          <div className="flex-1 flex flex-col overflow-hidden bg-[#2C2C2C]">
-            <div className="flex justify-between items-center p-4 pb-2 border-b border-black/40 shrink-0">
-               <h3 className="text-[10px] font-bold text-white uppercase tracking-wider">Layers</h3>
-               <span className="text-[9px] text-neutral-500">{layersUI.length} objects</span>
-            </div>
-            
-            <div className="flex-1 overflow-y-auto p-2 space-y-1">
-              {[...layersUI].reverse().map(layer => (
-                <div 
-                  key={layer.id} 
-                  onClick={() => { engine.current.selectedId = layer.id; setActiveCategory("SELECT"); syncUI(); }}
-                  className={`flex items-center gap-2 p-1.5 rounded cursor-pointer transition-all border ${selectedIdUI === layer.id ? "bg-[#0D99FF]/10 border-[#0D99FF]/30 text-white" : "border-transparent hover:bg-white/5 text-neutral-400"}`}
-                >
-                  <button onClick={(e) => { e.stopPropagation(); updateSelectedLayer({visible: !layer.visible}); commitLayerUpdate(); }} className="hover:text-white shrink-0">
-                    {layer.visible ? <Icons.Eye /> : <Icons.EyeOff />}
-                  </button>
-                  <button onClick={(e) => { e.stopPropagation(); updateSelectedLayer({locked: !layer.locked}); commitLayerUpdate(); }} className="hover:text-white shrink-0">
-                    {layer.locked ? <Icons.Lock /> : <Icons.Unlock />}
-                  </button>
-                  
-                  <span className="flex-1 text-xs truncate ml-1 font-medium select-none">{layer.name}</span>
-                  
-                  {selectedIdUI === layer.id && (
-                    <div className="flex gap-0.5 shrink-0 opacity-70 hover:opacity-100">
-                      <button onClick={(e) => { e.stopPropagation(); moveLayer(layer.id, "FRONT"); }} className="hover:text-white p-0.5" title="Bring to Front"><Icons.Up /></button>
-                      <button onClick={(e) => { e.stopPropagation(); moveLayer(layer.id, "BACK"); }} className="hover:text-white p-0.5" title="Send to Back"><Icons.Down /></button>
-                    </div>
-                  )}
-                </div>
-              ))}
-              {layersUI.length === 0 && <div className="text-xs text-neutral-600 text-center py-8">Canvas is empty</div>}
-            </div>
-            
-            {onSecureArtifact && (
-              <div className="p-4 border-t border-black/40 bg-[#1E1E1E]">
-                <button 
-                  onClick={handleSecureToArchive}
-                  className="w-full py-2.5 rounded bg-white text-black hover:bg-neutral-200 text-[10px] uppercase tracking-wider font-bold transition-colors shadow-sm"
-                >
-                  Secure to Resonance
-                </button>
+                <span className="text-xs">Select a layer to edit properties</span>
               </div>
             )}
           </div>
           
+          {onSecureArtifact && (
+            <div className="p-4 border-t border-black/40 bg-[#1E1E1E] mt-auto">
+              <button 
+                onClick={exportCanvas}
+                className="w-full py-3 rounded-lg bg-white text-black hover:bg-neutral-200 text-[11px] uppercase tracking-wider font-bold transition-colors shadow-lg"
+              >
+                Secure to Resonance
+              </button>
+            </div>
+          )}
         </aside>
       </div>
     </div>

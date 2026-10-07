@@ -77,6 +77,8 @@ const Icons = {
   AlignLeft: () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="21" y1="6" x2="3" y2="6"/><line x1="15" y1="12" x2="3" y2="12"/><line x1="17" y1="18" x2="3" y2="18"/></svg>,
   AlignCenter: () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="21" y1="6" x2="3" y2="6"/><line x1="19" y1="12" x2="5" y2="12"/><line x1="17" y1="18" x2="7" y2="18"/></svg>,
   AlignRight: () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="21" y1="6" x2="3" y2="6"/><line x1="21" y1="12" x2="9" y2="12"/><line x1="21" y1="18" x2="7" y2="18"/></svg>,
+  Undo: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 00-9-9 9 9 0 00-6 2.3L3 13"/></svg>,
+  Redo: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 7v6h-6"/><path d="M3 17a9 9 0 019-9 9 9 0 016 2.3l3 2.7"/></svg>,
 };
 
 const FONTS = ["Inter", "Roboto", "Montserrat", "Open Sans", "Playfair Display", "Oswald", "Courier New", "Comic Sans MS", "Pacifico", "Impact"];
@@ -87,7 +89,7 @@ function generateId() { return Math.random().toString(36).substr(2, 9); }
 // ==========================================
 // MAIN COMPONENT: OMNI STUDIO PRO
 // ==========================================
-export default function BarrettEngine({ query, onSecureArtifact }: { query?: string, onSecureArtifact?: (d: string, t: string) => void }) {
+export default function BarrettEngine({ query, onSecureArtifact }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -269,13 +271,14 @@ export default function BarrettEngine({ query, onSecureArtifact }: { query?: str
         ctx.scale(dpr, dpr);
       }
 
-      ctx.fillStyle = "#2C2C2C"; 
+      ctx.fillStyle = "#2C2C2C"; // Figma-like workspace dark background
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
       ctx.save();
       ctx.translate(state.viewport.x, state.viewport.y);
       ctx.scale(state.viewport.scale, state.viewport.scale);
 
+      // Artboard shadow
       ctx.shadowColor = "rgba(0,0,0,0.3)";
       ctx.shadowBlur = 20;
       ctx.shadowOffsetX = 0;
@@ -327,6 +330,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: { query?: str
         ctx.lineCap = "round";
         ctx.lineJoin = "round";
 
+        // ОТРИСОВКА ФИГУР
         if (layer.type === "RECTANGLE") {
           ctx.beginPath();
           if (layer.cornerRadius && (ctx as any).roundRect) {
@@ -399,7 +403,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: { query?: str
           ctx.drawImage(layer.imageObj, layer.x, layer.y, layer.width, layer.height);
         }
         else if (layer.type === "TEXT" && layer.text) {
-          ctx.font = `${layer.fontWeight || "normal"} ${layer.fontSize}px ${layer.fontFamily || "Inter"}`;
+          ctx.font = `${layer.fontWeight || "normal"} ${layer.fontSize}px ${layer.fontFamily || "Inter, sans-serif"}`;
           ctx.fillStyle = layer.fill || "#ffffff";
           ctx.textBaseline = "top";
           ctx.textAlign = layer.textAlign || "left";
@@ -428,6 +432,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: { query?: str
 
         ctx.restore();
 
+        // 5. Отрисовка Bounding Box (Выделение) в стиле Figma
         if (state.selectedId === layer.id && !layer.locked) {
           ctx.save();
           ctx.translate(cx, cy);
@@ -630,6 +635,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: { query?: str
     if (state.isDrawing && state.liveLayer) {
       const newLayer = { ...state.liveLayer, id: generateId(), name: `${activeCategory === "SHAPE" ? activeShape : activeCategory}` };
       
+      // ИДЕАЛЬНЫЙ BOUNDING BOX ДЛЯ ПЕРА
       if (newLayer.type === "PATH" && newLayer.points && newLayer.points.length > 0) {
         let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
         newLayer.points.forEach(p => {
@@ -821,7 +827,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: { query?: str
 
     const dataUrl = canvas.toDataURL("image/png", 1.0);
     const link = document.createElement("a");
-    link.download = `omni-studio-export-${Date.now()}.png`; 
+    link.download = `omni-studio-export-${Date.now()}.png`;
     link.href = dataUrl;
     link.click();
   };
@@ -872,7 +878,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: { query?: str
 
     const dataUrl = canvas.toDataURL("image/png", 0.95);
     if (onSecureArtifact) {
-      onSecureArtifact(dataUrl, `[OMNI PRO] Siberian Punk Art`);
+      onSecureArtifact(dataUrl, `[OMNI PRO] ${query || "Vector Art"}`);
     }
   };
 
@@ -1204,7 +1210,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: { query?: str
                   )}
                 </div>
               ))}
-              {layersUI.length === 0 && <div className="text-xs text-neutral-600 text-center py-6">Canvas is empty</div>}
+              {layersUI.length === 0 && <div className="text-xs text-neutral-600 text-center py-8">Canvas is empty</div>}
             </div>
             
             {onSecureArtifact && (

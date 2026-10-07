@@ -38,7 +38,7 @@ interface CanvasLayer {
   originalImageData?: ImageData; 
   bgTolerance?: number; 
   autoBgRemoved?: boolean;
-  brightness?: number; contrast?: number; saturation?: number; hue?: number; sepia?: number; invert?: number;
+  brightness?: number; contrast?: number; saturation?: number; hue?: number; sepia?: number; invert?: number; grayscale?: number;
   twirl?: number; bulge?: number; 
   
   points?: VectorPoint[];
@@ -242,13 +242,15 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
   }, [handleUndo, handleRedo, editingTextId]);
 
   // ==========================================
-  // АЛГОРИТМЫ ОБРАБОТКИ ИЗОБРАЖЕНИЙ
+  // АЛГОРИТМЫ ОБРАБОТКИ ИЗОБРАЖЕНИЙ (ИСПРАВЛЕНЫ ПРОПОРЦИИ)
   // ==========================================
   const processImagePixels = (layer: CanvasLayer) => {
-    if (!layer.originalImageData) return;
+    if (!layer.originalImageData || !layer.originalImageObj) return;
     
-    const w = layer.width; 
-    const h = layer.height;
+    // БАГФИКС: Используем оригинальные размеры картинки для пиксельной математики, а не рамки слоя
+    const w = layer.originalImageObj.width; 
+    const h = layer.originalImageObj.height;
+    
     const cvs = document.createElement('canvas');
     cvs.width = w; cvs.height = h;
     const ctx = cvs.getContext('2d')!;
@@ -391,6 +393,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
           if (layer.saturation !== undefined && layer.saturation !== 100) filterStr += `saturate(${layer.saturation}%) `;
           if (layer.hue && layer.hue !== 0) filterStr += `hue-rotate(${layer.hue}deg) `;
           if (layer.sepia && layer.sepia > 0) filterStr += `sepia(${layer.sepia}%) `;
+          if (layer.grayscale && layer.grayscale > 0) filterStr += `grayscale(${layer.grayscale}%) `;
           if (layer.invert && layer.invert > 0) filterStr += `invert(${layer.invert}%) `;
           if (layer.blur && layer.blur > 0) filterStr += `blur(${layer.blur}px) `;
           if (filterStr) ctx.filter = filterStr.trim();
@@ -401,7 +404,8 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
         ctx.fillStyle = layer.fill || "transparent";
         ctx.strokeStyle = layer.stroke || "transparent";
         ctx.lineWidth = layer.strokeWidth || 0;
-        ctx.lineCap = "round"; ctx.lineJoin = "round";
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
 
         if (layer.type === "RECTANGLE") {
           ctx.beginPath();
@@ -415,54 +419,56 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
         }
         else if (layer.type === "POLYGON") {
           ctx.beginPath(); const sides = layer.sides || 3; const r = Math.min(Math.abs(layer.width), Math.abs(layer.height)) / 2;
-          for (let i = 0; i < sides; i++) { const a = (Math.PI * 2 * i) / sides - Math.PI / 2; if (i === 0) ctx.moveTo(cx + r * Math.cos(a), cy + r * Math.sin(a)); else ctx.lineTo(cx + r * Math.cos(a), cy + r * Math.sin(a)); }
+          for (let i = 0; i < sides; i++) { const a = (Math.PI * 2 * i) / sides - Math.PI / 2; if (i === 0) ctx.moveTo(r * Math.cos(a), r * Math.sin(a)); else ctx.lineTo(r * Math.cos(a), r * Math.sin(a)); }
           ctx.closePath(); if (layer.fill && layer.fill !== "transparent") ctx.fill(); if (layer.strokeWidth) ctx.stroke();
         }
         else if (layer.type === "STAR") {
           ctx.beginPath(); const points = layer.sides || 5; const outerR = Math.min(Math.abs(layer.width), Math.abs(layer.height)) / 2; const innerR = outerR * 0.4;
-          for (let i = 0; i < points * 2; i++) { const r = i % 2 === 0 ? outerR : innerR; const a = (Math.PI * i) / points - Math.PI / 2; if (i === 0) ctx.moveTo(cx + r * Math.cos(a), cy + r * Math.sin(a)); else ctx.lineTo(cx + r * Math.cos(a), cy + r * Math.sin(a)); }
+          for (let i = 0; i < points * 2; i++) { const r = i % 2 === 0 ? outerR : innerR; const a = (Math.PI * i) / points - Math.PI / 2; if (i === 0) ctx.moveTo(r * Math.cos(a), r * Math.sin(a)); else ctx.lineTo(r * Math.cos(a), r * Math.sin(a)); }
           ctx.closePath(); if (layer.fill && layer.fill !== "transparent") ctx.fill(); if (layer.strokeWidth) ctx.stroke();
         }
         else if (layer.type === "ARROW") {
           ctx.beginPath(); const hw = layer.strokeWidth || 4; const headL = Math.max(15, hw * 3); const headW = Math.max(15, hw * 3);
-          const p1 = {x: layer.x, y: cy}; const p2 = {x: layer.x + layer.width, y: cy}; const angle = Math.atan2(p2.y - p1.y, p2.x - p1.x);
+          const p1 = {x: -layer.width/2, y: 0}; const p2 = {x: layer.width/2, y: 0}; const angle = Math.atan2(p2.y - p1.y, p2.x - p1.x);
           ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke();
           ctx.fillStyle = ctx.strokeStyle; ctx.beginPath(); ctx.moveTo(p2.x, p2.y); ctx.lineTo(p2.x - headL * Math.cos(angle - Math.PI/6), p2.y - headW * Math.sin(angle - Math.PI/6)); ctx.lineTo(p2.x - headL * Math.cos(angle + Math.PI/6), p2.y - headW * Math.sin(angle + Math.PI/6)); ctx.closePath(); ctx.fill();
         }
         else if (layer.type === "LINE") {
-          ctx.beginPath(); ctx.moveTo(layer.x, layer.y); ctx.lineTo(layer.x + layer.width, layer.y + layer.height); if (layer.strokeWidth) ctx.stroke();
+          ctx.beginPath(); ctx.moveTo(-layer.width/2, -layer.height/2); ctx.lineTo(layer.width/2, layer.height/2); if (layer.strokeWidth) ctx.stroke();
         }
         else if (layer.type === "IMAGE" && layer.imageObj) {
-          ctx.drawImage(layer.imageObj, layer.x, layer.y, layer.width, layer.height);
+          ctx.drawImage(layer.imageObj, -layer.width/2, -layer.height/2, layer.width, layer.height);
         }
         else if (layer.type === "TEXT" && layer.text && editingTextId !== layer.id) {
           ctx.font = `${layer.fontWeight || "normal"} ${layer.fontSize}px ${layer.fontFamily || "Inter, sans-serif"}`;
           ctx.fillStyle = layer.fill || "#ffffff"; ctx.textBaseline = "top"; ctx.textAlign = layer.textAlign || "left";
           const textLines = layer.text.split('\n');
-          let tX = layer.x; if (layer.textAlign === "center") tX = cx; if (layer.textAlign === "right") tX = layer.x + layer.width;
-          textLines.forEach((line, i) => { ctx.fillText(line, tX, layer.y + i * (layer.fontSize || 24) * 1.2); });
+          let tX = -layer.width/2; if (layer.textAlign === "center") tX = 0; if (layer.textAlign === "right") tX = layer.width/2;
+          textLines.forEach((line, i) => { ctx.fillText(line, tX, -layer.height/2 + i * (layer.fontSize || 24) * 1.2); });
         }
         else if (layer.type === "PATH" && layer.points && layer.points.length > 0) {
-          ctx.beginPath(); ctx.moveTo(layer.x + layer.points[0].x, layer.y + layer.points[0].y);
-          for (let i = 1; i < layer.points.length; i++) { ctx.lineTo(layer.x + layer.points[i].x, layer.y + layer.points[i].y); }
+          ctx.beginPath(); ctx.moveTo(layer.points[0].x - layer.width/2, layer.points[0].y - layer.height/2);
+          for (let i = 1; i < layer.points.length; i++) { ctx.lineTo(layer.points[i].x - layer.width/2, layer.points[i].y - layer.height/2); }
           if (layer.strokeWidth) ctx.stroke();
         }
 
         ctx.restore();
 
+        // Отрисовка Bounding Box (Выделение)
         if (state.selectedId === layer.id && !layer.locked && !editingTextId) {
           ctx.save();
-          ctx.translate(cx, cy); ctx.rotate((layer.rotation * Math.PI) / 180); ctx.translate(-cx, -cy);
+          ctx.translate(cx, cy); ctx.rotate((layer.rotation * Math.PI) / 180);
           ctx.strokeStyle = "#0D99FF"; ctx.lineWidth = 1.5 / state.viewport.scale;
-          ctx.strokeRect(layer.x, layer.y, layer.width, layer.height);
+          ctx.strokeRect(-layer.width/2, -layer.height/2, layer.width, layer.height);
           
           const hSize = 8 / state.viewport.scale;
           ctx.fillStyle = "#ffffff"; ctx.strokeStyle = "#0D99FF"; ctx.lineWidth = 1.5 / state.viewport.scale;
           const drawHandle = (hx: number, hy: number) => { ctx.beginPath(); ctx.arc(hx, hy, hSize/2, 0, Math.PI*2); ctx.fill(); ctx.stroke(); };
-          drawHandle(layer.x, layer.y); drawHandle(layer.x + layer.width, layer.y); drawHandle(layer.x, layer.y + layer.height); drawHandle(layer.x + layer.width, layer.y + layer.height); 
+          drawHandle(-layer.width/2, -layer.height/2); drawHandle(layer.width/2, -layer.height/2); drawHandle(-layer.width/2, layer.height/2); drawHandle(layer.width/2, layer.height/2); 
           
-          ctx.beginPath(); ctx.moveTo(cx, layer.y); ctx.lineTo(cx, layer.y - 25 / state.viewport.scale); ctx.stroke();
-          drawHandle(cx, layer.y - 25 / state.viewport.scale);
+          // Rotation handle
+          ctx.beginPath(); ctx.moveTo(0, -layer.height/2); ctx.lineTo(0, -layer.height/2 - 25 / state.viewport.scale); ctx.stroke();
+          drawHandle(0, -layer.height/2 - 25 / state.viewport.scale);
           ctx.restore();
         }
       });
@@ -716,7 +722,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
           x: vX - imgW / 2, y: vY - imgH / 2, 
           width: imgW, height: imgH, rotation: 0, opacity: 100, visible: true, locked: false, blendMode: "source-over",
           imageObj: img, originalImageObj: img, originalImageData: originalData, src: src,
-          bgTolerance: 0, brightness: 100, contrast: 100, saturation: 100, hue: 0, sepia: 0, invert: 0, twirl: 0, bulge: 0
+          bgTolerance: 0, brightness: 100, contrast: 100, saturation: 100, hue: 0, sepia: 0, grayscale: 0, invert: 0, twirl: 0, bulge: 0
         };
         state.layers.push(newImage); state.selectedId = newImage.id;
         setActiveCategory("SELECT");
@@ -750,6 +756,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
     const layer = engine.current.layers.find(l => l.id === engine.current.selectedId);
     if (layer) {
       Object.assign(layer, updates);
+      
       if (layer.type === "IMAGE" && (updates.bgTolerance !== undefined || updates.twirl !== undefined || updates.bulge !== undefined || updates.autoBgRemoved !== undefined)) {
         processImagePixels(layer);
       } else {
@@ -797,6 +804,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
         if (layer.saturation !== undefined && layer.saturation !== 100) filterStr += `saturate(${layer.saturation}%) `;
         if (layer.hue && layer.hue !== 0) filterStr += `hue-rotate(${layer.hue}deg) `;
         if (layer.sepia && layer.sepia > 0) filterStr += `sepia(${layer.sepia}%) `;
+        if (layer.grayscale && layer.grayscale > 0) filterStr += `grayscale(${layer.grayscale}%) `;
         if (layer.invert && layer.invert > 0) filterStr += `invert(${layer.invert}%) `;
         if (layer.blur && layer.blur > 0) filterStr += `blur(${layer.blur}px) `;
         if (filterStr) ctx.filter = filterStr.trim();
@@ -804,15 +812,15 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
 
       ctx.fillStyle = layer.fill || "transparent"; ctx.strokeStyle = layer.stroke || "transparent"; ctx.lineWidth = layer.strokeWidth || 0; ctx.lineCap = "round"; ctx.lineJoin = "round";
 
-      if (layer.type === "RECTANGLE") { ctx.beginPath(); if (layer.cornerRadius && (ctx as any).roundRect) { (ctx as any).roundRect(layer.x, layer.y, layer.width, layer.height, layer.cornerRadius); } else { ctx.rect(layer.x, layer.y, layer.width, layer.height); } if (layer.fill && layer.fill !== "transparent") ctx.fill(); if (layer.strokeWidth) ctx.stroke(); } 
-      else if (layer.type === "ELLIPSE") { ctx.beginPath(); ctx.ellipse(layer.x + layer.width/2, layer.y + layer.height/2, Math.abs(layer.width/2), Math.abs(layer.height/2), 0, 0, Math.PI * 2); if (layer.fill && layer.fill !== "transparent") ctx.fill(); if (layer.strokeWidth) ctx.stroke(); }
-      else if (layer.type === "POLYGON") { ctx.beginPath(); const sides = layer.sides || 3; const r = Math.min(Math.abs(layer.width), Math.abs(layer.height)) / 2; for (let i = 0; i < sides; i++) { const a = (Math.PI * 2 * i) / sides - Math.PI / 2; if (i === 0) ctx.moveTo(layer.x + layer.width/2 + r * Math.cos(a), layer.y + layer.height/2 + r * Math.sin(a)); else ctx.lineTo(layer.x + layer.width/2 + r * Math.cos(a), layer.y + layer.height/2 + r * Math.sin(a)); } ctx.closePath(); if (layer.fill && layer.fill !== "transparent") ctx.fill(); if (layer.strokeWidth) ctx.stroke(); }
-      else if (layer.type === "STAR") { ctx.beginPath(); const points = layer.sides || 5; const outerR = Math.min(Math.abs(layer.width), Math.abs(layer.height)) / 2; const innerR = outerR * 0.4; for (let i = 0; i < points * 2; i++) { const r = i % 2 === 0 ? outerR : innerR; const a = (Math.PI * i) / points - Math.PI / 2; if (i === 0) ctx.moveTo(layer.x + layer.width/2 + r * Math.cos(a), layer.y + layer.height/2 + r * Math.sin(a)); else ctx.lineTo(layer.x + layer.width/2 + r * Math.cos(a), layer.y + layer.height/2 + r * Math.sin(a)); } ctx.closePath(); if (layer.fill && layer.fill !== "transparent") ctx.fill(); if (layer.strokeWidth) ctx.stroke(); }
-      else if (layer.type === "LINE") { ctx.beginPath(); ctx.moveTo(layer.x, layer.y); ctx.lineTo(layer.x + layer.width, layer.y + layer.height); if (layer.strokeWidth) ctx.stroke(); }
-      else if (layer.type === "ARROW") { ctx.beginPath(); const hw = layer.strokeWidth || 4; const headL = Math.max(15, hw * 3); const headW = Math.max(15, hw * 3); const p1 = {x: layer.x, y: cy}; const p2 = {x: layer.x + layer.width, y: cy}; const angle = Math.atan2(p2.y - p1.y, p2.x - p1.x); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke(); ctx.fillStyle = ctx.strokeStyle; ctx.beginPath(); ctx.moveTo(p2.x, p2.y); ctx.lineTo(p2.x - headL * Math.cos(angle - Math.PI/6), p2.y - headW * Math.sin(angle - Math.PI/6)); ctx.lineTo(p2.x - headL * Math.cos(angle + Math.PI/6), p2.y - headW * Math.sin(angle + Math.PI/6)); ctx.closePath(); ctx.fill(); }
-      else if (layer.type === "IMAGE" && layer.imageObj) { ctx.drawImage(layer.imageObj, layer.x, layer.y, layer.width, layer.height); }
-      else if (layer.type === "TEXT" && layer.text) { ctx.font = `${layer.fontWeight || "normal"} ${layer.fontSize}px ${layer.fontFamily || "Inter"}`; ctx.fillStyle = layer.fill || "#ffffff"; ctx.textBaseline = "top"; ctx.textAlign = layer.textAlign || "left"; const textLines = layer.text.split('\n'); let tX = layer.x; if (layer.textAlign === "center") tX = cx; if (layer.textAlign === "right") tX = layer.x + layer.width; textLines.forEach((line, i) => { ctx.fillText(line, tX, layer.y + i * (layer.fontSize || 24) * 1.2); }); }
-      else if (layer.type === "PATH" && layer.points) { ctx.beginPath(); ctx.moveTo(layer.x + layer.points[0].x, layer.y + layer.points[0].y); for (let i = 1; i < layer.points.length; i++) ctx.lineTo(layer.x + layer.points[i].x, layer.y + layer.points[i].y); if (layer.strokeWidth) ctx.stroke(); }
+      if (layer.type === "RECTANGLE") { ctx.beginPath(); if (layer.cornerRadius && (ctx as any).roundRect) { (ctx as any).roundRect(-layer.width/2, -layer.height/2, layer.width, layer.height, layer.cornerRadius); } else { ctx.rect(-layer.width/2, -layer.height/2, layer.width, layer.height); } if (layer.fill && layer.fill !== "transparent") ctx.fill(); if (layer.strokeWidth) ctx.stroke(); } 
+      else if (layer.type === "ELLIPSE") { ctx.beginPath(); ctx.ellipse(0, 0, Math.abs(layer.width/2), Math.abs(layer.height/2), 0, 0, Math.PI * 2); if (layer.fill && layer.fill !== "transparent") ctx.fill(); if (layer.strokeWidth) ctx.stroke(); }
+      else if (layer.type === "POLYGON") { ctx.beginPath(); const sides = layer.sides || 3; const r = Math.min(Math.abs(layer.width), Math.abs(layer.height)) / 2; for (let i = 0; i < sides; i++) { const a = (Math.PI * 2 * i) / sides - Math.PI / 2; if (i === 0) ctx.moveTo(r * Math.cos(a), r * Math.sin(a)); else ctx.lineTo(r * Math.cos(a), r * Math.sin(a)); } ctx.closePath(); if (layer.fill && layer.fill !== "transparent") ctx.fill(); if (layer.strokeWidth) ctx.stroke(); }
+      else if (layer.type === "STAR") { ctx.beginPath(); const points = layer.sides || 5; const outerR = Math.min(Math.abs(layer.width), Math.abs(layer.height)) / 2; const innerR = outerR * 0.4; for (let i = 0; i < points * 2; i++) { const r = i % 2 === 0 ? outerR : innerR; const a = (Math.PI * i) / points - Math.PI / 2; if (i === 0) ctx.moveTo(r * Math.cos(a), r * Math.sin(a)); else ctx.lineTo(r * Math.cos(a), r * Math.sin(a)); } ctx.closePath(); if (layer.fill && layer.fill !== "transparent") ctx.fill(); if (layer.strokeWidth) ctx.stroke(); }
+      else if (layer.type === "LINE") { ctx.beginPath(); ctx.moveTo(-layer.width/2, -layer.height/2); ctx.lineTo(layer.width/2, layer.height/2); if (layer.strokeWidth) ctx.stroke(); }
+      else if (layer.type === "ARROW") { ctx.beginPath(); const hw = layer.strokeWidth || 4; const headL = Math.max(15, hw * 3); const headW = Math.max(15, hw * 3); const p1 = {x: -layer.width/2, y: 0}; const p2 = {x: layer.width/2, y: 0}; const angle = Math.atan2(p2.y - p1.y, p2.x - p1.x); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke(); ctx.fillStyle = ctx.strokeStyle; ctx.beginPath(); ctx.moveTo(p2.x, p2.y); ctx.lineTo(p2.x - headL * Math.cos(angle - Math.PI/6), p2.y - headW * Math.sin(angle - Math.PI/6)); ctx.lineTo(p2.x - headL * Math.cos(angle + Math.PI/6), p2.y - headW * Math.sin(angle + Math.PI/6)); ctx.closePath(); ctx.fill(); }
+      else if (layer.type === "IMAGE" && layer.imageObj) { ctx.drawImage(layer.imageObj, -layer.width/2, -layer.height/2, layer.width, layer.height); }
+      else if (layer.type === "TEXT" && layer.text) { ctx.font = `${layer.fontWeight || "normal"} ${layer.fontSize}px ${layer.fontFamily || "Inter"}`; ctx.fillStyle = layer.fill || "#ffffff"; ctx.textBaseline = "top"; ctx.textAlign = layer.textAlign || "left"; const textLines = layer.text.split('\n'); let tX = -layer.width/2; if (layer.textAlign === "center") tX = 0; if (layer.textAlign === "right") tX = layer.width/2; textLines.forEach((line, i) => { ctx.fillText(line, tX, -layer.height/2 + i * (layer.fontSize || 24) * 1.2); }); }
+      else if (layer.type === "PATH" && layer.points) { ctx.beginPath(); ctx.moveTo(layer.points[0].x - layer.width/2, layer.points[0].y - layer.height/2); for (let i = 1; i < layer.points.length; i++) ctx.lineTo(layer.points[i].x - layer.width/2, layer.points[i].y - layer.height/2); if (layer.strokeWidth) ctx.stroke(); }
       ctx.restore();
     });
 
@@ -822,24 +830,21 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
   };
 
   const handleSecureToArchive = () => {
-    // Дублируем рендер логику
     const canvas = document.createElement("canvas");
     canvas.width = engine.current.canvasWidth; canvas.height = engine.current.canvasHeight;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-
+    
     ctx.fillStyle = canvasBgColor; ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     engine.current.layers.forEach(layer => {
       if (!layer.visible) return;
       ctx.save();
       ctx.globalAlpha = layer.opacity / 100; ctx.globalCompositeOperation = layer.blendMode || "source-over";
-
       const cx = layer.x + layer.width / 2, cy = layer.y + layer.height / 2;
       ctx.translate(cx, cy); ctx.rotate((layer.rotation * Math.PI) / 180); ctx.translate(-cx, -cy);
-
-      if (layer.shadowColor && layer.shadowBlur) { ctx.shadowColor = layer.shadowColor; ctx.shadowBlur = layer.shadowBlur; ctx.shadowOffsetX = layer.shadowOffsetX || 0; ctx.shadowOffsetY = layer.shadowOffsetY || 0; }
       
+      if (layer.shadowColor && layer.shadowBlur) { ctx.shadowColor = layer.shadowColor; ctx.shadowBlur = layer.shadowBlur; ctx.shadowOffsetX = layer.shadowOffsetX || 0; ctx.shadowOffsetY = layer.shadowOffsetY || 0; }
       if (layer.type === "IMAGE") {
         let filterStr = "";
         if (layer.brightness !== undefined && layer.brightness !== 100) filterStr += `brightness(${layer.brightness}%) `;
@@ -847,28 +852,29 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
         if (layer.saturation !== undefined && layer.saturation !== 100) filterStr += `saturate(${layer.saturation}%) `;
         if (layer.hue && layer.hue !== 0) filterStr += `hue-rotate(${layer.hue}deg) `;
         if (layer.sepia && layer.sepia > 0) filterStr += `sepia(${layer.sepia}%) `;
+        if (layer.grayscale && layer.grayscale > 0) filterStr += `grayscale(${layer.grayscale}%) `;
         if (layer.invert && layer.invert > 0) filterStr += `invert(${layer.invert}%) `;
         if (layer.blur && layer.blur > 0) filterStr += `blur(${layer.blur}px) `;
         if (filterStr) ctx.filter = filterStr.trim();
       } else if (layer.blur && layer.blur > 0) { ctx.filter = `blur(${layer.blur}px)`; }
-
+      
       ctx.fillStyle = layer.fill || "transparent"; ctx.strokeStyle = layer.stroke || "transparent"; ctx.lineWidth = layer.strokeWidth || 0; ctx.lineCap = "round"; ctx.lineJoin = "round";
 
-      if (layer.type === "RECTANGLE") { ctx.beginPath(); if (layer.cornerRadius && (ctx as any).roundRect) { (ctx as any).roundRect(layer.x, layer.y, layer.width, layer.height, layer.cornerRadius); } else { ctx.rect(layer.x, layer.y, layer.width, layer.height); } if (layer.fill && layer.fill !== "transparent") ctx.fill(); if (layer.strokeWidth) ctx.stroke(); } 
-      else if (layer.type === "ELLIPSE") { ctx.beginPath(); ctx.ellipse(layer.x + layer.width/2, layer.y + layer.height/2, Math.abs(layer.width/2), Math.abs(layer.height/2), 0, 0, Math.PI * 2); if (layer.fill && layer.fill !== "transparent") ctx.fill(); if (layer.strokeWidth) ctx.stroke(); }
-      else if (layer.type === "POLYGON") { ctx.beginPath(); const sides = layer.sides || 3; const r = Math.min(Math.abs(layer.width), Math.abs(layer.height)) / 2; for (let i = 0; i < sides; i++) { const a = (Math.PI * 2 * i) / sides - Math.PI / 2; if (i === 0) ctx.moveTo(layer.x + layer.width/2 + r * Math.cos(a), layer.y + layer.height/2 + r * Math.sin(a)); else ctx.lineTo(layer.x + layer.width/2 + r * Math.cos(a), layer.y + layer.height/2 + r * Math.sin(a)); } ctx.closePath(); if (layer.fill && layer.fill !== "transparent") ctx.fill(); if (layer.strokeWidth) ctx.stroke(); }
-      else if (layer.type === "STAR") { ctx.beginPath(); const points = layer.sides || 5; const outerR = Math.min(Math.abs(layer.width), Math.abs(layer.height)) / 2; const innerR = outerR * 0.4; for (let i = 0; i < points * 2; i++) { const r = i % 2 === 0 ? outerR : innerR; const a = (Math.PI * i) / points - Math.PI / 2; if (i === 0) ctx.moveTo(layer.x + layer.width/2 + r * Math.cos(a), layer.y + layer.height/2 + r * Math.sin(a)); else ctx.lineTo(layer.x + layer.width/2 + r * Math.cos(a), layer.y + layer.height/2 + r * Math.sin(a)); } ctx.closePath(); if (layer.fill && layer.fill !== "transparent") ctx.fill(); if (layer.strokeWidth) ctx.stroke(); }
-      else if (layer.type === "LINE") { ctx.beginPath(); ctx.moveTo(layer.x, layer.y); ctx.lineTo(layer.x + layer.width, layer.y + layer.height); if (layer.strokeWidth) ctx.stroke(); }
-      else if (layer.type === "ARROW") { ctx.beginPath(); const hw = layer.strokeWidth || 4; const headL = Math.max(15, hw * 3); const headW = Math.max(15, hw * 3); const p1 = {x: layer.x, y: cy}; const p2 = {x: layer.x + layer.width, y: cy}; const angle = Math.atan2(p2.y - p1.y, p2.x - p1.x); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke(); ctx.fillStyle = ctx.strokeStyle; ctx.beginPath(); ctx.moveTo(p2.x, p2.y); ctx.lineTo(p2.x - headL * Math.cos(angle - Math.PI/6), p2.y - headW * Math.sin(angle - Math.PI/6)); ctx.lineTo(p2.x - headL * Math.cos(angle + Math.PI/6), p2.y - headW * Math.sin(angle + Math.PI/6)); ctx.closePath(); ctx.fill(); }
-      else if (layer.type === "IMAGE" && layer.imageObj) { ctx.drawImage(layer.imageObj, layer.x, layer.y, layer.width, layer.height); }
-      else if (layer.type === "TEXT" && layer.text) { ctx.font = `${layer.fontWeight || "normal"} ${layer.fontSize}px ${layer.fontFamily || "Inter"}`; ctx.fillStyle = layer.fill || "#ffffff"; ctx.textBaseline = "top"; ctx.textAlign = layer.textAlign || "left"; const textLines = layer.text.split('\n'); let tX = layer.x; if (layer.textAlign === "center") tX = cx; if (layer.textAlign === "right") tX = layer.x + layer.width; textLines.forEach((line, i) => { ctx.fillText(line, tX, layer.y + i * (layer.fontSize || 24) * 1.2); }); }
-      else if (layer.type === "PATH" && layer.points) { ctx.beginPath(); ctx.moveTo(layer.x + layer.points[0].x, layer.y + layer.points[0].y); for (let i = 1; i < layer.points.length; i++) ctx.lineTo(layer.x + layer.points[i].x, layer.y + layer.points[i].y); if (layer.strokeWidth) ctx.stroke(); }
+      if (layer.type === "RECTANGLE") { ctx.beginPath(); if (layer.cornerRadius && (ctx as any).roundRect) { (ctx as any).roundRect(-layer.width/2, -layer.height/2, layer.width, layer.height, layer.cornerRadius); } else { ctx.rect(-layer.width/2, -layer.height/2, layer.width, layer.height); } if (layer.fill && layer.fill !== "transparent") ctx.fill(); if (layer.strokeWidth) ctx.stroke(); } 
+      else if (layer.type === "ELLIPSE") { ctx.beginPath(); ctx.ellipse(0, 0, Math.abs(layer.width/2), Math.abs(layer.height/2), 0, 0, Math.PI * 2); if (layer.fill && layer.fill !== "transparent") ctx.fill(); if (layer.strokeWidth) ctx.stroke(); }
+      else if (layer.type === "POLYGON") { ctx.beginPath(); const sides = layer.sides || 3; const r = Math.min(Math.abs(layer.width), Math.abs(layer.height)) / 2; for (let i = 0; i < sides; i++) { const a = (Math.PI * 2 * i) / sides - Math.PI / 2; if (i === 0) ctx.moveTo(r * Math.cos(a), r * Math.sin(a)); else ctx.lineTo(r * Math.cos(a), r * Math.sin(a)); } ctx.closePath(); if (layer.fill && layer.fill !== "transparent") ctx.fill(); if (layer.strokeWidth) ctx.stroke(); }
+      else if (layer.type === "STAR") { ctx.beginPath(); const points = layer.sides || 5; const outerR = Math.min(Math.abs(layer.width), Math.abs(layer.height)) / 2; const innerR = outerR * 0.4; for (let i = 0; i < points * 2; i++) { const r = i % 2 === 0 ? outerR : innerR; const a = (Math.PI * i) / points - Math.PI / 2; if (i === 0) ctx.moveTo(r * Math.cos(a), r * Math.sin(a)); else ctx.lineTo(r * Math.cos(a), r * Math.sin(a)); } ctx.closePath(); if (layer.fill && layer.fill !== "transparent") ctx.fill(); if (layer.strokeWidth) ctx.stroke(); }
+      else if (layer.type === "LINE") { ctx.beginPath(); ctx.moveTo(-layer.width/2, -layer.height/2); ctx.lineTo(layer.width/2, layer.height/2); if (layer.strokeWidth) ctx.stroke(); }
+      else if (layer.type === "ARROW") { ctx.beginPath(); const hw = layer.strokeWidth || 4; const headL = Math.max(15, hw * 3); const headW = Math.max(15, hw * 3); const p1 = {x: -layer.width/2, y: 0}; const p2 = {x: layer.width/2, y: 0}; const angle = Math.atan2(p2.y - p1.y, p2.x - p1.x); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke(); ctx.fillStyle = ctx.strokeStyle; ctx.beginPath(); ctx.moveTo(p2.x, p2.y); ctx.lineTo(p2.x - headL * Math.cos(angle - Math.PI/6), p2.y - headW * Math.sin(angle - Math.PI/6)); ctx.lineTo(p2.x - headL * Math.cos(angle + Math.PI/6), p2.y - headW * Math.sin(angle + Math.PI/6)); ctx.closePath(); ctx.fill(); }
+      else if (layer.type === "IMAGE" && layer.imageObj) { ctx.drawImage(layer.imageObj, -layer.width/2, -layer.height/2, layer.width, layer.height); }
+      else if (layer.type === "TEXT" && layer.text) { ctx.font = `${layer.fontWeight || "normal"} ${layer.fontSize}px ${layer.fontFamily || "Inter"}`; ctx.fillStyle = layer.fill || "#ffffff"; ctx.textBaseline = "top"; ctx.textAlign = layer.textAlign || "left"; const textLines = layer.text.split('\n'); let tX = -layer.width/2; if (layer.textAlign === "center") tX = 0; if (layer.textAlign === "right") tX = layer.width/2; textLines.forEach((line, i) => { ctx.fillText(line, tX, -layer.height/2 + i * (layer.fontSize || 24) * 1.2); }); }
+      else if (layer.type === "PATH" && layer.points) { ctx.beginPath(); ctx.moveTo(layer.points[0].x - layer.width/2, layer.points[0].y - layer.height/2); for (let i = 1; i < layer.points.length; i++) ctx.lineTo(layer.points[i].x - layer.width/2, layer.points[i].y - layer.height/2); if (layer.strokeWidth) ctx.stroke(); }
       ctx.restore();
     });
 
     const dataUrl = canvas.toDataURL("image/png", 0.95);
     if (onSecureArtifact) {
-      onSecureArtifact(dataUrl, `[OMNI PRO] Export`);
+      onSecureArtifact(dataUrl, `[OMNI PRO] Professional Art`);
     }
   };
 
@@ -892,7 +898,6 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
         value={layer.text}
         onChange={(e) => {
           layer.text = e.target.value;
-          
           const canvas = document.createElement("canvas");
           const ctx = canvas.getContext("2d");
           if (ctx) {
@@ -910,25 +915,11 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
           e.stopPropagation();
         }}
         style={{
-          position: "absolute",
-          left: textX - 4, 
-          top: textY - 4,
-          minWidth: Math.max(100, layer.width * scale + 20),
-          height: Math.max(50, layer.height * scale + 20),
-          fontSize: `${(layer.fontSize || 24) * scale}px`,
-          fontFamily: layer.fontFamily,
-          fontWeight: layer.fontWeight,
-          textAlign: layer.textAlign,
-          color: layer.fill,
-          background: "rgba(0,0,0,0.6)",
-          border: "2px solid #0D99FF",
-          borderRadius: "4px",
-          outline: "none",
-          padding: "4px",
-          zIndex: 100,
-          lineHeight: 1.2,
-          resize: "none",
-          overflow: "hidden"
+          position: "absolute", left: textX - 4, top: textY - 4,
+          minWidth: Math.max(100, layer.width * scale + 20), height: Math.max(50, layer.height * scale + 20),
+          fontSize: `${(layer.fontSize || 24) * scale}px`, fontFamily: layer.fontFamily, fontWeight: layer.fontWeight, textAlign: layer.textAlign,
+          color: layer.fill, background: "rgba(0,0,0,0.6)", border: "2px solid #0D99FF", borderRadius: "4px", outline: "none", padding: "4px",
+          zIndex: 100, lineHeight: 1.2, resize: "none", overflow: "hidden"
         }}
       />
     );
@@ -947,7 +938,6 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
             <div className="w-2.5 h-2.5 rounded-sm bg-[#0D99FF]"></div>
             OMNI STUDIO 5.0
           </div>
-          
           <div className="h-4 w-px bg-white/10 mx-1"></div>
 
           <div className="flex items-center gap-3 text-[11px] text-neutral-400">
@@ -959,7 +949,6 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
               <span>H</span>
               <input type="number" value={engine.current.canvasHeight} onChange={e => { engine.current.canvasHeight = Number(e.target.value); syncUI(); saveHistory(); }} className="w-12 bg-black/30 border border-white/10 rounded px-1 py-0.5 text-white text-center focus:border-[#0D99FF] outline-none hover:bg-black/50 transition-colors" />
             </div>
-            
             <div className="flex items-center gap-2 ml-2" title="Canvas Background Color">
               <span>Bg</span>
               <div className="relative w-4 h-4 rounded overflow-hidden border border-white/20">
@@ -984,7 +973,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
 
       <div className="flex flex-1 overflow-hidden relative">
         
-        {/* LEFT SIDEBAR: LAYERS (FIGMA STYLE) */}
+        {/* LEFT SIDEBAR: LAYERS */}
         <aside className="w-64 bg-[#2C2C2C] border-r border-black/40 flex flex-col z-10 shrink-0 shadow-[4px_0_15px_rgba(0,0,0,0.2)]">
           <div className="flex justify-between items-center p-3 border-b border-white/5 shrink-0">
              <h3 className="text-[11px] font-bold text-white uppercase tracking-wider">Layers</h3>
@@ -1022,7 +1011,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
           </div>
         </aside>
 
-        {/* WORKSPACE CANVAS */}
+        {/* MAIN WORKSPACE */}
         <main 
           ref={containerRef}
           className="flex-1 relative overflow-hidden bg-[#1E1E1E]"
@@ -1038,12 +1027,12 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
           
           {renderInlineTextEditor()}
           
-          {/* FLOATING BOTTOM TOOLBAR (FIGMA STYLE) */}
+          {/* FLOATING BOTTOM TOOLBAR */}
           <div className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-[#2C2C2C] border border-black/50 p-1.5 rounded-xl shadow-[0_10px_30px_rgba(0,0,0,0.5)] flex items-center gap-1 z-20 pointer-events-auto">
             <button onClick={() => { setActiveCategory("SELECT"); engine.current.selectedId = null; syncUI(); }} className={`w-9 h-9 rounded-lg flex items-center justify-center transition-all ${activeCategory === "SELECT" ? "bg-[#0D99FF]/20 text-[#0D99FF]" : "text-neutral-400 hover:bg-white/10 hover:text-white"}`} title="Select (V)"><Icons.Select /></button>
             <button onClick={() => { setActiveCategory("PAN"); syncUI(); }} className={`w-9 h-9 rounded-lg flex items-center justify-center transition-all ${activeCategory === "PAN" ? "bg-[#0D99FF]/20 text-[#0D99FF]" : "text-neutral-400 hover:bg-white/10 hover:text-white"}`} title="Pan Tool (Space)"><Icons.Pan /></button>
             <div className="w-px h-6 bg-white/10 mx-1"></div>
-            <button onClick={() => { setActiveCategory("PEN"); engine.current.selectedId = null; syncUI(); }} className={`w-9 h-9 rounded-lg flex items-center justify-center transition-all ${activeCategory === "PEN" ? "bg-[#0D99FF]/20 text-[#0D99FF]" : "text-neutral-400 hover:bg-white/10 hover:text-white"}`} title="Pen Tool (P)"><Icons.Pen /></button>
+            <button onClick={() => { setActiveCategory("PEN"); engine.current.selectedId = null; syncUI(); }} className={`w-9 h-9 rounded-lg flex items-center justify-center transition-all ${activeCategory === "PEN" ? "bg-[#0D99FF]/20 text-[#0D99FF]" : "text-neutral-400 hover:bg-white/10 hover:text-white"}`} title="Pen Brush"><Icons.Pen /></button>
             <button onClick={() => { setActiveCategory("ERASER"); engine.current.selectedId = null; syncUI(); }} className={`w-9 h-9 rounded-lg flex items-center justify-center transition-all ${activeCategory === "ERASER" ? "bg-red-500/20 text-red-500" : "text-neutral-400 hover:bg-white/10 hover:text-white"}`} title="Eraser (Destroys Pixels)"><Icons.Eraser /></button>
             <button onClick={() => { setActiveCategory("TEXT"); engine.current.selectedId = null; syncUI(); }} className={`w-9 h-9 rounded-lg flex items-center justify-center transition-all ${activeCategory === "TEXT" ? "bg-[#0D99FF]/20 text-[#0D99FF]" : "text-neutral-400 hover:bg-white/10 hover:text-white"}`} title="Text Tool (T)"><Icons.Text /></button>
             
@@ -1061,7 +1050,17 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
             </div>
 
             <div className="w-px h-6 bg-white/10 mx-1"></div>
-            
+            <div className="flex gap-2 mx-1 items-center">
+              <div className="relative w-6 h-6 rounded-full border border-white/20 overflow-hidden shadow-inner cursor-pointer" title="Fill Color">
+                <input type="color" value={currentColor} onChange={e => setCurrentColor(e.target.value)} className="absolute -top-2 -left-2 w-10 h-10 cursor-pointer" />
+              </div>
+              <div className="relative w-6 h-6 rounded-full border border-white/20 overflow-hidden shadow-inner cursor-pointer" title="Stroke Color">
+                <input type="color" value={currentStrokeColor} onChange={e => setCurrentStrokeColor(e.target.value)} className="absolute -top-2 -left-2 w-10 h-10 cursor-pointer" />
+              </div>
+              <input type="number" min="0" max="100" value={currentStrokeWidth} onChange={e => setCurrentStrokeWidth(Number(e.target.value))} className="w-10 bg-black/30 border border-white/10 rounded text-center text-xs text-white p-1 ml-1 hover:bg-black/50 outline-none" title="Stroke Width" />
+            </div>
+            <div className="w-px h-6 bg-white/10 mx-1"></div>
+
             <div className="flex gap-1 ml-1 mr-2">
               <button onClick={handleUndo} title="Undo (Ctrl+Z)" className="p-1.5 hover:bg-white/10 rounded-lg text-neutral-400 hover:text-white transition-colors"><Icons.Undo /></button>
               <button onClick={handleRedo} title="Redo (Ctrl+Y)" className="p-1.5 hover:bg-white/10 rounded-lg text-neutral-400 hover:text-white transition-colors"><Icons.Redo /></button>
@@ -1070,8 +1069,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
         </main>
 
         {/* RIGHT SIDEBAR (Properties) */}
-        <aside className="w-[280px] bg-[#2C2C2C] border-l border-black/40 flex flex-col z-10 shrink-0 shadow-[-4px_0_15px_rgba(0,0,0,0.2)]">
-          
+        <aside className="w-[280px] bg-[#2C2C2C] border-l border-black/40 flex flex-col z-10 shrink-0 overflow-hidden shadow-[-4px_0_15px_rgba(0,0,0,0.2)]">
           <div className="flex-1 overflow-y-auto p-4">
             <div className="flex justify-between items-center mb-5 border-b border-white/5 pb-3">
               <h3 className="text-[11px] font-bold text-white uppercase tracking-wider">Properties</h3>
@@ -1085,7 +1083,6 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
             
             {activeLayer ? (
               <div className="space-y-5">
-                
                 {/* 1. LAYOUT */}
                 <div className="space-y-2">
                   <div className="grid grid-cols-2 gap-2">
@@ -1159,7 +1156,6 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
 
                 {/* 3. APPEARANCE (Fill, Stroke, Blend) */}
                 <div className="space-y-4 border-t border-white/10 pt-4">
-                  
                   <div className="flex items-center justify-between">
                     <span className="text-xs text-neutral-400 font-medium">Blend Mode</span>
                     <select value={activeLayer.blendMode || "source-over"} onChange={e => { updateSelectedLayer({blendMode: e.target.value as BlendMode}); commitLayerUpdate(); }} className="bg-[#1E1E1E] border border-white/10 rounded px-2 py-1.5 text-xs text-white outline-none w-32 hover:border-white/30 focus:border-[#0D99FF] cursor-pointer">
@@ -1206,10 +1202,10 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
                   {activeLayer.type === "IMAGE" && (
                     <div className="space-y-4 bg-[#1E1E1E] p-3.5 rounded-xl border border-white/5 shadow-inner">
                       
-                      <div className="flex items-center justify-between mb-2 border-b border-white/5 pb-3">
+                      <div className="flex items-center justify-between mb-3 border-b border-white/5 pb-3">
                         <span className="text-[11px] text-[#0D99FF] font-bold flex items-center gap-1.5"><Icons.Magic /> Auto AI Cutout</span>
                         <div className="flex items-center gap-2">
-                           <button onClick={handleAutoBgRemove} className="text-[10px] bg-[#0D99FF] hover:bg-blue-500 px-2 py-1 rounded text-white font-bold transition-colors">REMOVE BG</button>
+                           <button onClick={handleAutoBgRemove} className="text-[10px] bg-[#0D99FF] hover:bg-blue-500 px-2 py-1 rounded text-white font-bold transition-colors shadow-lg">REMOVE BG</button>
                         </div>
                       </div>
 
@@ -1283,11 +1279,11 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
             )}
           </div>
           
-          {/* SECURE BUTTON FIXED AT BOTTOM */}
+          {/* СТАТИЧНАЯ КНОПКА СОХРАНЕНИЯ */}
           {onSecureArtifact && (
-            <div className="p-4 border-t border-black/40 bg-[#1E1E1E] shrink-0 mt-auto">
+            <div className="p-4 border-t border-black/40 bg-[#1E1E1E] shrink-0">
               <button 
-                onClick={handleSecureToArchive}
+                onClick={() => onSecureArtifact(canvasRef.current?.toDataURL() || "", "OMNI PROJECT")}
                 className="w-full py-3 rounded-lg bg-white text-black hover:bg-neutral-200 text-[11px] uppercase tracking-wider font-bold transition-colors shadow-lg"
               >
                 Secure to Resonance

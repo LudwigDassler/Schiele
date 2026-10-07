@@ -88,16 +88,16 @@ function generateId() { return Math.random().toString(36).substr(2, 9); }
 // MAIN COMPONENT: OMNI STUDIO PRO
 // ==========================================
 export default function BarrettEngine({ query, onSecureArtifact }: Props) {
-  const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // --- UI STATES ---
   const [activeTool, setActiveTool] = useState<ToolType>("SELECT");
-  const [currentColor, setCurrentColor] = useState<string>("#ffffff");
+  const [currentColor, setCurrentColor] = useState<string>("#a855f7");
   const [currentStrokeColor, setCurrentStrokeColor] = useState<string>("#3b82f6");
   const [currentStrokeWidth, setCurrentStrokeWidth] = useState<number>(4);
-  const [canvasBgColor, setCanvasBgColor] = useState<string>("#121212"); // Цвет самого артборда
+  const [canvasBgColor, setCanvasBgColor] = useState<string>("#121212"); 
 
   const [layersUI, setLayersUI] = useState<CanvasLayer[]>([]);
   const [selectedIdUI, setSelectedIdUI] = useState<string | null>(null);
@@ -115,13 +115,13 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
     isDrawing: false,
     isDraggingObject: false,
     isResizingObject: false,
-    resizeHandle: null as string | null, // 'tl', 'tr', 'bl', 'br'
+    resizeHandle: null as string | null, 
     
     startX: 0, startY: 0,
     lastX: 0, lastY: 0,
     
     liveLayer: null as CanvasLayer | null,
-    historyStack: [] as string[], // Сохраняем JSON слепки
+    historyStack: [] as string[], 
     historyIndex: -1,
   });
 
@@ -135,6 +135,8 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
     if (state.historyIndex < state.historyStack.length - 1) {
       state.historyStack = state.historyStack.slice(0, state.historyIndex + 1);
     }
+    // Сохраняем состояние слоев (Без HTMLImageElement, они восстанавливаются по ссылкам в памяти браузера, но для глубокого клона лучше осторожнее)
+    // В данном случае JSON.stringify проигнорирует imageObj, но мы не очищаем исходники из памяти.
     state.historyStack.push(JSON.stringify(state.layers));
     if (state.historyStack.length > 30) state.historyStack.shift();
     else state.historyIndex++;
@@ -144,7 +146,20 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
     const state = engine.current;
     if (state.historyIndex > 0) {
       state.historyIndex--;
-      state.layers = JSON.parse(state.historyStack[state.historyIndex]);
+      
+      // Восстанавливаем стейт. Трюк: перепривязываем imageObj из предыдущего живого стейта, 
+      // так как JSON.stringify его "съел".
+      const prevLayers = state.layers;
+      const newLayers: CanvasLayer[] = JSON.parse(state.historyStack[state.historyIndex]);
+      
+      newLayers.forEach(nl => {
+        if (nl.type === "IMAGE") {
+          const old = prevLayers.find(pl => pl.id === nl.id);
+          if (old && old.imageObj) nl.imageObj = old.imageObj;
+        }
+      });
+      
+      state.layers = newLayers;
       state.selectedId = null;
       syncUI();
     }
@@ -154,7 +169,18 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
     const state = engine.current;
     if (state.historyIndex < state.historyStack.length - 1) {
       state.historyIndex++;
-      state.layers = JSON.parse(state.historyStack[state.historyIndex]);
+      
+      const prevLayers = state.layers;
+      const newLayers: CanvasLayer[] = JSON.parse(state.historyStack[state.historyIndex]);
+      
+      newLayers.forEach(nl => {
+        if (nl.type === "IMAGE") {
+          const old = prevLayers.find(pl => pl.id === nl.id);
+          if (old && old.imageObj) nl.imageObj = old.imageObj;
+        }
+      });
+      
+      state.layers = newLayers;
       state.selectedId = null;
       syncUI();
     }
@@ -163,6 +189,9 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
   // Хоткеи
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Игнорируем нажатия, если фокус в инпуте или текстарее
+      if (document.activeElement?.tagName === "INPUT" || document.activeElement?.tagName === "TEXTAREA") return;
+      
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); if (e.shiftKey) handleRedo(); else handleUndo(); }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); handleRedo(); }
       if (e.key === "Delete" || e.key === "Backspace") {
@@ -179,19 +208,18 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [handleUndo, handleRedo, saveHistory, syncUI]);
 
-  // Инициализация (Центрирование Full HD холста)
+  // Инициализация
   useEffect(() => {
     if (!containerRef.current) return;
     const cw = containerRef.current.clientWidth;
     const ch = containerRef.current.clientHeight;
-    // Даем запас в 100px со всех сторон
     const scale = Math.min((cw - 100) / engine.current.canvasWidth, (ch - 100) / engine.current.canvasHeight, 1);
     engine.current.viewport = {
       x: (cw - engine.current.canvasWidth * scale) / 2,
       y: (ch - engine.current.canvasHeight * scale) / 2,
       scale
     };
-    saveHistory(); // Сохраняем пустой стейт
+    saveHistory();
   }, [saveHistory]);
 
   // ==========================================
@@ -217,27 +245,22 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
         ctx.scale(dpr, dpr);
       }
 
-      // 1. Очистка пространства за пределами холста
-      ctx.fillStyle = "#0a0a0c";
+      ctx.fillStyle = "#141417";
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-      // 2. Трансформация камеры
       ctx.save();
       ctx.translate(state.viewport.x, state.viewport.y);
       ctx.scale(state.viewport.scale, state.viewport.scale);
 
-      // 3. Отрисовка Artboard (Холста)
       ctx.fillStyle = canvasBgColor;
       ctx.fillRect(0, 0, state.canvasWidth, state.canvasHeight);
       
-      // Тень холста для визуального выделения
       ctx.save();
       ctx.strokeStyle = "rgba(255,255,255,0.05)";
       ctx.lineWidth = 1 / state.viewport.scale;
       ctx.strokeRect(0, 0, state.canvasWidth, state.canvasHeight);
       ctx.restore();
 
-      // 4. Отрисовка всех слоев
       const layersToDraw = [...state.layers];
       if (state.liveLayer) layersToDraw.push(state.liveLayer);
 
@@ -248,7 +271,6 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
         ctx.globalAlpha = layer.opacity / 100;
         ctx.globalCompositeOperation = layer.blendMode || "source-over";
 
-        // Центр для вращения
         const cx = layer.x + layer.width / 2;
         const cy = layer.y + layer.height / 2;
         
@@ -256,7 +278,6 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
         ctx.rotate((layer.rotation * Math.PI) / 180);
         ctx.translate(-cx, -cy);
 
-        // Применение эффектов (Тень и Размытие)
         if (layer.shadowColor && layer.shadowBlur !== undefined && layer.shadowBlur > 0) {
           ctx.shadowColor = layer.shadowColor;
           ctx.shadowBlur = layer.shadowBlur;
@@ -264,7 +285,6 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
           ctx.shadowOffsetY = layer.shadowOffsetY || 0;
         }
         
-        // CSS Фильтры для картинок
         if (layer.type === "IMAGE") {
           let filterStr = "";
           if (layer.brightness !== undefined && layer.brightness !== 100) filterStr += `brightness(${layer.brightness}%) `;
@@ -282,7 +302,6 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
         ctx.lineCap = "round";
         ctx.lineJoin = "round";
 
-        // РЕНДЕР ФИГУР
         if (layer.type === "RECT") {
           ctx.beginPath();
           if (layer.cornerRadius && (ctx as any).roundRect) {
@@ -314,7 +333,6 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
           ctx.textBaseline = "top";
           ctx.fillText(layer.text, layer.x, layer.y);
           
-          // Хак: Обновляем Bounding Box текста для правильного выделения
           const textMetrics = ctx.measureText(layer.text);
           layer.width = textMetrics.width;
           layer.height = layer.fontSize || 24; 
@@ -330,15 +348,13 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
 
         ctx.restore();
 
-        // 5. Отрисовка Bounding Box (Выделение)
         if (state.selectedId === layer.id && !layer.locked) {
           ctx.save();
-          // Отрисовка трансформационной рамки (учитываем вращение)
           ctx.translate(cx, cy);
           ctx.rotate((layer.rotation * Math.PI) / 180);
           ctx.translate(-cx, -cy);
 
-          ctx.strokeStyle = "#3b82f6"; // Blue-500
+          ctx.strokeStyle = "#3b82f6";
           ctx.lineWidth = 1.5 / state.viewport.scale;
           
           ctx.strokeRect(layer.x, layer.y, layer.width, layer.height);
@@ -353,10 +369,10 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
             ctx.strokeRect(hx - hSize/2, hy - hSize/2, hSize, hSize);
           };
 
-          drawHandle(layer.x, layer.y); // TL
-          drawHandle(layer.x + layer.width, layer.y); // TR
-          drawHandle(layer.x, layer.y + layer.height); // BL
-          drawHandle(layer.x + layer.width, layer.y + layer.height); // BR
+          drawHandle(layer.x, layer.y); 
+          drawHandle(layer.x + layer.width, layer.y); 
+          drawHandle(layer.x, layer.y + layer.height); 
+          drawHandle(layer.x + layer.width, layer.y + layer.height); 
           
           ctx.restore();
         }
@@ -371,7 +387,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
   }, [canvasBgColor]);
 
   // ==========================================
-  // ЛОГИКА МЫШИ (РИСОВАНИЕ И ВЫДЕЛЕНИЕ)
+  // ВЗАИМОДЕЙСТВИЕ С МЫШЬЮ
   // ==========================================
   const getCanvasPos = (e: React.PointerEvent) => {
     const state = engine.current;
@@ -386,7 +402,6 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     const state = engine.current;
     
-    // Панорамирование
     if (e.button === 1 || activeTool === "PAN" || e.altKey || e.shiftKey) {
       state.isPanning = true;
       state.startX = e.clientX - state.viewport.x;
@@ -406,7 +421,6 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
         const layer = state.layers.find(l => l.id === state.selectedId);
         if (layer && !layer.locked && layer.visible) {
           const hSize = 10 / state.viewport.scale;
-          // Простая проверка ручек (без учета угла поворота для простоты клика)
           const handles = [
             { id: "tl", x: layer.x, y: layer.y },
             { id: "tr", x: layer.x + layer.width, y: layer.y },
@@ -424,19 +438,20 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
         }
       }
 
-      // Выделение объекта (Сверху вниз)
       let hitId: string | null = null;
       for (let i = state.layers.length - 1; i >= 0; i--) {
         const l = state.layers[i];
         if (!l.visible || l.locked) continue;
         
-        // AABB Hit Test (Нормализованный для отрицательных ширин)
         const minX = Math.min(l.x, l.x + l.width);
         const maxX = Math.max(l.x, l.x + l.width);
         const minY = Math.min(l.y, l.y + l.height);
         const maxY = Math.max(l.y, l.y + l.height);
 
-        if (pos.x >= minX && pos.x <= maxX && pos.y >= minY && pos.y <= maxY) {
+        // Расширенный хитбокс для линий
+        const padding = l.type === "PATH" || l.type === "LINE" ? 10 / state.viewport.scale : 0;
+
+        if (pos.x >= minX - padding && pos.x <= maxX + padding && pos.y >= minY - padding && pos.y <= maxY + padding) {
           hitId = l.id;
           break;
         }
@@ -448,15 +463,14 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
       return;
     }
 
-    // Создание новой фигуры
     state.isDrawing = true;
-    state.selectedId = null; 
+    state.selectedId = null;
 
     if (activeTool === "PEN") {
       state.liveLayer = {
         id: "live", name: "Path", type: "PATH",
         x: pos.x, y: pos.y, width: 0, height: 0, rotation: 0, opacity: 100, visible: true, locked: false, blendMode: "source-over",
-        stroke: currentStrokeColor, strokeWidth: currentStroke,
+        stroke: currentStrokeColor, strokeWidth: currentStrokeWidth,
         points: [{ x: 0, y: 0 }] 
       };
     } else if (activeTool === "TEXT") {
@@ -475,9 +489,8 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
       state.liveLayer = {
         id: "live", name: activeTool, type: activeTool as LayerType,
         x: pos.x, y: pos.y, width: 0, height: 0, rotation: 0, opacity: 100, visible: true, locked: false, blendMode: "source-over",
-        stroke: currentStrokeColor, strokeWidth: currentStroke, fill: currentColor
+        stroke: currentStrokeColor, strokeWidth: currentStrokeWidth, fill: currentColor
       };
-      // Для линий убираем заливку
       if (activeTool === "LINE") state.liveLayer.fill = "transparent";
     }
     syncUI();
@@ -546,7 +559,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
     if (state.isDrawing && state.liveLayer) {
       const newLayer = { ...state.liveLayer, id: generateId(), name: `${activeTool}` };
       
-      // ИДЕАЛЬНОЕ ВЫЧИСЛЕНИЕ BOUNDING BOX ДЛЯ ПЕРА (PATH)
+      // Идеальное вычисление Bounding Box для пути
       if (newLayer.type === "PATH" && newLayer.points && newLayer.points.length > 0) {
         let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
         newLayer.points.forEach(p => {
@@ -556,17 +569,14 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
         
         newLayer.x += minX;
         newLayer.y += minY;
-        newLayer.width = Math.max(10, maxX - minX); // Мин. ширина, чтобы можно было кликнуть
+        newLayer.width = Math.max(10, maxX - minX);
         newLayer.height = Math.max(10, maxY - minY);
         
-        // Смещаем точки относительно нового X/Y
         newLayer.points = newLayer.points.map(p => ({ x: p.x - minX, y: p.y - minY }));
       } 
-      // Нормализация отрицательных ширин для фигур
       else if (newLayer.type === "RECT" || newLayer.type === "ELLIPSE" || newLayer.type === "LINE") {
         if (newLayer.width < 0) { newLayer.x += newLayer.width; newLayer.width = Math.abs(newLayer.width); }
         if (newLayer.height < 0) { newLayer.y += newLayer.height; newLayer.height = Math.abs(newLayer.height); }
-        // Защита от микро-кликов
         if (newLayer.width < 5 && newLayer.height < 5) { newLayer.width = 100; newLayer.height = 100; }
       }
 
@@ -613,7 +623,6 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
     reader.onload = (event) => {
       const img = new Image();
       img.onload = () => {
-        // Вычисляем масштаб, чтобы картинка не была огромной
         const state = engine.current;
         let imgW = img.width;
         let imgH = img.height;
@@ -637,6 +646,14 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
       img.src = event.target?.result as string;
     };
     reader.readAsDataURL(file);
+  };
+
+  const deleteSelectedLayer = () => {
+    if (!engine.current.selectedId) return;
+    engine.current.layers = engine.current.layers.filter(l => l.id !== engine.current.selectedId);
+    engine.current.selectedId = null;
+    saveHistory();
+    syncUI();
   };
 
   const updateSelectedLayer = (updates: Partial<CanvasLayer>) => {
@@ -718,7 +735,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
       ctx.restore();
     });
 
-    const dataUrl = canvas.toDataURL("image/png", 1.0);
+    const dataUrl = canvas.toDataURL("image/png");
     const link = document.createElement("a");
     link.download = `omni-studio-export-${Date.now()}.png`;
     link.href = dataUrl;
@@ -726,13 +743,12 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
   };
 
   const handleSecureToArchive = () => {
-    // Тот же код рендера, что и в exportCanvas, но вызываем onSecureArtifact
     const canvas = document.createElement("canvas");
     canvas.width = engine.current.canvasWidth;
     canvas.height = engine.current.canvasHeight;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-
+    
     ctx.fillStyle = canvasBgColor;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
@@ -762,7 +778,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
       ctx.restore();
     });
 
-    const dataUrl = canvas.toDataURL("image/png", 0.95);
+    const dataUrl = canvas.toDataURL("image/png");
     if (onSecureArtifact) {
       onSecureArtifact(dataUrl, `[OMNI PRO] ${query || "Vector Art"}`);
     }
@@ -863,7 +879,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
               <input type="color" value={currentStrokeColor} onChange={e => setCurrentStrokeColor(e.target.value)} className="absolute -top-2 -left-2 w-12 h-12 cursor-pointer" />
             </div>
             
-            <input type="number" value={currentStroke} onChange={e => setCurrentStroke(Number(e.target.value))} className="w-8 mx-auto mt-1 bg-black/50 border border-white/10 rounded text-center text-xs text-white p-1" />
+            <input type="number" value={currentStrokeWidth} onChange={e => setCurrentStrokeWidth(Number(e.target.value))} className="w-8 mx-auto mt-1 bg-black/50 border border-white/10 rounded text-center text-xs text-white p-1" />
           </div>
         </aside>
 
@@ -973,8 +989,8 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
 
                   {activeLayer.type !== "IMAGE" && (
                     <div className="flex items-center gap-3 mt-2">
-                      <div className="relative w-6 h-6 rounded border border-white/20 overflow-hidden shrink-0">
-                        <input type="color" value={activeLayer.fill === "transparent" ? "#000000" : activeLayer.fill} onChange={e => { updateSelectedLayer({fill: e.target.value}); commitLayerUpdate(); }} className="absolute -top-2 -left-2 w-10 h-10 cursor-pointer" />
+                      <div className="relative w-6 h-6 rounded-md border border-white/20 overflow-hidden shrink-0">
+                        <input type="color" value={activeLayer.type === "TEXT" ? activeLayer.fill : activeLayer.stroke} onChange={e => { updateSelectedLayer({stroke: e.target.value, fill: e.target.value}); commitLayerUpdate(); }} className="absolute -top-2 -left-2 w-10 h-10 cursor-pointer" />
                       </div>
                       <span className="text-xs text-neutral-300 flex-1">Fill</span>
                       <button onClick={() => { updateSelectedLayer({fill: "transparent"}); commitLayerUpdate(); }} className="text-[10px] text-neutral-500 hover:text-white px-2 py-1 bg-white/5 rounded">Clear</button>

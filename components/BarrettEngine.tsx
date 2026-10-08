@@ -21,6 +21,7 @@ interface CanvasLayer {
 
   src?: string; 
   imageObj?: HTMLImageElement; 
+  originalImageObj?: HTMLImageElement; // ВОТ ОНО! ВЕРНУЛ ОБРАТНО.
   originalImageData?: ImageData; 
   
   bgTolerance?: number; autoBgRemoved?: boolean;
@@ -74,7 +75,7 @@ function clip(v: number, min = 0.0, max = 1.0): number { return Math.max(min, Ma
 function generateId() { return Math.random().toString(36).substr(2, 9); }
 
 // ==========================================
-// MAIN COMPONENT: OMNI STUDIO 7.0
+// MAIN COMPONENT: OMNI STUDIO PRO
 // ==========================================
 export default function BarrettEngine({ query, onSecureArtifact }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -122,13 +123,13 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
     // Очищаем DOM объекты для localStorage, оставляем только base64 (src)
     const serializableLayers = state.layers.map(l => {
       const copy = { ...l };
-      delete copy.imageObj; delete copy.originalImageData;
+      delete copy.imageObj; delete copy.originalImageObj; delete copy.originalImageData;
       return copy;
     });
 
     const jsonState = JSON.stringify({ w: state.canvasWidth, h: state.canvasHeight, bg: canvasBgColor, layers: serializableLayers });
     state.historyStack.push(jsonState);
-    if (state.historyStack.length > 20) state.historyStack.shift(); // Меньше лимит, чтобы не забить память
+    if (state.historyStack.length > 20) state.historyStack.shift(); 
     else state.historyIndex++;
     
     try { localStorage.setItem("omni-studio-pro", jsonState); } catch (e) { console.warn("Quota exceeded"); }
@@ -146,7 +147,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
         if (nl.type === "IMAGE" && nl.src) {
           const img = new Image();
           img.onload = () => { 
-            nl.imageObj = img;
+            nl.imageObj = img; nl.originalImageObj = img;
             const cvs = document.createElement('canvas'); cvs.width = img.width; cvs.height = img.height;
             const ctx = cvs.getContext('2d');
             if (ctx) { ctx.drawImage(img, 0, 0); nl.originalImageData = ctx.getImageData(0, 0, img.width, img.height); }
@@ -202,48 +203,69 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
   }, [handleUndo, handleRedo, editingTextId]);
 
   // ==========================================
-  // IMAGE PROCESSING (БЕЗ ОБРЕЗАНИЯ И ПОРЧИ РАЗРЕШЕНИЯ)
+  // IMAGE PROCESSING 
   // ==========================================
   const processImagePixels = (layer: CanvasLayer) => {
-    if (!layer.originalImageData) return;
-    const w = layer.originalImageData.width; const h = layer.originalImageData.height;
+    if (!layer.originalImageData || !layer.originalImageObj) return;
+    
+    const w = layer.originalImageObj.width; 
+    const h = layer.originalImageObj.height;
     
     const cvs = document.createElement('canvas'); cvs.width = w; cvs.height = h;
     const ctx = cvs.getContext('2d')!;
-    ctx.putImageData(layer.originalImageData, 0, 0);
     
+    ctx.putImageData(layer.originalImageData, 0, 0);
     let imgData = ctx.getImageData(0, 0, w, h);
     let data = imgData.data;
 
-    // 1. LIQUIFY
+    // 1. LIQUIFY 
     if (layer.twirl || layer.bulge) {
       const tempCvs = document.createElement('canvas'); tempCvs.width = w; tempCvs.height = h;
       const tempCtx = tempCvs.getContext('2d')!; tempCtx.putImageData(imgData, 0, 0);
       const srcData = tempCtx.getImageData(0, 0, w, h).data;
-      const cx = w / 2; const cy = h / 2; const radius = Math.min(w, h) / 2;
-      const twirlAngle = (layer.twirl || 0) * Math.PI / 180; const bulge = layer.bulge || 0; 
+      
+      const cx = w / 2; const cy = h / 2;
+      const radius = Math.min(w, h) / 2;
+      const twirlAngle = (layer.twirl || 0) * Math.PI / 180;
+      const bulge = layer.bulge || 0; 
 
       for (let y = 0; y < h; y++) {
         for (let x = 0; x < w; x++) {
-          let dx = x - cx; let dy = y - cy; let r = Math.sqrt(dx * dx + dy * dy); let a = Math.atan2(dy, dx);
+          let dx = x - cx; let dy = y - cy;
+          let r = Math.sqrt(dx * dx + dy * dy);
+          let a = Math.atan2(dy, dx);
+
           if (r < radius) {
-            a += twirlAngle * ((radius - r) / radius);
-            if (bulge !== 0) { let rn = r / radius; rn = Math.pow(rn, Math.exp(-bulge * 2)); r = rn * radius; }
+            const twirlFactor = (radius - r) / radius;
+            a += twirlAngle * twirlFactor;
+            if (bulge !== 0) {
+              let rn = r / radius;
+              rn = Math.pow(rn, Math.exp(-bulge * 2)); 
+              r = rn * radius;
+            }
             dx = r * Math.cos(a); dy = r * Math.sin(a);
           }
-          const sx = Math.max(0, Math.min(w - 1, Math.round(cx + dx))); const sy = Math.max(0, Math.min(h - 1, Math.round(cy + dy)));
-          const dstIdx = (y * w + x) * 4; const srcIdx = (sy * w + sx) * 4;
-          data[dstIdx] = srcData[srcIdx]; data[dstIdx+1] = srcData[srcIdx+1]; data[dstIdx+2] = srcData[srcIdx+2]; data[dstIdx+3] = srcData[srcIdx+3];
+
+          const sx = Math.max(0, Math.min(w - 1, Math.round(cx + dx)));
+          const sy = Math.max(0, Math.min(h - 1, Math.round(cy + dy)));
+          
+          const dstIdx = (y * w + x) * 4;
+          const srcIdx = (sy * w + sx) * 4;
+          data[dstIdx] = srcData[srcIdx];
+          data[dstIdx+1] = srcData[srcIdx+1];
+          data[dstIdx+2] = srcData[srcIdx+2];
+          data[dstIdx+3] = srcData[srcIdx+3];
         }
       }
     }
 
-    // 2. MAGIC ERASER
+    // 2. MAGIC ERASER 
     if (layer.autoBgRemoved || (layer.bgTolerance && layer.bgTolerance > 0)) {
       const corners = [0, (w - 1) * 4, (h - 1) * w * 4, ((h - 1) * w + w - 1) * 4];
       let rSum = 0, gSum = 0, bSum = 0;
       corners.forEach(idx => { rSum+=data[idx]; gSum+=data[idx+1]; bSum+=data[idx+2]; });
       const bgR = rSum/4, bgG = gSum/4, bgB = bSum/4;
+
       const tol = layer.autoBgRemoved ? 45 : (layer.bgTolerance || 0);
       
       for (let i = 0; i < data.length; i += 4) {
@@ -263,8 +285,10 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
     if (!engine.current.selectedId) return;
     const layer = engine.current.layers.find(l => l.id === engine.current.selectedId);
     if (layer && layer.type === "IMAGE") {
-      layer.autoBgRemoved = true; layer.bgTolerance = 45;
-      processImagePixels(layer); saveHistory();
+      layer.autoBgRemoved = true;
+      layer.bgTolerance = 45;
+      processImagePixels(layer);
+      saveHistory();
     }
   };
 
@@ -272,9 +296,12 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
   // РЕНДЕР ЦИКЛ CANVAS
   // ==========================================
   useEffect(() => {
-    const canvas = canvasRef.current; const container = containerRef.current;
+    const canvas = canvasRef.current;
+    const container = containerRef.current;
     if (!canvas || !container) return;
-    const ctx = canvas.getContext("2d"); if (!ctx) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
     let animId = 0;
 
     const render = () => {
@@ -282,29 +309,37 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
       const dpr = window.devicePixelRatio || 1;
       const rect = container.getBoundingClientRect();
       if (canvas.width !== rect.width * dpr || canvas.height !== rect.height * dpr) {
-        canvas.width = rect.width * dpr; canvas.height = rect.height * dpr; ctx.scale(dpr, dpr);
+        canvas.width = rect.width * dpr; canvas.height = rect.height * dpr;
+        ctx.scale(dpr, dpr);
       }
 
-      ctx.fillStyle = "#18181B"; // Darker UI background
+      ctx.fillStyle = "#141414"; 
       ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.save(); ctx.translate(state.viewport.x, state.viewport.y); ctx.scale(state.viewport.scale, state.viewport.scale);
 
-      // Artboard shadow
-      ctx.shadowColor = "rgba(0,0,0,0.5)"; ctx.shadowBlur = 40; ctx.shadowOffsetY = 15;
-      ctx.fillStyle = canvasBgColor; ctx.fillRect(0, 0, state.canvasWidth, state.canvasHeight);
+      ctx.save();
+      ctx.translate(state.viewport.x, state.viewport.y);
+      ctx.scale(state.viewport.scale, state.viewport.scale);
+
+      ctx.shadowColor = "rgba(0,0,0,0.5)"; ctx.shadowBlur = 40; ctx.shadowOffsetY = 10;
+      ctx.fillStyle = canvasBgColor;
+      ctx.fillRect(0, 0, state.canvasWidth, state.canvasHeight);
       ctx.shadowColor = "transparent";
 
-      const layersToDraw = [...state.layers]; if (state.liveLayer) layersToDraw.push(state.liveLayer);
+      const layersToDraw = [...state.layers];
+      if (state.liveLayer) layersToDraw.push(state.liveLayer);
 
       layersToDraw.forEach(layer => {
         if (!layer.visible) return;
-        ctx.save();
-        ctx.globalAlpha = layer.opacity / 100; ctx.globalCompositeOperation = layer.blendMode || "source-over";
 
-        const cx = layer.x + layer.width / 2; const cy = layer.y + layer.height / 2;
+        ctx.save();
+        ctx.globalAlpha = layer.opacity / 100;
+        ctx.globalCompositeOperation = layer.blendMode || "source-over";
+
+        const cx = layer.x + layer.width / 2;
+        const cy = layer.y + layer.height / 2;
         ctx.translate(cx, cy); ctx.rotate((layer.rotation * Math.PI) / 180); ctx.translate(-cx, -cy);
 
-        if (layer.shadowColor && layer.shadowBlur) {
+        if (layer.shadowColor && layer.shadowBlur !== undefined && layer.shadowBlur > 0) {
           ctx.shadowColor = layer.shadowColor; ctx.shadowBlur = layer.shadowBlur;
           ctx.shadowOffsetX = layer.shadowOffsetX || 0; ctx.shadowOffsetY = layer.shadowOffsetY || 0;
         }
@@ -320,114 +355,236 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
           if (layer.grayscale && layer.grayscale > 0) filterStr += `grayscale(${layer.grayscale}%) `;
           if (layer.blur && layer.blur > 0) filterStr += `blur(${layer.blur}px) `;
           if (filterStr) ctx.filter = filterStr.trim();
-        } else if (layer.blur && layer.blur > 0) { ctx.filter = `blur(${layer.blur}px)`; }
+        } else if (layer.blur && layer.blur > 0) {
+          ctx.filter = `blur(${layer.blur}px)`;
+        }
 
-        ctx.fillStyle = layer.fill || "transparent"; ctx.strokeStyle = layer.stroke || "transparent"; ctx.lineWidth = layer.strokeWidth || 0; ctx.lineCap = "round"; ctx.lineJoin = "round";
+        ctx.fillStyle = layer.fill || "transparent";
+        ctx.strokeStyle = layer.stroke || "transparent";
+        ctx.lineWidth = layer.strokeWidth || 0;
+        ctx.lineCap = "round"; ctx.lineJoin = "round";
 
-        const w2 = layer.width/2; const h2 = layer.height/2;
-
-        if (layer.type === "RECTANGLE") { ctx.beginPath(); if (layer.cornerRadius && (ctx as any).roundRect) { (ctx as any).roundRect(layer.x, layer.y, layer.width, layer.height, layer.cornerRadius); } else { ctx.rect(layer.x, layer.y, layer.width, layer.height); } if (layer.fill && layer.fill !== "transparent") ctx.fill(); if (layer.strokeWidth) ctx.stroke(); } 
-        else if (layer.type === "ELLIPSE") { ctx.beginPath(); ctx.ellipse(layer.x + layer.width/2, layer.y + layer.height/2, Math.abs(w2), Math.abs(h2), 0, 0, Math.PI * 2); if (layer.fill && layer.fill !== "transparent") ctx.fill(); if (layer.strokeWidth) ctx.stroke(); }
-        else if (layer.type === "POLYGON") { ctx.beginPath(); const sides = layer.sides || 3; const r = Math.min(Math.abs(layer.width), Math.abs(layer.height)) / 2; for (let i = 0; i < sides; i++) { const a = (Math.PI * 2 * i) / sides - Math.PI / 2; if (i === 0) ctx.moveTo(layer.x + layer.width/2 + r * Math.cos(a), layer.y + layer.height/2 + r * Math.sin(a)); else ctx.lineTo(layer.x + layer.width/2 + r * Math.cos(a), layer.y + layer.height/2 + r * Math.sin(a)); } ctx.closePath(); if (layer.fill && layer.fill !== "transparent") ctx.fill(); if (layer.strokeWidth) ctx.stroke(); }
-        else if (layer.type === "STAR") { ctx.beginPath(); const points = layer.sides || 5; const outerR = Math.min(Math.abs(layer.width), Math.abs(layer.height)) / 2; const innerR = outerR * 0.4; for (let i = 0; i < points * 2; i++) { const r = i % 2 === 0 ? outerR : innerR; const a = (Math.PI * i) / points - Math.PI / 2; if (i === 0) ctx.moveTo(layer.x + layer.width/2 + r * Math.cos(a), layer.y + layer.height/2 + r * Math.sin(a)); else ctx.lineTo(layer.x + layer.width/2 + r * Math.cos(a), layer.y + layer.height/2 + r * Math.sin(a)); } ctx.closePath(); if (layer.fill && layer.fill !== "transparent") ctx.fill(); if (layer.strokeWidth) ctx.stroke(); }
-        else if (layer.type === "ARROW") { ctx.beginPath(); const hw = layer.strokeWidth || 4; const headL = Math.max(15, hw * 3); const headW = Math.max(15, hw * 3); const p1 = {x: layer.x, y: cy}; const p2 = {x: layer.x + layer.width, y: cy}; const angle = Math.atan2(p2.y - p1.y, p2.x - p1.x); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke(); ctx.fillStyle = ctx.strokeStyle; ctx.beginPath(); ctx.moveTo(p2.x, p2.y); ctx.lineTo(p2.x - headL * Math.cos(angle - Math.PI/6), p2.y - headW * Math.sin(angle - Math.PI/6)); ctx.lineTo(p2.x - headL * Math.cos(angle + Math.PI/6), p2.y - headW * Math.sin(angle + Math.PI/6)); ctx.closePath(); ctx.fill(); }
-        else if (layer.type === "LINE") { ctx.beginPath(); ctx.moveTo(layer.x, layer.y); ctx.lineTo(layer.x + layer.width, layer.y + layer.height); if (layer.strokeWidth) ctx.stroke(); }
-        else if (layer.type === "IMAGE" && layer.imageObj) { ctx.drawImage(layer.imageObj, layer.x, layer.y, layer.width, layer.height); }
-        else if (layer.type === "TEXT" && layer.text && editingTextId !== layer.id) { ctx.font = `${layer.fontWeight || "normal"} ${layer.fontSize}px ${layer.fontFamily || "Inter, sans-serif"}`; ctx.fillStyle = layer.fill || "#ffffff"; ctx.textBaseline = "top"; ctx.textAlign = layer.textAlign || "left"; const textLines = layer.text.split('\n'); let tX = layer.x; if (layer.textAlign === "center") tX = cx; if (layer.textAlign === "right") tX = layer.x + layer.width; textLines.forEach((line, i) => { ctx.fillText(line, tX, layer.y + i * (layer.fontSize || 24) * 1.2); }); }
-        else if (layer.type === "PATH" && layer.points && layer.points.length > 0) { ctx.beginPath(); ctx.moveTo(layer.points[0].x + layer.x, layer.points[0].y + layer.y); for (let i = 1; i < layer.points.length; i++) { ctx.lineTo(layer.points[i].x + layer.x, layer.points[i].y + layer.y); } if (layer.strokeWidth) ctx.stroke(); }
+        if (layer.type === "RECTANGLE") {
+          ctx.beginPath();
+          if (layer.cornerRadius && (ctx as any).roundRect) { (ctx as any).roundRect(layer.x, layer.y, layer.width, layer.height, layer.cornerRadius); } 
+          else { ctx.rect(layer.x, layer.y, layer.width, layer.height); }
+          if (layer.fill && layer.fill !== "transparent") ctx.fill(); if (layer.strokeWidth) ctx.stroke();
+        } 
+        else if (layer.type === "ELLIPSE") {
+          ctx.beginPath(); ctx.ellipse(layer.x + layer.width/2, layer.y + layer.height/2, Math.abs(layer.width/2), Math.abs(layer.height/2), 0, 0, Math.PI * 2);
+          if (layer.fill && layer.fill !== "transparent") ctx.fill(); if (layer.strokeWidth) ctx.stroke();
+        }
+        else if (layer.type === "POLYGON") {
+          ctx.beginPath(); const sides = layer.sides || 3; const r = Math.min(Math.abs(layer.width), Math.abs(layer.height)) / 2;
+          for (let i = 0; i < sides; i++) { const a = (Math.PI * 2 * i) / sides - Math.PI / 2; if (i === 0) ctx.moveTo(cx + r * Math.cos(a), cy + r * Math.sin(a)); else ctx.lineTo(cx + r * Math.cos(a), cy + r * Math.sin(a)); }
+          ctx.closePath(); if (layer.fill && layer.fill !== "transparent") ctx.fill(); if (layer.strokeWidth) ctx.stroke();
+        }
+        else if (layer.type === "STAR") {
+          ctx.beginPath(); const points = layer.sides || 5; const outerR = Math.min(Math.abs(layer.width), Math.abs(layer.height)) / 2; const innerR = outerR * 0.4;
+          for (let i = 0; i < points * 2; i++) { const r = i % 2 === 0 ? outerR : innerR; const a = (Math.PI * i) / points - Math.PI / 2; if (i === 0) ctx.moveTo(cx + r * Math.cos(a), cy + r * Math.sin(a)); else ctx.lineTo(cx + r * Math.cos(a), cy + r * Math.sin(a)); }
+          ctx.closePath(); if (layer.fill && layer.fill !== "transparent") ctx.fill(); if (layer.strokeWidth) ctx.stroke();
+        }
+        else if (layer.type === "ARROW") {
+          ctx.beginPath(); const hw = layer.strokeWidth || 4; const headL = Math.max(15, hw * 3); const headW = Math.max(15, hw * 3);
+          const p1 = {x: layer.x, y: cy}; const p2 = {x: layer.x + layer.width, y: cy}; const angle = Math.atan2(p2.y - p1.y, p2.x - p1.x);
+          ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke();
+          ctx.fillStyle = ctx.strokeStyle; ctx.beginPath(); ctx.moveTo(p2.x, p2.y); ctx.lineTo(p2.x - headL * Math.cos(angle - Math.PI/6), p2.y - headW * Math.sin(angle - Math.PI/6)); ctx.lineTo(p2.x - headL * Math.cos(angle + Math.PI/6), p2.y - headW * Math.sin(angle + Math.PI/6)); ctx.closePath(); ctx.fill();
+        }
+        else if (layer.type === "LINE") {
+          ctx.beginPath(); ctx.moveTo(layer.x, layer.y); ctx.lineTo(layer.x + layer.width, layer.y + layer.height); if (layer.strokeWidth) ctx.stroke();
+        }
+        else if (layer.type === "IMAGE" && layer.imageObj) {
+          ctx.drawImage(layer.imageObj, layer.x, layer.y, layer.width, layer.height);
+        }
+        else if (layer.type === "TEXT" && layer.text && editingTextId !== layer.id) {
+          ctx.font = `${layer.fontWeight || "normal"} ${layer.fontSize}px ${layer.fontFamily || "Inter, sans-serif"}`;
+          ctx.fillStyle = layer.fill || "#ffffff"; ctx.textBaseline = "top"; ctx.textAlign = layer.textAlign || "left";
+          const textLines = layer.text.split('\n');
+          let tX = layer.x; if (layer.textAlign === "center") tX = cx; if (layer.textAlign === "right") tX = layer.x + layer.width;
+          textLines.forEach((line, i) => { ctx.fillText(line, tX, layer.y + i * (layer.fontSize || 24) * 1.2); });
+        }
+        else if (layer.type === "PATH" && layer.points && layer.points.length > 0) {
+          ctx.beginPath(); ctx.moveTo(layer.points[0].x + layer.x, layer.points[0].y + layer.y);
+          for (let i = 1; i < layer.points.length; i++) { ctx.lineTo(layer.points[i].x + layer.x, layer.points[i].y + layer.y); }
+          if (layer.strokeWidth) ctx.stroke();
+        }
 
         ctx.restore();
 
-        // Отрисовка Bounding Box (Выделение)
+        // Отрисовка Bounding Box
         if (state.selectedId === layer.id && !layer.locked && !editingTextId) {
-          ctx.save(); ctx.translate(cx, cy); ctx.rotate((layer.rotation * Math.PI) / 180); 
-          ctx.strokeStyle = "#3B82F6"; ctx.lineWidth = 1.5 / state.viewport.scale; ctx.strokeRect(-w2, -h2, layer.width, layer.height);
-          const hSize = 8 / state.viewport.scale; ctx.fillStyle = "#ffffff"; ctx.strokeStyle = "#3B82F6"; ctx.lineWidth = 1.5 / state.viewport.scale;
+          ctx.save();
+          ctx.translate(cx, cy); ctx.rotate((layer.rotation * Math.PI) / 180); 
+          ctx.strokeStyle = "#3B82F6"; ctx.lineWidth = 1.5 / state.viewport.scale;
+          ctx.strokeRect(-layer.width/2, -layer.height/2, layer.width, layer.height);
+          
+          const hSize = 8 / state.viewport.scale;
+          ctx.fillStyle = "#ffffff"; ctx.strokeStyle = "#3B82F6"; ctx.lineWidth = 1.5 / state.viewport.scale;
           const drawHandle = (hx: number, hy: number) => { ctx.beginPath(); ctx.arc(hx, hy, hSize/2, 0, Math.PI*2); ctx.fill(); ctx.stroke(); };
-          drawHandle(-w2, -h2); drawHandle(w2, -h2); drawHandle(-w2, h2); drawHandle(w2, h2); 
-          ctx.beginPath(); ctx.moveTo(0, -h2); ctx.lineTo(0, -h2 - 25 / state.viewport.scale); ctx.stroke(); drawHandle(0, -h2 - 25 / state.viewport.scale);
+          drawHandle(-layer.width/2, -layer.height/2); drawHandle(layer.width/2, -layer.height/2); drawHandle(-layer.width/2, layer.height/2); drawHandle(layer.width/2, layer.height/2); 
+          
+          ctx.beginPath(); ctx.moveTo(0, -layer.height/2); ctx.lineTo(0, -layer.height/2 - 25 / state.viewport.scale); ctx.stroke();
+          drawHandle(0, -layer.height/2 - 25 / state.viewport.scale);
           ctx.restore();
         }
       });
-      ctx.restore(); animId = requestAnimationFrame(render);
+
+      ctx.restore();
+      animId = requestAnimationFrame(render);
     };
 
-    animId = requestAnimationFrame(render); return () => cancelAnimationFrame(animId);
+    animId = requestAnimationFrame(render);
+    return () => cancelAnimationFrame(animId);
   }, [canvasBgColor, editingTextId]);
 
   // ==========================================
   // ВЗАИМОДЕЙСТВИЕ С МЫШЬЮ
   // ==========================================
   const getCanvasPos = (e: React.PointerEvent) => {
-    const state = engine.current; if (!containerRef.current) return { x: 0, y: 0 };
+    const state = engine.current;
+    if (!containerRef.current) return { x: 0, y: 0 };
     const rect = containerRef.current.getBoundingClientRect();
-    return { x: (e.clientX - rect.left - state.viewport.x) / state.viewport.scale, y: (e.clientY - rect.top - state.viewport.y) / state.viewport.scale };
+    return {
+      x: (e.clientX - rect.left - state.viewport.x) / state.viewport.scale,
+      y: (e.clientY - rect.top - state.viewport.y) / state.viewport.scale,
+    };
   };
 
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (editingTextId) return; 
+    
     const state = engine.current;
     if (e.button === 1 || activeCategory === "PAN" || e.altKey || e.shiftKey) {
-      state.isPanning = true; state.startX = e.clientX - state.viewport.x; state.startY = e.clientY - state.viewport.y; document.body.style.cursor = "grabbing"; return;
+      state.isPanning = true;
+      state.startX = e.clientX - state.viewport.x;
+      state.startY = e.clientY - state.viewport.y;
+      document.body.style.cursor = "grabbing";
+      return;
     }
 
-    const pos = getCanvasPos(e); state.startX = pos.x; state.startY = pos.y; state.lastX = pos.x; state.lastY = pos.y;
+    const pos = getCanvasPos(e);
+    state.startX = pos.x;
+    state.startY = pos.y;
+    state.lastX = pos.x;
+    state.lastY = pos.y;
 
     if (activeCategory === "SELECT") {
       if (state.selectedId) {
         const layer = state.layers.find(l => l.id === state.selectedId);
         if (layer && !layer.locked && layer.visible) {
-          const hSize = 12 / state.viewport.scale; const cx = layer.x + layer.width/2; const cy = layer.y + layer.height/2;
-          const rad = (-layer.rotation * Math.PI) / 180; const dx = pos.x - cx; const dy = pos.y - cy;
-          const lx = dx * Math.cos(rad) - dy * Math.sin(rad); const ly = dx * Math.sin(rad) + dy * Math.cos(rad);
+          const hSize = 12 / state.viewport.scale;
+          const cx = layer.x + layer.width/2; const cy = layer.y + layer.height/2;
+          
+          const rad = (-layer.rotation * Math.PI) / 180;
+          const dx = pos.x - cx; const dy = pos.y - cy;
+          const lx = dx * Math.cos(rad) - dy * Math.sin(rad);
+          const ly = dx * Math.sin(rad) + dy * Math.cos(rad);
+          
           const w2 = Math.abs(layer.width)/2; const h2 = Math.abs(layer.height)/2;
 
-          if (Math.hypot(lx - 0, ly - (-h2 - 25 / state.viewport.scale)) < hSize) { state.isRotatingObject = true; return; }
+          if (Math.hypot(lx - 0, ly - (-h2 - 25 / state.viewport.scale)) < hSize) {
+            state.isRotatingObject = true; return;
+          }
 
           const handles = [{ id: "tl", x: -w2, y: -h2 }, { id: "tr", x: w2, y: -h2 }, { id: "bl", x: -w2, y: h2 }, { id: "br", x: w2, y: h2 }];
-          for (const h of handles) { if (lx >= h.x - hSize && lx <= h.x + hSize && ly >= h.y - hSize && ly <= h.y + hSize) { state.isResizingObject = true; state.resizeHandle = h.id; return; } }
+          for (const h of handles) {
+            if (lx >= h.x - hSize && lx <= h.x + hSize && ly >= h.y - hSize && ly <= h.y + hSize) {
+              state.isResizingObject = true; state.resizeHandle = h.id; return;
+            }
+          }
         }
       }
 
       let hitId: string | null = null;
       for (let i = state.layers.length - 1; i >= 0; i--) {
-        const l = state.layers[i]; if (!l.visible || l.locked) continue;
-        const cx = l.x + l.width/2; const cy = l.y + l.height/2; const rad = (-l.rotation * Math.PI) / 180;
-        const dx = pos.x - cx; const dy = pos.y - cy; const lx = dx * Math.cos(rad) - dy * Math.sin(rad); const ly = dx * Math.sin(rad) + dy * Math.cos(rad);
+        const l = state.layers[i];
+        if (!l.visible || l.locked) continue;
+        
+        const cx = l.x + l.width/2; const cy = l.y + l.height/2;
+        const rad = (-l.rotation * Math.PI) / 180;
+        const dx = pos.x - cx; const dy = pos.y - cy;
+        const lx = dx * Math.cos(rad) - dy * Math.sin(rad);
+        const ly = dx * Math.sin(rad) + dy * Math.cos(rad);
+        
         const w2 = Math.abs(l.width)/2; const h2 = Math.abs(l.height)/2;
         const padding = l.type === "PATH" || l.type === "LINE" || l.type === "ARROW" ? 10 / state.viewport.scale : 0;
 
-        if (lx >= -w2 - padding && lx <= w2 + padding && ly >= -h2 - padding && ly <= h2 + padding) { hitId = l.id; break; }
+        if (lx >= -w2 - padding && lx <= w2 + padding && ly >= -h2 - padding && ly <= h2 + padding) {
+          hitId = l.id; break;
+        }
       }
-      state.selectedId = hitId; if (hitId) state.isDraggingObject = true; syncUI(); return;
+
+      state.selectedId = hitId;
+      if (hitId) state.isDraggingObject = true;
+      syncUI();
+      return;
     }
 
-    state.isDrawing = true; state.selectedId = null;
+    state.isDrawing = true;
+    state.selectedId = null;
 
     if (activeCategory === "PEN" || activeCategory === "ERASER") {
-      state.liveLayer = { id: "live", name: activeCategory === "ERASER" ? "Eraser Path" : "Vector Path", type: "PATH", x: pos.x, y: pos.y, width: 0, height: 0, rotation: 0, opacity: 100, visible: true, locked: false, blendMode: activeCategory === "ERASER" ? "destination-out" : "source-over", stroke: activeCategory === "ERASER" ? "#000000" : currentStrokeColor, strokeWidth: currentStrokeWidth * (activeCategory === "ERASER" ? 6 : 1), points: [{ x: 0, y: 0 }] };
+      state.liveLayer = {
+        id: "live", name: activeCategory === "ERASER" ? "Eraser Path" : "Vector Path", type: "PATH",
+        x: pos.x, y: pos.y, width: 0, height: 0, rotation: 0, opacity: 100, visible: true, locked: false, blendMode: "source-over",
+        stroke: activeCategory === "ERASER" ? "rgba(255,255,255,0.5)" : currentStrokeColor, strokeWidth: currentStrokeWidth * (activeCategory === "ERASER" ? 6 : 1),
+        points: [{ x: 0, y: 0 }] 
+      };
     } else if (activeCategory === "TEXT") {
-      const newText: CanvasLayer = { id: generateId(), name: "Text", type: "TEXT", x: pos.x, y: pos.y, width: 300, height: 50, rotation: 0, opacity: 100, visible: true, locked: false, blendMode: "source-over", fill: currentColor, text: "Double click to edit", fontSize: 64, fontFamily: "Inter", fontWeight: "600", textAlign: "left" };
-      state.layers.push(newText); state.selectedId = newText.id; state.isDrawing = false; setActiveCategory("SELECT"); saveHistory(); syncUI();
+      const newText: CanvasLayer = {
+        id: generateId(), name: "Text", type: "TEXT",
+        x: pos.x, y: pos.y, width: 250, height: 50, rotation: 0, opacity: 100, visible: true, locked: false, blendMode: "source-over",
+        fill: currentColor, text: "Double click to edit", fontSize: 64, fontFamily: "Inter", fontWeight: "600", textAlign: "left"
+      };
+      state.layers.push(newText);
+      state.selectedId = newText.id;
+      state.isDrawing = false;
+      setActiveCategory("SELECT");
+      saveHistory();
+      syncUI();
     } else if (activeCategory === "SHAPE") {
-      state.liveLayer = { id: "live", name: activeShape, type: activeShape, x: pos.x, y: pos.y, width: 0, height: 0, rotation: 0, opacity: 100, visible: true, locked: false, blendMode: "source-over", stroke: currentStrokeWidth > 0 ? currentStrokeColor : "transparent", strokeWidth: currentStrokeWidth, fill: currentColor, cornerRadius: 0, sides: activeShape === "STAR" ? 5 : 3 };
+      state.liveLayer = {
+        id: "live", name: activeShape, type: activeShape,
+        x: pos.x, y: pos.y, width: 0, height: 0, rotation: 0, opacity: 100, visible: true, locked: false, blendMode: "source-over",
+        stroke: currentStrokeWidth > 0 ? currentStrokeColor : "transparent", strokeWidth: currentStrokeWidth, fill: currentColor, cornerRadius: 0, sides: activeShape === "STAR" ? 5 : 3
+      };
       if (activeShape === "LINE" || activeShape === "ARROW") state.liveLayer.fill = "transparent";
     }
     syncUI();
   };
 
   const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (editingTextId) return; const state = engine.current;
-    if (state.isPanning) { state.viewport.x = e.clientX - state.startX; state.viewport.y = e.clientY - state.startY; return; }
-    const pos = getCanvasPos(e); const dx = pos.x - state.lastX; const dy = pos.y - state.lastY;
+    if (editingTextId) return;
+    const state = engine.current;
+
+    if (state.isPanning) {
+      state.viewport.x = e.clientX - state.startX;
+      state.viewport.y = e.clientY - state.startY;
+      return;
+    }
+
+    const pos = getCanvasPos(e);
+    const dx = pos.x - state.lastX;
+    const dy = pos.y - state.lastY;
 
     if (state.isRotatingObject && state.selectedId) {
       const layer = state.layers.find(l => l.id === state.selectedId);
-      if (layer) { const cx = layer.x + layer.width / 2; const cy = layer.y + layer.height / 2; const angle = Math.atan2(pos.y - cy, pos.x - cx); layer.rotation = (angle * 180) / Math.PI + 90; } return;
+      if (layer) {
+        const cx = layer.x + layer.width / 2;
+        const cy = layer.y + layer.height / 2;
+        const angle = Math.atan2(pos.y - cy, pos.x - cx);
+        layer.rotation = (angle * 180) / Math.PI + 90; 
+      }
+      return;
     }
+
     if (state.isDraggingObject && state.selectedId) {
-      const layer = state.layers.find(l => l.id === state.selectedId); if (layer) { layer.x += dx; layer.y += dy; } state.lastX = pos.x; state.lastY = pos.y; return;
+      const layer = state.layers.find(l => l.id === state.selectedId);
+      if (layer) { layer.x += dx; layer.y += dy; }
+      state.lastX = pos.x; state.lastY = pos.y;
+      return;
     }
+
     if (state.isResizingObject && state.selectedId && state.resizeHandle) {
       const layer = state.layers.find(l => l.id === state.selectedId);
       if (layer) {
@@ -436,49 +593,90 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
         if (state.resizeHandle === "bl") { layer.x += dx; layer.width -= dx; layer.height += dy; }
         if (state.resizeHandle === "tl") { layer.x += dx; layer.y += dy; layer.width -= dx; layer.height -= dy; }
       }
-      state.lastX = pos.x; state.lastY = pos.y; return;
+      state.lastX = pos.x; state.lastY = pos.y;
+      return;
     }
+
     if (state.isDrawing && state.liveLayer) {
-      if ((activeCategory === "PEN" || activeCategory === "ERASER") && state.liveLayer.points) { state.liveLayer.points.push({ x: pos.x - state.liveLayer.x, y: pos.y - state.liveLayer.y }); } else { state.liveLayer.width = pos.x - state.startX; state.liveLayer.height = pos.y - state.startY; }
+      if ((activeCategory === "PEN" || activeCategory === "ERASER") && state.liveLayer.points) {
+        state.liveLayer.points.push({ x: pos.x - state.liveLayer.x, y: pos.y - state.liveLayer.y });
+      } else {
+        state.liveLayer.width = pos.x - state.startX;
+        state.liveLayer.height = pos.y - state.startY;
+      }
     }
   };
 
   const handlePointerUp = () => {
     const state = engine.current;
+    
     if (state.isPanning) { state.isPanning = false; document.body.style.cursor = "default"; return; }
-    if (state.isDraggingObject || state.isResizingObject || state.isRotatingObject) { state.isDraggingObject = false; state.isResizingObject = false; state.isRotatingObject = false; state.resizeHandle = null; saveHistory(); syncUI(); return; }
+    if (state.isDraggingObject || state.isResizingObject || state.isRotatingObject) { 
+      state.isDraggingObject = false; state.isResizingObject = false; state.isRotatingObject = false; state.resizeHandle = null; 
+      saveHistory(); syncUI(); return; 
+    }
 
     if (state.isDrawing && state.liveLayer) {
       const newLayer = { ...state.liveLayer, id: generateId(), name: `${activeCategory === "SHAPE" ? activeShape : activeCategory}` };
       
       if (newLayer.type === "PATH" && newLayer.points && newLayer.points.length > 0) {
         let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-        newLayer.points.forEach(p => { if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x; if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y; });
-        newLayer.x += minX; newLayer.y += minY; newLayer.width = Math.max(10, maxX - minX); newLayer.height = Math.max(10, maxY - minY);
+        newLayer.points.forEach(p => {
+          if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x;
+          if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y;
+        });
+        
+        newLayer.x += minX; newLayer.y += minY;
+        newLayer.width = Math.max(10, maxX - minX); newLayer.height = Math.max(10, maxY - minY);
         newLayer.points = newLayer.points.map(p => ({ x: p.x - minX, y: p.y - minY }));
+        
+        // Превращаем ластик в деструктивный путь, который стирает слои
+        if (activeCategory === "ERASER") {
+           newLayer.blendMode = "destination-out";
+           newLayer.stroke = "rgba(0,0,0,1)";
+        }
       } 
       else if (newLayer.type !== "IMAGE" && newLayer.type !== "TEXT" && newLayer.type !== "PATH") {
         if (newLayer.width < 0) { newLayer.x += newLayer.width; newLayer.width = Math.abs(newLayer.width); }
         if (newLayer.height < 0) { newLayer.y += newLayer.height; newLayer.height = Math.abs(newLayer.height); }
         if (newLayer.width < 5 && newLayer.height < 5) { newLayer.width = 100; newLayer.height = 100; }
       }
-      state.layers.push(newLayer); state.liveLayer = null; state.isDrawing = false;
-      if (activeCategory !== "PEN" && activeCategory !== "ERASER") { setActiveCategory("SELECT"); state.selectedId = newLayer.id; }
-      saveHistory(); syncUI();
+
+      state.layers.push(newLayer);
+      state.liveLayer = null;
+      state.isDrawing = false;
+      
+      if (activeCategory !== "PEN" && activeCategory !== "ERASER") {
+        setActiveCategory("SELECT");
+        state.selectedId = newLayer.id;
+      }
+      
+      saveHistory();
+      syncUI();
     }
   };
 
   const handleDoubleClick = (e: React.MouseEvent) => {
     if (activeCategory !== "SELECT" || !engine.current.selectedId) return;
     const layer = engine.current.layers.find(l => l.id === engine.current.selectedId);
-    if (layer && layer.type === "TEXT") setEditingTextId(layer.id);
+    if (layer && layer.type === "TEXT") {
+      setEditingTextId(layer.id);
+    }
   };
 
   const handleWheel = (e: React.WheelEvent) => {
-    e.preventDefault(); const state = engine.current; const zoomSensitivity = 0.002; const delta = -e.deltaY * zoomSensitivity;
+    e.preventDefault();
+    const state = engine.current;
+    const zoomSensitivity = 0.002;
+    const delta = -e.deltaY * zoomSensitivity;
+    
     const newScale = clip(state.viewport.scale * (1 + delta), 0.05, 20.0);
+    
     if (containerRef.current) {
-      const rect = containerRef.current.getBoundingClientRect(); const mouseX = e.clientX - rect.left; const mouseY = e.clientY - rect.top;
+      const rect = containerRef.current.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+      
       state.viewport.x = mouseX - (mouseX - state.viewport.x) * (newScale / state.viewport.scale);
       state.viewport.y = mouseY - (mouseY - state.viewport.y) * (newScale / state.viewport.scale);
       state.viewport.scale = newScale;
@@ -489,13 +687,16 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
   // ПАНЕЛЬ СЛОЕВ И ЭКСПОРТ
   // ==========================================
   const handleImageImport = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]; if (!file) return;
+    const file = e.target.files?.[0];
+    if (!file) return;
     const reader = new FileReader();
     reader.onload = (event) => {
       const img = new Image();
       img.onload = () => {
-        const state = engine.current; let imgW = img.width, imgH = img.height;
-        // Масштабируем пиксели при импорте (Ограничение до 1600px для экономии памяти localStorage)
+        const state = engine.current;
+        let imgW = img.width;
+        let imgH = img.height;
+        // Лимит для сохранения производительности
         const MAX_SIZE = 1600;
         if (imgW > MAX_SIZE || imgH > MAX_SIZE) {
           const ratio = Math.min(MAX_SIZE / imgW, MAX_SIZE / imgH);
@@ -505,35 +706,112 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
         const cvs = document.createElement('canvas'); cvs.width = imgW; cvs.height = imgH;
         const ctx = cvs.getContext('2d')!; ctx.drawImage(img, 0, 0, imgW, imgH);
         const originalData = ctx.getImageData(0, 0, imgW, imgH);
-        // Сжимаем в jpeg для localStorage, чтобы не убить 5MB квоту
-        const compressedSrc = cvs.toDataURL("image/jpeg", 0.8);
+        const compressedSrc = cvs.toDataURL("image/jpeg", 0.8); // JPEG для легкости в localStorage
 
-        const cw = containerRef.current?.clientWidth || state.canvasWidth; const ch = containerRef.current?.clientHeight || state.canvasHeight;
-        const vX = (cw / 2 - state.viewport.x) / state.viewport.scale; const vY = (ch / 2 - state.viewport.y) / state.viewport.scale;
+        const cw = containerRef.current?.clientWidth || state.canvasWidth;
+        const ch = containerRef.current?.clientHeight || state.canvasHeight;
+        const vX = (cw / 2 - state.viewport.x) / state.viewport.scale;
+        const vY = (ch / 2 - state.viewport.y) / state.viewport.scale;
 
-        const newImage: CanvasLayer = { id: generateId(), name: file.name, type: "IMAGE", x: vX - imgW / 2, y: vY - imgH / 2, width: imgW, height: imgH, rotation: 0, opacity: 100, visible: true, locked: false, blendMode: "source-over", imageObj: img, originalImageObj: img, originalImageData: originalData, src: compressedSrc, bgTolerance: 0, brightness: 100, contrast: 100, saturation: 100, hue: 0, sepia: 0, grayscale: 0, invert: 0, twirl: 0, bulge: 0 };
-        state.layers.push(newImage); state.selectedId = newImage.id; setActiveCategory("SELECT"); saveHistory(); syncUI();
+        const newImage: CanvasLayer = {
+          id: generateId(), name: file.name, type: "IMAGE",
+          x: vX - imgW / 2, y: vY - imgH / 2, 
+          width: imgW, height: imgH, rotation: 0, opacity: 100, visible: true, locked: false, blendMode: "source-over",
+          imageObj: img, originalImageObj: img, originalImageData: originalData, src: compressedSrc,
+          bgTolerance: 0, brightness: 100, contrast: 100, saturation: 100, hue: 0, sepia: 0, grayscale: 0, invert: 0, twirl: 0, bulge: 0
+        };
+        state.layers.push(newImage);
+        state.selectedId = newImage.id;
+        setActiveCategory("SELECT");
+        saveHistory();
+        syncUI();
       };
       img.src = event.target?.result as string;
     };
     reader.readAsDataURL(file);
   };
 
-  const deleteSelectedLayer = () => { if (!engine.current.selectedId) return; engine.current.layers = engine.current.layers.filter(l => l.id !== engine.current.selectedId); engine.current.selectedId = null; saveHistory(); syncUI(); };
-  const duplicateSelectedLayer = () => { const state = engine.current; if (!state.selectedId) return; const layer = state.layers.find(l => l.id === state.selectedId); if (layer) { const clone = { ...layer, id: generateId(), x: layer.x + 40, y: layer.y + 40, name: layer.name + " Copy" }; state.layers.push(clone); state.selectedId = clone.id; saveHistory(); syncUI(); } };
-  const updateSelectedLayer = (updates: Partial<CanvasLayer>) => { if (!engine.current.selectedId) return; const layer = engine.current.layers.find(l => l.id === engine.current.selectedId); if (layer) { Object.assign(layer, updates); if (layer.type === "IMAGE" && (updates.bgTolerance !== undefined || updates.twirl !== undefined || updates.bulge !== undefined || updates.autoBgRemoved !== undefined)) { processImagePixels(layer); } else { syncUI(); } } };
+  const deleteSelectedLayer = () => {
+    if (!engine.current.selectedId) return;
+    engine.current.layers = engine.current.layers.filter(l => l.id !== engine.current.selectedId);
+    engine.current.selectedId = null;
+    saveHistory();
+    syncUI();
+  };
+
+  const duplicateSelectedLayer = () => {
+    const state = engine.current;
+    if (!state.selectedId) return;
+    const layer = state.layers.find(l => l.id === state.selectedId);
+    if (layer) {
+      const clone = { ...layer, id: generateId(), x: layer.x + 40, y: layer.y + 40, name: layer.name + " Copy" };
+      state.layers.push(clone);
+      state.selectedId = clone.id;
+      saveHistory();
+      syncUI();
+    }
+  };
+
+  const updateSelectedLayer = (updates: Partial<CanvasLayer>) => {
+    if (!engine.current.selectedId) return;
+    const layer = engine.current.layers.find(l => l.id === engine.current.selectedId);
+    if (layer) {
+      Object.assign(layer, updates);
+      
+      if (layer.type === "IMAGE" && (updates.bgTolerance !== undefined || updates.twirl !== undefined || updates.bulge !== undefined || updates.autoBgRemoved !== undefined)) {
+        processImagePixels(layer);
+      } else {
+        syncUI();
+      }
+    }
+  };
+
   const commitLayerUpdate = () => saveHistory();
-  const moveLayer = (id: string, direction: "UP" | "DOWN" | "FRONT" | "BACK") => { const idx = engine.current.layers.findIndex(l => l.id === id); if (idx === -1) return; const layers = engine.current.layers; const l = layers.splice(idx, 1)[0]; if (direction === "UP") layers.splice(Math.min(layers.length, idx + 1), 0, l); if (direction === "DOWN") layers.splice(Math.max(0, idx - 1), 0, l); if (direction === "FRONT") layers.push(l); if (direction === "BACK") layers.unshift(l); saveHistory(); syncUI(); };
+
+  const moveLayer = (id: string, direction: "UP" | "DOWN" | "FRONT" | "BACK") => {
+    const idx = engine.current.layers.findIndex(l => l.id === id);
+    if (idx === -1) return;
+    const layers = engine.current.layers;
+    const l = layers.splice(idx, 1)[0];
+    
+    if (direction === "UP") layers.splice(Math.min(layers.length, idx + 1), 0, l);
+    if (direction === "DOWN") layers.splice(Math.max(0, idx - 1), 0, l);
+    if (direction === "FRONT") layers.push(l);
+    if (direction === "BACK") layers.unshift(l);
+    
+    saveHistory();
+    syncUI();
+  };
 
   const exportCanvas = () => {
-    const canvas = document.createElement("canvas"); canvas.width = engine.current.canvasWidth; canvas.height = engine.current.canvasHeight;
-    const ctx = canvas.getContext("2d"); if (!ctx) return;
-    ctx.fillStyle = canvasBgColor; ctx.fillRect(0, 0, canvas.width, canvas.height);
+    const canvas = document.createElement("canvas");
+    canvas.width = engine.current.canvasWidth;
+    canvas.height = engine.current.canvasHeight;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    ctx.fillStyle = canvasBgColor;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
     engine.current.layers.forEach(layer => {
       if (!layer.visible) return;
-      ctx.save(); ctx.globalAlpha = layer.opacity / 100; ctx.globalCompositeOperation = layer.blendMode || "source-over";
-      const cx = layer.x + layer.width / 2, cy = layer.y + layer.height / 2; ctx.translate(cx, cy); ctx.rotate((layer.rotation * Math.PI) / 180); ctx.translate(-cx, -cy);
-      if (layer.shadowColor && layer.shadowBlur) { ctx.shadowColor = layer.shadowColor; ctx.shadowBlur = layer.shadowBlur; ctx.shadowOffsetX = layer.shadowOffsetX || 0; ctx.shadowOffsetY = layer.shadowOffsetY || 0; }
+      ctx.save();
+      ctx.globalAlpha = layer.opacity / 100;
+      ctx.globalCompositeOperation = layer.blendMode || "source-over";
+
+      const cx = layer.x + layer.width / 2;
+      const cy = layer.y + layer.height / 2;
+      ctx.translate(cx, cy);
+      ctx.rotate((layer.rotation * Math.PI) / 180);
+      ctx.translate(-cx, -cy);
+
+      if (layer.shadowColor && layer.shadowBlur) {
+        ctx.shadowColor = layer.shadowColor;
+        ctx.shadowBlur = layer.shadowBlur;
+        ctx.shadowOffsetX = layer.shadowOffsetX || 0;
+        ctx.shadowOffsetY = layer.shadowOffsetY || 0;
+      }
+      
       if (layer.type === "IMAGE") {
         let filterStr = "";
         if (layer.brightness !== undefined && layer.brightness !== 100) filterStr += `brightness(${layer.brightness}%) `;
@@ -545,10 +823,17 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
         if (layer.invert && layer.invert > 0) filterStr += `invert(${layer.invert}%) `;
         if (layer.blur && layer.blur > 0) filterStr += `blur(${layer.blur}px) `;
         if (filterStr) ctx.filter = filterStr.trim();
-      } else if (layer.blur && layer.blur > 0) { ctx.filter = `blur(${layer.blur}px)`; }
-      ctx.fillStyle = layer.fill || "transparent"; ctx.strokeStyle = layer.stroke || "transparent"; ctx.lineWidth = layer.strokeWidth || 0; ctx.lineCap = "round"; ctx.lineJoin = "round";
+      } else if (layer.blur && layer.blur > 0) {
+        ctx.filter = `blur(${layer.blur}px)`;
+      }
+
+      ctx.fillStyle = layer.fill || "transparent";
+      ctx.strokeStyle = layer.stroke || "transparent";
+      ctx.lineWidth = layer.strokeWidth || 0;
+      ctx.lineCap = "round"; ctx.lineJoin = "round";
 
       const w2 = layer.width/2; const h2 = layer.height/2;
+
       if (layer.type === "RECTANGLE") { ctx.beginPath(); if (layer.cornerRadius && (ctx as any).roundRect) { (ctx as any).roundRect(-w2, -h2, layer.width, layer.height, layer.cornerRadius); } else { ctx.rect(-w2, -h2, layer.width, layer.height); } if (layer.fill && layer.fill !== "transparent") ctx.fill(); if (layer.strokeWidth) ctx.stroke(); } 
       else if (layer.type === "ELLIPSE") { ctx.beginPath(); ctx.ellipse(0, 0, Math.abs(w2), Math.abs(h2), 0, 0, Math.PI * 2); if (layer.fill && layer.fill !== "transparent") ctx.fill(); if (layer.strokeWidth) ctx.stroke(); }
       else if (layer.type === "POLYGON") { ctx.beginPath(); const sides = layer.sides || 3; const r = Math.min(Math.abs(layer.width), Math.abs(layer.height)) / 2; for (let i = 0; i < sides; i++) { const a = (Math.PI * 2 * i) / sides - Math.PI / 2; if (i === 0) ctx.moveTo(r * Math.cos(a), r * Math.sin(a)); else ctx.lineTo(r * Math.cos(a), r * Math.sin(a)); } ctx.closePath(); if (layer.fill && layer.fill !== "transparent") ctx.fill(); if (layer.strokeWidth) ctx.stroke(); }
@@ -562,11 +847,64 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
     });
 
     const dataUrl = canvas.toDataURL("image/png", 1.0);
-    const link = document.createElement("a"); link.download = `omni-studio-${Date.now()}.png`; link.href = dataUrl; link.click();
+    const link = document.createElement("a");
+    link.download = `omni-studio-${Date.now()}.png`;
+    link.href = dataUrl;
+    link.click();
   };
 
   const handleSecureToArchive = () => {
-    if (onSecureArtifact) onSecureArtifact(canvasRef.current?.toDataURL() || "", "OMNI PROJECT");
+    if (onSecureArtifact) {
+      // Экспортируем в архив с сохранением пропорций и прозрачности
+      const canvas = document.createElement("canvas");
+      canvas.width = engine.current.canvasWidth;
+      canvas.height = engine.current.canvasHeight;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      
+      ctx.fillStyle = canvasBgColor;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      engine.current.layers.forEach(layer => {
+        if (!layer.visible) return;
+        ctx.save();
+        ctx.globalAlpha = layer.opacity / 100;
+        ctx.globalCompositeOperation = layer.blendMode || "source-over";
+        const cx = layer.x + layer.width / 2, cy = layer.y + layer.height / 2;
+        ctx.translate(cx, cy); ctx.rotate((layer.rotation * Math.PI) / 180); ctx.translate(-cx, -cy);
+        
+        if (layer.shadowColor && layer.shadowBlur) { ctx.shadowColor = layer.shadowColor; ctx.shadowBlur = layer.shadowBlur; ctx.shadowOffsetX = layer.shadowOffsetX || 0; ctx.shadowOffsetY = layer.shadowOffsetY || 0; }
+        if (layer.type === "IMAGE") {
+          let filterStr = "";
+          if (layer.brightness !== undefined && layer.brightness !== 100) filterStr += `brightness(${layer.brightness}%) `;
+          if (layer.contrast !== undefined && layer.contrast !== 100) filterStr += `contrast(${layer.contrast}%) `;
+          if (layer.saturation !== undefined && layer.saturation !== 100) filterStr += `saturate(${layer.saturation}%) `;
+          if (layer.hue && layer.hue !== 0) filterStr += `hue-rotate(${layer.hue}deg) `;
+          if (layer.sepia && layer.sepia > 0) filterStr += `sepia(${layer.sepia}%) `;
+          if (layer.grayscale && layer.grayscale > 0) filterStr += `grayscale(${layer.grayscale}%) `;
+          if (layer.invert && layer.invert > 0) filterStr += `invert(${layer.invert}%) `;
+          if (layer.blur && layer.blur > 0) filterStr += `blur(${layer.blur}px) `;
+          if (filterStr) ctx.filter = filterStr.trim();
+        } else if (layer.blur && layer.blur > 0) { ctx.filter = `blur(${layer.blur}px)`; }
+        
+        ctx.fillStyle = layer.fill || "transparent"; ctx.strokeStyle = layer.stroke || "transparent"; ctx.lineWidth = layer.strokeWidth || 0; ctx.lineCap = "round"; ctx.lineJoin = "round";
+
+        const w2 = layer.width/2; const h2 = layer.height/2;
+
+        if (layer.type === "RECTANGLE") { ctx.beginPath(); if (layer.cornerRadius && (ctx as any).roundRect) { (ctx as any).roundRect(-w2, -h2, layer.width, layer.height, layer.cornerRadius); } else { ctx.rect(-w2, -h2, layer.width, layer.height); } if (layer.fill && layer.fill !== "transparent") ctx.fill(); if (layer.strokeWidth) ctx.stroke(); } 
+        else if (layer.type === "ELLIPSE") { ctx.beginPath(); ctx.ellipse(0, 0, Math.abs(w2), Math.abs(h2), 0, 0, Math.PI * 2); if (layer.fill && layer.fill !== "transparent") ctx.fill(); if (layer.strokeWidth) ctx.stroke(); }
+        else if (layer.type === "POLYGON") { ctx.beginPath(); const sides = layer.sides || 3; const r = Math.min(Math.abs(layer.width), Math.abs(layer.height)) / 2; for (let i = 0; i < sides; i++) { const a = (Math.PI * 2 * i) / sides - Math.PI / 2; if (i === 0) ctx.moveTo(r * Math.cos(a), r * Math.sin(a)); else ctx.lineTo(r * Math.cos(a), r * Math.sin(a)); } ctx.closePath(); if (layer.fill && layer.fill !== "transparent") ctx.fill(); if (layer.strokeWidth) ctx.stroke(); }
+        else if (layer.type === "STAR") { ctx.beginPath(); const points = layer.sides || 5; const outerR = Math.min(Math.abs(layer.width), Math.abs(layer.height)) / 2; const innerR = outerR * 0.4; for (let i = 0; i < points * 2; i++) { const r = i % 2 === 0 ? outerR : innerR; const a = (Math.PI * i) / points - Math.PI / 2; if (i === 0) ctx.moveTo(r * Math.cos(a), r * Math.sin(a)); else ctx.lineTo(r * Math.cos(a), r * Math.sin(a)); } ctx.closePath(); if (layer.fill && layer.fill !== "transparent") ctx.fill(); if (layer.strokeWidth) ctx.stroke(); }
+        else if (layer.type === "LINE") { ctx.beginPath(); ctx.moveTo(-w2, -h2); ctx.lineTo(w2, h2); if (layer.strokeWidth) ctx.stroke(); }
+        else if (layer.type === "ARROW") { ctx.beginPath(); const hw = layer.strokeWidth || 4; const headL = Math.max(15, hw * 3); const headW = Math.max(15, hw * 3); const p1 = {x: -w2, y: 0}; const p2 = {x: w2, y: 0}; const angle = Math.atan2(p2.y - p1.y, p2.x - p1.x); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke(); ctx.fillStyle = ctx.strokeStyle; ctx.beginPath(); ctx.moveTo(p2.x, p2.y); ctx.lineTo(p2.x - headL * Math.cos(angle - Math.PI/6), p2.y - headW * Math.sin(angle - Math.PI/6)); ctx.lineTo(p2.x - headL * Math.cos(angle + Math.PI/6), p2.y - headW * Math.sin(angle + Math.PI/6)); ctx.closePath(); ctx.fill(); }
+        else if (layer.type === "IMAGE" && layer.imageObj) { ctx.drawImage(layer.imageObj, -w2, -h2, layer.width, layer.height); }
+        else if (layer.type === "TEXT" && layer.text) { ctx.font = `${layer.fontWeight || "normal"} ${layer.fontSize}px ${layer.fontFamily || "Inter"}`; ctx.fillStyle = layer.fill || "#ffffff"; ctx.textBaseline = "top"; ctx.textAlign = layer.textAlign || "left"; const textLines = layer.text.split('\n'); let tX = -w2; if (layer.textAlign === "center") tX = 0; if (layer.textAlign === "right") tX = w2; textLines.forEach((line, i) => { ctx.fillText(line, tX, -h2 + i * (layer.fontSize || 24) * 1.2); }); }
+        else if (layer.type === "PATH" && layer.points) { ctx.beginPath(); ctx.moveTo(layer.points[0].x - w2, layer.points[0].y - h2); for (let i = 1; i < layer.points.length; i++) ctx.lineTo(layer.points[i].x - w2, layer.points[i].y - h2); if (layer.strokeWidth) ctx.stroke(); }
+        ctx.restore();
+      });
+
+      onSecureArtifact(canvas.toDataURL("image/png", 0.95), "OMNI PROJECT");
+    }
   };
 
   // FLOATING TEXT EDITOR
@@ -608,9 +946,9 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
   // UI РЕНДЕР
   // ==========================================
   return (
-    <div className="flex flex-col h-screen max-h-[85vh] bg-[#18181A] text-neutral-300 font-sans text-sm select-none border border-white/10 rounded-2xl overflow-hidden shadow-2xl">
+    <div className="flex flex-col h-screen max-h-[85vh] bg-[#1E1E1E] text-neutral-300 font-sans text-sm select-none border border-white/10 rounded-2xl overflow-hidden shadow-2xl">
       
-      {/* HEADER TOP (ADOBE / FIGMA STYLE) */}
+      {/* HEADER */}
       <header className="h-12 bg-[#27272A] border-b border-black/40 flex items-center justify-between px-4 z-20 shrink-0 shadow-sm relative">
         <div className="flex items-center gap-4">
           <div className="font-bold text-white tracking-wider flex items-center gap-2 text-xs">
@@ -810,9 +1148,9 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
                       <input type="number" value={activeLayer.fontSize} onChange={e => { updateSelectedLayer({fontSize: Number(e.target.value)}); commitLayerUpdate(); }} className="w-16 bg-[#18181A] border border-white/10 rounded px-2 py-1.5 text-xs text-white outline-none text-center focus:border-[#3B82F6]" />
                     </div>
                     <div className="flex bg-[#18181A] border border-white/10 rounded p-0.5">
-                      <button onClick={() => { updateSelectedLayer({textAlign: "left"}); commitLayerUpdate(); }} className={`flex-1 flex justify-center py-1.5 rounded ${activeLayer.textAlign === "left" ? "bg-white/10 text-white" : "text-neutral-500"}`}><I.AlignLeft /></button>
-                      <button onClick={() => { updateSelectedLayer({textAlign: "center"}); commitLayerUpdate(); }} className={`flex-1 flex justify-center py-1.5 rounded ${activeLayer.textAlign === "center" ? "bg-white/10 text-white" : "text-neutral-500"}`}><I.AlignCenter /></button>
-                      <button onClick={() => { updateSelectedLayer({textAlign: "right"}); commitLayerUpdate(); }} className={`flex-1 flex justify-center py-1.5 rounded ${activeLayer.textAlign === "right" ? "bg-white/10 text-white" : "text-neutral-500"}`}><I.AlignRight /></button>
+                      <button onClick={() => { updateSelectedLayer({textAlign: "left"}); commitLayerUpdate(); }} className={`flex-1 flex justify-center py-1.5 rounded ${activeLayer.textAlign === "left" ? "bg-white/10 text-white shadow-sm" : "text-neutral-500 hover:text-white"}`}><I.AlignLeft /></button>
+                      <button onClick={() => { updateSelectedLayer({textAlign: "center"}); commitLayerUpdate(); }} className={`flex-1 flex justify-center py-1.5 rounded ${activeLayer.textAlign === "center" ? "bg-white/10 text-white shadow-sm" : "text-neutral-500 hover:text-white"}`}><I.AlignCenter /></button>
+                      <button onClick={() => { updateSelectedLayer({textAlign: "right"}); commitLayerUpdate(); }} className={`flex-1 flex justify-center py-1.5 rounded ${activeLayer.textAlign === "right" ? "bg-white/10 text-white shadow-sm" : "text-neutral-500 hover:text-white"}`}><I.AlignRight /></button>
                     </div>
                   </div>
                 )}
@@ -831,7 +1169,7 @@ export default function BarrettEngine({ query, onSecureArtifact }: Props) {
                     </div>
                   )}
                   {activeLayer.type !== "IMAGE" && activeLayer.type !== "TEXT" && (
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-3 mt-2">
                       <div className="relative w-6 h-6 rounded border border-white/20 overflow-hidden shrink-0"><input type="color" value={activeLayer.stroke === "transparent" ? "#000000" : activeLayer.stroke} onChange={e => { updateSelectedLayer({stroke: e.target.value}); commitLayerUpdate(); }} className="absolute -top-2 -left-2 w-10 h-10 cursor-pointer" /></div>
                       <span className="text-xs text-neutral-300">Stroke</span>
                       <input type="number" value={activeLayer.strokeWidth || 0} onChange={e => { updateSelectedLayer({strokeWidth: Number(e.target.value)}); commitLayerUpdate(); }} className="w-14 bg-[#18181A] border border-white/10 rounded px-2 py-1.5 text-xs text-white ml-auto text-center" />

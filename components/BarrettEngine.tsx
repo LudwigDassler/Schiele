@@ -51,6 +51,15 @@ const I = {
   Undo: ()=><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 00-9-9 9 9 0 00-6 2.3L3 13"/></svg>,
   Redo: ()=><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 7v6h-6"/><path d="M3 17a9 9 0 019-9 9 9 0 016 2.3l3 2.7"/></svg>,
   Close: ()=><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>,
+  Eye: ()=><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>,
+  EyeOff: ()=><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>,
+  Lock: ()=><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>,
+  Unlock: ()=><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/></svg>,
+  Up: ()=><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="18 15 12 9 6 15"/></svg>,
+  Down: ()=><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 9 12 15 18 9"/></svg>,
+  AlignLeft: ()=><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="21" y1="6" x2="3" y2="6"/><line x1="15" y1="12" x2="3" y2="12"/><line x1="17" y1="18" x2="3" y2="18"/></svg>,
+  AlignCenter: ()=><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="21" y1="6" x2="3" y2="6"/><line x1="19" y1="12" x2="5" y2="12"/><line x1="17" y1="18" x2="7" y2="18"/></svg>,
+  AlignRight: ()=><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="21" y1="6" x2="3" y2="6"/><line x1="21" y1="12" x2="9" y2="12"/><line x1="21" y1="18" x2="7" y2="18"/></svg>,
 };
 
 const FONTS = ["Inter", "Roboto", "Montserrat", "Playfair Display", "Courier New", "Pacifico"];
@@ -502,6 +511,7 @@ export default function OmniStudio({ query, onSecureArtifact }: Props) {
       else if (layer.type === "POLYGON") { ctx.beginPath(); const sides = layer.sides || 3; const r = Math.min(Math.abs(layer.width), Math.abs(layer.height)) / 2; for (let i = 0; i < sides; i++) { const a = (Math.PI * 2 * i) / sides - Math.PI / 2; if (i === 0) ctx.moveTo(r * Math.cos(a), r * Math.sin(a)); else ctx.lineTo(r * Math.cos(a), r * Math.sin(a)); } ctx.closePath(); if (layer.fill && layer.fill !== "transparent") ctx.fill(); if (layer.strokeWidth) ctx.stroke(); }
       else if (layer.type === "STAR") { ctx.beginPath(); const points = layer.sides || 5; const outerR = Math.min(Math.abs(layer.width), Math.abs(layer.height)) / 2; const innerR = outerR * 0.4; for (let i = 0; i < points * 2; i++) { const r = i % 2 === 0 ? outerR : innerR; const a = (Math.PI * i) / points - Math.PI / 2; if (i === 0) ctx.moveTo(r * Math.cos(a), r * Math.sin(a)); else ctx.lineTo(r * Math.cos(a), r * Math.sin(a)); } ctx.closePath(); if (layer.fill && layer.fill !== "transparent") ctx.fill(); if (layer.strokeWidth) ctx.stroke(); }
       else if (layer.type === "LINE") { ctx.beginPath(); ctx.moveTo(-w2, -h2); ctx.lineTo(w2, h2); if (layer.strokeWidth) ctx.stroke(); }
+      else if (layer.type === "ARROW") { ctx.beginPath(); const hw = layer.strokeWidth || 4; const headL = Math.max(15, hw * 3); const headW = Math.max(15, hw * 3); const p1 = {x: -w2, y: 0}; const p2 = {x: w2, y: 0}; const angle = Math.atan2(p2.y - p1.y, p2.x - p1.x); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke(); ctx.fillStyle = ctx.strokeStyle; ctx.beginPath(); ctx.moveTo(p2.x, p2.y); ctx.lineTo(p2.x - headL * Math.cos(angle - Math.PI/6), p2.y - headW * Math.sin(angle - Math.PI/6)); ctx.lineTo(p2.x - headL * Math.cos(angle + Math.PI/6), p2.y - headW * Math.sin(angle + Math.PI/6)); ctx.closePath(); ctx.fill(); }
       else if (layer.type === "IMAGE" && layer.imageObj) { ctx.drawImage(layer.imageObj, -w2, -h2, layer.width, layer.height); }
       else if (layer.type === "TEXT" && layer.text) { ctx.font = `${layer.fontWeight || "normal"} ${layer.fontSize}px ${layer.fontFamily || "Inter"}`; ctx.fillStyle = layer.fill || "#ffffff"; ctx.textBaseline = "top"; ctx.textAlign = layer.textAlign || "left"; const textLines = layer.text.split('\n'); let tX = -w2; if (layer.textAlign === "center") tX = 0; if (layer.textAlign === "right") tX = w2; textLines.forEach((line, i) => { ctx.fillText(line, tX, -h2 + i * (layer.fontSize || 24) * 1.2); }); }
       else if (layer.type === "PATH" && layer.points) { ctx.beginPath(); ctx.moveTo(layer.points[0].x - w2, layer.points[0].y - h2); for (let i = 1; i < layer.points.length; i++) ctx.lineTo(layer.points[i].x - w2, layer.points[i].y - h2); if (layer.strokeWidth) ctx.stroke(); }
@@ -549,13 +559,13 @@ export default function OmniStudio({ query, onSecureArtifact }: Props) {
     );
   };
 
-  // КОНТЕКСТНАЯ ВЕРХНЯЯ ПАНЕЛЬ (PICSART VIBE)
+  // КОНТЕКСТНАЯ ВЕРХНЯЯ ПАНЕЛЬ
   const activeLayer = layersUI.find(l => l.id === selectedIdUI);
 
   return (
     <div className="flex flex-col h-screen max-h-[85vh] bg-[#1E1E1E] text-neutral-300 font-sans text-sm select-none border border-white/10 rounded-2xl overflow-hidden shadow-2xl">
       
-      {/* HEADER TOP (PICSART STYLE CONTEXTUAL BAR) */}
+      {/* HEADER TOP */}
       <header className="h-12 bg-[#2C2C2C] border-b border-black/40 flex items-center justify-between px-4 z-20 shrink-0 shadow-sm relative">
         <div className="flex items-center gap-4">
           <div className="font-bold text-white tracking-wider flex items-center gap-2 text-xs">
@@ -624,7 +634,7 @@ export default function OmniStudio({ query, onSecureArtifact }: Props) {
           </div>
         </aside>
 
-        {/* EXPANDABLE LEFT DRAWER (PICSART STYLE) */}
+        {/* EXPANDABLE LEFT DRAWER */}
         {drawerMode !== "CLOSED" && (
           <aside className="w-[260px] bg-[#222222] border-r border-black/40 flex flex-col z-10 shrink-0 shadow-[4px_0_15px_rgba(0,0,0,0.2)]">
             <div className="flex justify-between items-center p-3 border-b border-white/5">
@@ -695,7 +705,7 @@ export default function OmniStudio({ query, onSecureArtifact }: Props) {
           
           {renderInlineTextEditor()}
 
-          {/* FLOATING ACTION BAR OVER OBJECT (PICSART STYLE) */}
+          {/* FLOATING ACTION BAR OVER OBJECT */}
           {activeLayer && !engine.current.isPanning && !engine.current.isDraggingObject && !editingTextId && (
             <div className="absolute z-30 pointer-events-auto flex items-center gap-1 bg-[#2C2C2C] border border-white/10 rounded-lg p-1 shadow-2xl transition-all"
                  style={{
@@ -757,9 +767,9 @@ export default function OmniStudio({ query, onSecureArtifact }: Props) {
                     <div className="flex bg-[#1E1E1E] border border-white/10 rounded overflow-hidden hover:border-white/30 focus-within:border-[#0D99FF]"><span className="bg-transparent px-2 py-1.5 text-xs text-neutral-500 font-mono">H</span><input type="number" value={Math.round(activeLayer.height)} onChange={e => { updateSelectedLayer({height: Number(e.target.value)}); commitLayerUpdate(); }} className="w-full bg-transparent px-1 py-1.5 text-xs text-white outline-none font-mono" /></div>
                   </div>
                   <div className="grid grid-cols-2 gap-2 mt-2">
-                    <div className="flex bg-[#1E1E1E] border border-white/10 rounded overflow-hidden hover:border-white/30 focus-within:border-[#0D99FF]"><span className="bg-transparent px-2 py-1.5 text-xs text-neutral-500">°</span><input type="number" value={Math.round(activeLayer.rotation)} onChange={e => { updateSelectedLayer({rotation: Number(e.target.value)}); commitLayerUpdate(); }} className="w-full bg-transparent px-1 py-1.5 text-xs text-white outline-none font-mono" /></div>
-                    {activeLayer.type === "RECTANGLE" && (<div className="flex bg-[#1E1E1E] border border-white/10 rounded overflow-hidden hover:border-white/30 focus-within:border-[#0D99FF]"><span className="bg-transparent px-2 py-1.5 text-xs text-neutral-500">R</span><input type="number" value={activeLayer.cornerRadius || 0} onChange={e => { updateSelectedLayer({cornerRadius: Number(e.target.value)}); commitLayerUpdate(); }} className="w-full bg-transparent px-1 py-1.5 text-xs text-white outline-none font-mono" /></div>)}
-                    {(activeLayer.type === "POLYGON" || activeLayer.type === "STAR") && (<div className="flex bg-[#1E1E1E] border border-white/10 rounded overflow-hidden hover:border-white/30 focus-within:border-[#0D99FF]"><span className="bg-transparent px-2 py-1.5 text-xs text-neutral-500">Pts</span><input type="number" min="3" max="20" value={activeLayer.sides || (activeLayer.type==="STAR"?5:3)} onChange={e => { updateSelectedLayer({sides: Number(e.target.value)}); commitLayerUpdate(); }} className="w-full bg-transparent px-1 py-1.5 text-xs text-white outline-none font-mono" /></div>)}
+                    <div className="flex bg-[#1E1E1E] border border-white/10 rounded overflow-hidden hover:border-white/30 focus-within:border-[#0D99FF]" title="Rotation"><span className="bg-transparent px-2 py-1.5 text-xs text-neutral-500">°</span><input type="number" value={Math.round(activeLayer.rotation)} onChange={e => { updateSelectedLayer({rotation: Number(e.target.value)}); commitLayerUpdate(); }} className="w-full bg-transparent px-1 py-1.5 text-xs text-white outline-none font-mono" /></div>
+                    {activeLayer.type === "RECTANGLE" && (<div className="flex bg-[#1E1E1E] border border-white/10 rounded overflow-hidden hover:border-white/30 focus-within:border-[#0D99FF]" title="Corner Radius"><span className="bg-transparent px-2 py-1.5 text-xs text-neutral-500">R</span><input type="number" value={activeLayer.cornerRadius || 0} onChange={e => { updateSelectedLayer({cornerRadius: Number(e.target.value)}); commitLayerUpdate(); }} className="w-full bg-transparent px-1 py-1.5 text-xs text-white outline-none font-mono" /></div>)}
+                    {(activeLayer.type === "POLYGON" || activeLayer.type === "STAR") && (<div className="flex bg-[#1E1E1E] border border-white/10 rounded overflow-hidden hover:border-white/30 focus-within:border-[#0D99FF]" title="Sides / Points"><span className="bg-transparent px-2 py-1.5 text-xs text-neutral-500">Pts</span><input type="number" min="3" max="20" value={activeLayer.sides || (activeLayer.type==="STAR"?5:3)} onChange={e => { updateSelectedLayer({sides: Number(e.target.value)}); commitLayerUpdate(); }} className="w-full bg-transparent px-1 py-1.5 text-xs text-white outline-none font-mono" /></div>)}
                   </div>
                 </div>
 

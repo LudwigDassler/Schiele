@@ -60,6 +60,7 @@ const I = {
   AlignLeft: ()=><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="21" y1="6" x2="3" y2="6"/><line x1="15" y1="12" x2="3" y2="12"/><line x1="17" y1="18" x2="3" y2="18"/></svg>,
   AlignCenter: ()=><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="21" y1="6" x2="3" y2="6"/><line x1="19" y1="12" x2="5" y2="12"/><line x1="17" y1="18" x2="7" y2="18"/></svg>,
   AlignRight: ()=><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="21" y1="6" x2="3" y2="6"/><line x1="21" y1="12" x2="9" y2="12"/><line x1="21" y1="18" x2="7" y2="18"/></svg>,
+  Warp: ()=><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 4h16v16H4z"/><path d="M4 12c4 0 4 4 8 4s4-4 8-4"/></svg>,
 };
 
 const FONTS = ["Inter", "Roboto", "Montserrat", "Playfair Display", "Courier New", "Pacifico"];
@@ -559,18 +560,18 @@ export default function OmniStudio({ query, onSecureArtifact }: Props) {
     );
   };
 
-  // КОНТЕКСТНАЯ ВЕРХНЯЯ ПАНЕЛЬ
+  // КОНТЕКСТНАЯ ВЕРХНЯЯ ПАНЕЛЬ (PICSART VIBE)
   const activeLayer = layersUI.find(l => l.id === selectedIdUI);
 
   return (
     <div className="flex flex-col h-screen max-h-[85vh] bg-[#1E1E1E] text-neutral-300 font-sans text-sm select-none border border-white/10 rounded-2xl overflow-hidden shadow-2xl">
       
-      {/* HEADER TOP */}
+      {/* HEADER TOP (PICSART STYLE CONTEXTUAL BAR) */}
       <header className="h-12 bg-[#2C2C2C] border-b border-black/40 flex items-center justify-between px-4 z-20 shrink-0 shadow-sm relative">
         <div className="flex items-center gap-4">
           <div className="font-bold text-white tracking-wider flex items-center gap-2 text-xs">
             <div className="w-2.5 h-2.5 rounded-sm bg-[#0D99FF]"></div>
-            OMNI 6.0
+            OMNI 6.1
           </div>
           <div className="h-4 w-px bg-white/10 mx-1"></div>
 
@@ -634,7 +635,7 @@ export default function OmniStudio({ query, onSecureArtifact }: Props) {
           </div>
         </aside>
 
-        {/* EXPANDABLE LEFT DRAWER */}
+        {/* EXPANDABLE LEFT DRAWER (PICSART STYLE) */}
         {drawerMode !== "CLOSED" && (
           <aside className="w-[260px] bg-[#222222] border-r border-black/40 flex flex-col z-10 shrink-0 shadow-[4px_0_15px_rgba(0,0,0,0.2)]">
             <div className="flex justify-between items-center p-3 border-b border-white/5">
@@ -705,7 +706,7 @@ export default function OmniStudio({ query, onSecureArtifact }: Props) {
           
           {renderInlineTextEditor()}
 
-          {/* FLOATING ACTION BAR OVER OBJECT */}
+          {/* FLOATING ACTION BAR OVER OBJECT (PICSART STYLE) */}
           {activeLayer && !engine.current.isPanning && !engine.current.isDraggingObject && !editingTextId && (
             <div className="absolute z-30 pointer-events-auto flex items-center gap-1 bg-[#2C2C2C] border border-white/10 rounded-lg p-1 shadow-2xl transition-all"
                  style={{
